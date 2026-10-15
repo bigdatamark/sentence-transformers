@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Tests for SentenceTransformerTrainer: validation of loss dicts against dataset dicts, reserved column names,
+# model card regeneration, short training runs across streaming/dict/loss-dict combinations, the Features hint
+# for featureless streaming datasets, a slow matrix verifying how prompts are applied to preprocessed texts
+# (and when prompt_length and dataset_name reach the batch), eval strategy validation, prompt length detection
+# in the data collator with different special-token setups, custom batch sampler and multi-dataset batch sampler
+# classes or functions, model_init with multiple losses, and per-dataset caching of eval dataloaders with
+# persistent workers. Skipped at module level without the training extras.
 from __future__ import annotations
 
 import re
@@ -41,6 +49,10 @@ if not is_training_available():
 def test_trainer_multi_dataset_errors(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts the trainer raises ValueError when a loss dict is used with a plain train dataset, when the train
+    # dataset dict has a key missing from the loss dict, when the eval dataset is not a dict, and when the eval dict
+    # has keys missing from the loss dict (listing the missing names).
     train_dataset = stsb_dataset_dict["train"]
     loss = {
         "multi_nli": CosineSimilarityLoss(model=stsb_bert_tiny_model),
@@ -106,6 +118,10 @@ def test_trainer_multi_dataset_errors(
 def test_trainer_invalid_column_names(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # For each reserved column name ("return_loss", "dataset_name") renamed into the data, asserts a ValueError
+    # naming the offending dataset for plain and dict train datasets, for plain and dict eval datasets at
+    # construction, and when passed later to evaluate.
     train_dataset = stsb_dataset_dict["train"]
     for column_name in ("return_loss", "dataset_name"):
         invalid_train_dataset = train_dataset.rename_column("sentence1", column_name)
@@ -187,6 +203,9 @@ def test_trainer_invalid_column_names(
 
 
 def test_model_card_reuse(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Asserts saving the untouched model writes its existing card text, and that after constructing a trainer the
+    # saved card differs.
     assert stsb_bert_tiny_model._model_card_text
     # Reuse the model card if no training was done
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_folder:
@@ -221,6 +240,13 @@ def test_trainer(
     eval_dict: bool,
     loss_dict: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over streaming, train dict, eval dict and loss dict. Determines the expected ValueError (loss
+    # dict without train or eval dicts, or streaming with a train dict), builds 10-row train/eval sets (iterable
+    # and/or duplicated into two-entry dicts), trains two steps with CosineSimilarityLoss in a temp dir and, when no
+    # error is expected, asserts the embedding changed compared with a deep copy taken before training.
+    # KNOWN ISSUE: The post-training embedding is computed for "The cat is on the the mat." (duplicated word) while
+    # the original uses "The cat is on the mat.", so the inequality would hold even if training changed nothing.
     """
     Some cases are not allowed:
     * streaming=True and train_dict=True: streaming is not supported with DatasetDict, because our DatasetDict
@@ -294,6 +320,10 @@ def test_trainer(
 def test_trainer_featureless_iterable_dataset_hint_covers_list_columns(
     stsb_bert_tiny_model: SentenceTransformer,
 ) -> None:
+    # [FUNCTION DOC]
+    # Builds a streaming dataset whose identity map drops the schema, asserts its column names are unknown, and
+    # asserts constructing a trainer raises a "must have Features" ValueError whose suggested Features use a string
+    # value for text columns and a float list for the list column, never "null".
     # Streaming map without features= loses the schema. The suggested Features snippet must
     # render KD-style list columns as list features, not the invalid Value('null').
     train_dataset = Dataset.from_dict(
@@ -348,6 +378,14 @@ def test_trainer_prompts(
     streaming: bool,
     prompts: dict[str, dict[str, str]] | dict[str, str] | str | None,
 ):
+    # [FUNCTION DOC]
+    # Slow; parametrized over train/eval dicts, loss dict, the pooling include-prompt flag, a transform, streaming
+    # and prompt configurations. Skips loss dicts unless both datasets are dicts. Uses a loss subclass recording the
+    # keys of the first feature dict and wraps preprocessing to record prompted texts, assembles regular or
+    # streaming datasets or dicts (optionally uppercased), expects a ValueError for nested prompts without both
+    # dicts, trains briefly while recording collated batch keys, then asserts prompt_length reaches the forward
+    # exactly when prompts are effectively applied, dataset_name reaches the batch exactly when a dict dataset is
+    # combined with a loss dict or dict prompts, and the recorded texts equal the expected prompted texts.
     if loss_dict and (not train_dict or not eval_dict):
         pytest.skip(
             "Skipping test because loss_dict=True requires train_dict=True and eval_dict=True; already tested via test_trainer."
@@ -383,10 +421,17 @@ def test_trainer_prompts(
     tracked_forward_keys = set()
 
     class EmptyLoss(MultipleNegativesRankingLoss):
+        # [CLASS DOC]
+        # HELPER: MultipleNegativesRankingLoss subclass that records the keys of the first features dict it receives
+        # into the enclosing set before computing the normal loss.
         def __init__(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Delegates construction to the parent loss.
             super().__init__(*args, **kwargs)
 
         def forward(self, features, *args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Adds the first feature dict's keys to the tracked set and returns the parent loss.
             tracked_forward_keys.update(set(features[0].keys()))
             return super().forward(features, *args, **kwargs)
 
@@ -396,6 +441,8 @@ def test_trainer_prompts(
     old_preprocess = model.preprocess
 
     def preprocess_tracker(texts, prompt=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the texts (prefixed with the prompt when given) and calls the original preprocess.
         if prompt:
             tracked_texts.extend([prompt + text for text in texts])
         else:
@@ -427,6 +474,8 @@ def test_trainer_prompts(
             eval_dataset = eval_dataset_1
 
     def upper_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: Uppercases every text in every column of the batch in place and returns it.
         for column_name, column in batch.items():
             batch[column_name] = [text.upper() for text in column]
         return batch
@@ -517,6 +566,8 @@ def test_trainer_prompts(
         old_compute_loss = trainer.compute_loss
 
         def compute_loss_tracker(model, inputs, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Records the batch keys and returns the original compute_loss result.
             datacollator_keys.update(set(inputs.keys()))
             loss = old_compute_loss(model, inputs, **kwargs)
             return loss
@@ -655,6 +706,9 @@ def test_trainer_no_eval_dataset_with_eval_strategy(
     use_evaluator: bool,
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over providing an eval dataset and an evaluator; with eval strategy "steps" asserts the trainer
+    # raises a ValueError only when neither is given.
     # Expect a crash when `args.eval_strategy` is not "no" but neither `eval_dataset` or `evaluator` is provided
     # Otherwise, the trainer should be created without any issues
     model = stsb_bert_tiny_model
@@ -706,6 +760,11 @@ def test_data_collator(
     has_eos_token: bool,
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over the presence of BOS and EOS tokens. Disables prompt inclusion in pooling, sets dummy CLS and
+    # SEP ids on the tokenizer and a matching post-processor template, asserts preprocessing places the tokens as
+    # configured, trains two steps with a single "Prompt: " prompt, and asserts the transformer module cached the
+    # prompt's token length (plus one with BOS) under that prompt.
     # Test that the data collator correctly recognizes whether the tokenizer has an SEP/EOS token
     model = stsb_bert_tiny_model
     # We need to set this to False, otherwise the prompt length won't be needed:
@@ -786,6 +845,9 @@ def test_data_collator(
 def test_trainer_get_batch_sampler_class(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts a batch sampler class given in the training arguments is instantiated by get_batch_sampler, for
+    # GroupByLabelBatchSampler and NoDuplicatesBatchSampler.
     """Test that you can specify a batch_sampler class in args."""
 
     train_dataset = stsb_dataset_dict["train"]
@@ -826,12 +888,17 @@ def test_trainer_get_batch_sampler_class(
 def test_trainer_get_batch_sampler_function(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts a batch sampler function given in the arguments is called by get_batch_sampler, and a function
+    # returning None yields None.
     """Test that you can specify a batch_sampler function in args."""
 
     train_dataset = stsb_dataset_dict["train"]
 
     # Define a custom batch sampler function
     def custom_batch_sampler(dataset, batch_size, drop_last, valid_label_columns, generator, seed):
+        # [FUNCTION DOC]
+        # HELPER: Returns a GroupByLabelBatchSampler built from all the given arguments.
         # This function returns a GroupByLabelBatchSampler regardless of input
         return GroupByLabelBatchSampler(
             dataset=dataset,
@@ -862,6 +929,8 @@ def test_trainer_get_batch_sampler_function(
 
     # Test with a different function that returns None
     def null_batch_sampler(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Accepts any arguments and returns None.
         return None
 
     args = SentenceTransformerTrainingArguments(
@@ -885,6 +954,9 @@ def test_trainer_get_batch_sampler_function(
 def test_trainer_get_multi_dataset_batch_sampler_class(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts a multi-dataset batch sampler class (round robin, and a local proportional subclass) given in the
+    # arguments is instantiated by get_multi_dataset_batch_sampler.
     """Test that you can specify a multi_dataset_batch_sampler class in args."""
     train_dataset = stsb_dataset_dict["train"]
     concat_dataset = ConcatDataset([train_dataset, train_dataset])
@@ -920,6 +992,8 @@ def test_trainer_get_multi_dataset_batch_sampler_class(
     assert isinstance(batch_sampler, RoundRobinBatchSampler)
 
     class CopiedProportionalBatchSampler(ProportionalBatchSampler):
+        # [CLASS DOC]
+        # HELPER: Empty subclass of ProportionalBatchSampler used to check that custom classes are honoured.
         pass
 
     # Test with another class
@@ -942,6 +1016,8 @@ def test_trainer_get_multi_dataset_batch_sampler_class(
 def test_trainer_get_multi_dataset_batch_sampler_function(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts a multi-dataset batch sampler function is called, and one returning None yields None.
     """Test that you can specify a multi_dataset_batch_sampler function in args."""
     train_dataset = stsb_dataset_dict["train"]
     concat_dataset = ConcatDataset([train_dataset, train_dataset])
@@ -962,6 +1038,8 @@ def test_trainer_get_multi_dataset_batch_sampler_function(
 
     # Define a custom multi-dataset batch sampler function
     def custom_multi_dataset_batch_sampler(dataset, batch_samplers, generator, seed):
+        # [FUNCTION DOC]
+        # HELPER: Returns a RoundRobinBatchSampler built from the given dataset, batch samplers, generator and seed.
         # This function returns a RoundRobinBatchSampler regardless of input
         return RoundRobinBatchSampler(
             dataset=dataset,
@@ -988,6 +1066,8 @@ def test_trainer_get_multi_dataset_batch_sampler_function(
 
     # Test with a different function that returns None
     def null_multi_dataset_batch_sampler(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Accepts any arguments and returns None.
         return None
 
     args = SentenceTransformerTrainingArguments(
@@ -1009,6 +1089,9 @@ def test_trainer_get_multi_dataset_batch_sampler_function(
 def test_trainer_call_model_init_multi_loss(
     stsb_bert_tiny_model: SentenceTransformer, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Trains with model_init (loading the tiny model from the Hub) and a two-loss dict, and asserts the loss dict
+    # is preserved and every loss now references the trainer's new model instead of the original.
     """Test that call_model_init correctly updates the model in each loss function for multi-loss training."""
     model = stsb_bert_tiny_model
     train_dataset = DatasetDict(
@@ -1031,6 +1114,8 @@ def test_trainer_call_model_init_multi_loss(
     model_name = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
     def model_init():
+        # [FUNCTION DOC]
+        # HELPER: Loads and returns a fresh tiny STSB SentenceTransformer (network).
         return SentenceTransformer(model_name)
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1068,6 +1153,11 @@ def test_trainer_get_eval_dataloader_with_persistent_workers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over persistent workers. With one dataloader worker, monkeypatches accelerator preparation to
+    # return its input, and asserts named eval dataloaders map to the right datasets, are reused per name only with
+    # persistent workers, and that explicitly passed datasets are never cached (cache holds only the named entries,
+    # or nothing without persistent workers).
     # With `dataloader_persistent_workers=True`, eval dataloaders must be reused across evaluations,
     # cached per dataset name. Otherwise, every evaluation of every dataset leaks its persistent
     # worker processes, eventually exhausting file descriptors and memory.
@@ -1136,6 +1226,10 @@ def test_trainer_evaluate_caches_eval_dataloaders_per_dataset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # Skipped on transformers below 4.42. Stubs the evaluation loop to record dataloaders per metric prefix and
+    # return a zero loss, evaluates twice, and asserts each dataset is evaluated under its own prefix with the right
+    # size and that the same dataloaders are reused across evaluations only with persistent workers.
     # End to end variant of the test above: evaluate() must reach get_eval_dataloader with dataset
     # names via the superclass dict recursion, otherwise the per-name caching never engages
     model = stsb_bert_tiny_model
@@ -1165,6 +1259,9 @@ def test_trainer_evaluate_caches_eval_dataloaders_per_dataset(
     seen = {}
 
     def evaluation_loop_stub(dataloader, *loop_args, metric_key_prefix="eval", **loop_kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the dataloader under its metric key prefix and returns an evaluation output with no
+        # predictions, a zero loss metric and the dataset size as sample count.
         seen.setdefault(metric_key_prefix, []).append(dataloader)
         return EvalLoopOutput(
             predictions=None,

@@ -1,3 +1,6 @@
+# [MODULE DOC] Deprecated symmetric multiple negatives ranking loss, now a preset of MultipleNegativesRankingLoss with
+# query-to-doc and doc-to-query directions and per-direction normalization. Instantiating it emits a deprecation
+# warning via the class decorator.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -16,6 +19,8 @@ from sentence_transformers.util import cos_sim
     "`partition_mode='per_direction'` instead."
 )
 class MultipleNegativesSymmetricRankingLoss(MultipleNegativesRankingLoss):
+    # [CLASS DOC] Deprecated subclass of MultipleNegativesRankingLoss fixing directions and partition mode; all computation inherited.
+    # KNOWN ISSUE: The docstring says the forward and backward losses are summed; the inherited per-direction mode averages the two log-normalizers, which equals averaging the two losses.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -23,6 +28,8 @@ class MultipleNegativesSymmetricRankingLoss(MultipleNegativesRankingLoss):
         similarity_fct: Callable[[Tensor, Tensor], Tensor] = cos_sim,
         gather_across_devices: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Forward model, scale, similarity function and gather flag to the parent with directions query_to_doc plus
+        # doc_to_query and partition mode per_direction.
         """
         .. warning::
 

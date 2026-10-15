@@ -1,3 +1,6 @@
+# [MODULE DOC] Multiple negatives ranking loss (InfoNCE with in-batch negatives): each query should score its own positive
+# document higher than every other document in the batch (other queries' positives and all hard negatives), with
+# optional extra similarity directions, per-direction normalization, hardness weighting and cross-device gathering.
 from __future__ import annotations
 
 import logging
@@ -15,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class MultipleNegativesRankingLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, scale (positive; logits are similarities times scale), similarity_fct (matrix
+    # similarity, default cosine), gather_across_devices, directions (tuple that must contain "query_to_doc"; may add
+    # "query_to_query", "doc_to_query", "doc_to_doc"), partition_mode ("joint" or "per_direction"), hardness_mode (None,
+    # "in_batch_negatives", "hard_negatives" or "all_negatives"), hardness_strength (non-negative).
     def __init__(
         self,
         model: SentenceTransformer,
@@ -29,6 +36,9 @@ class MultipleNegativesRankingLoss(nn.Module):
         hardness_mode: Literal["in_batch_negatives", "hard_negatives", "all_negatives"] | None = None,
         hardness_strength: float = 0.0,
     ) -> None:
+        # [FUNCTION DOC] Store and validate settings. Raises ValueError for non-positive scale, empty or invalid directions, missing
+        # "query_to_doc", invalid partition mode, per-direction mode combined with query_to_query or doc_to_doc, invalid
+        # hardness mode, or negative hardness strength. Logs a warning when a hardness mode is set with zero strength.
         """
         Given a dataset of (anchor, positive) pairs, (anchor, positive, negative) triplets, or (anchor, positive, negative_1, ..., negative_n)
         n-tuples, this loss implements a contrastive learning objective that encourages the model to produce similar
@@ -230,11 +240,23 @@ class MultipleNegativesRankingLoss(nn.Module):
             )
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared helper and compute the loss.
         # Compute the embeddings and distribute them to anchor and candidates (positive and optionally negatives)
         embeddings = embed_columns(self.model, sentence_features)
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Raises ValueError with fewer than two columns. Column 0 is queries, the rest documents (positive then hard
+        # negatives). If gathering, queries and documents are gathered with gradient support and local rows are offset by
+        # rank times local batch size. All documents are concatenated into one candidate set. Query-to-doc similarities of
+        # local queries against all documents are always computed; optional query-to-query (self entries negative
+        # infinity), doc-to-query (local positives against all queries, transposed) and doc-to-doc (all documents vs local
+        # positives, transposed, with the same query's documents masked to negative infinity). With hardness weighting, a
+        # penalty of strength times detached raw query-to-doc similarity is added only to the selected negatives (own hard
+        # negatives, other rows' documents, or everything except the own positive). All similarities are multiplied by
+        # scale and penalties added. Loss is the mean over local rows of negative (own positive logit minus the log
+        # normalizer), where the normalizer is one log-sum-exp over all directions ("joint") or the mean of per-direction
+        # log-sum-exps ("per_direction"). Labels are ignored.
         if len(embeddings) < 2:
             raise ValueError(f"Expected at least 2 embeddings, got {len(embeddings)}")
 
@@ -338,6 +360,7 @@ class MultipleNegativesRankingLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: scale, similarity function name, gather flag, directions, partition mode and hardness settings.
         return {
             "scale": self.scale,
             "similarity_fct": similarity_fct_name(self.similarity_fct),
@@ -350,10 +373,13 @@ class MultipleNegativesRankingLoss(nn.Module):
 
     @property
     def temperature(self) -> float:
+        # [FUNCTION DOC] Return the temperature, one over scale.
         return 1.0 / self.scale
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return a BibTeX citation that depends on the configuration: one for the full four-direction joint setup, one for
+        # the symmetric per-direction setup, and the default Smart Reply paper otherwise.
         if (
             set(self.directions) == {"query_to_doc", "query_to_query", "doc_to_query", "doc_to_doc"}
             and self.partition_mode == "joint"

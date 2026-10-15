@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# SPLADE pooling module: turns per-token masked-language-model logits into one vocabulary-sized
+# sparse vector per text by applying ReLU and log1p (twice for the log1p_relu variant) and then max
+# or sum pooling over tokens. Supports chunking along the sequence and flattened (unpadded) batches.
 from __future__ import annotations
 
 import logging
@@ -12,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class SpladePooling(Module):
+    # [CLASS DOC]
+    # Pooling module with pooling_strategy ("max" or "sum"), activation_function ("relu" or
+    # "log1p_relu"), embedding_dimension (vocab size, inferred on first forward if unset) and
+    # chunk_size (tokens per chunk, not saved in the config). Config keys: pooling_strategy,
+    # activation_function, embedding_dimension (old key word_embedding_dimension is renamed).
     """
     SPLADE Pooling module for creating the sparse embeddings.
 
@@ -53,6 +62,9 @@ class SpladePooling(Module):
         embedding_dimension: int | None = None,
         chunk_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the options, raising ValueError for an unknown pooling strategy or activation function.
+        # Deprecated keyword names are accepted through the deprecated_kwargs decorator.
         super().__init__()
         self.pooling_strategy = pooling_strategy
         if pooling_strategy not in self.SPLADE_POOLING_MODES:
@@ -67,6 +79,15 @@ class SpladePooling(Module):
         self,
         features: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Pools "token_embeddings" (MLM logits, batch by sequence by vocab) into "sentence_embedding". If
+        # "cu_seq_lens_q" is present, uses the flattened path. Otherwise multiplies the logits by the
+        # attention mask, and over sequence chunks (the whole sequence if chunk_size is unset or not
+        # positive) applies ReLU then log1p (a second log1p for log1p_relu; in place outside training to
+        # save memory), and accumulates the element-wise maximum (starting at minus infinity) or sum
+        # across tokens. Logs a warning suggesting a smaller chunk_size if a RuntimeError mentions out of
+        # memory, then re-raises it. Sets embedding_dimension from the output if unset. Stores the result
+        # in the mutated features dict and returns it.
         """
         Forward pass of the model.
         Args:
@@ -141,6 +162,11 @@ class SpladePooling(Module):
         return features
 
     def _forward_flattened(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Pools flattened logits of shape (1, total_tokens, vocab): for each sequence segment given
+        # by consecutive "cu_seq_lens_q" boundaries, applies ReLU and log1p (twice for log1p_relu) and
+        # reduces with max or sum over its tokens. Stacks the per-sequence vectors, sets
+        # embedding_dimension if unset, stores "sentence_embedding" and returns the mutated features.
         flat_logits = features["token_embeddings"].squeeze(0)  # (total_tokens, vocab_size)
         cu_seq_lens = features["cu_seq_lens_q"].tolist()
 
@@ -162,12 +188,20 @@ class SpladePooling(Module):
         return features
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves only the config JSON to output_path.
         self.save_config(output_path)
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a string with the class name and config dict.
         return f"SpladePooling({self.get_config_dict()})"
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns embedding_dimension.
+        # KNOWN ISSUE: Annotated to return an int, but returns None until a forward pass has run when no
+        # embedding_dimension was given.
         """Get the dimension of the embedding.
 
         Returns:

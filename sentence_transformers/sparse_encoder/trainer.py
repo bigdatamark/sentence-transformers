@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Trainer for SparseEncoder models, a specialization of the shared BaseTrainer (built on the Hugging
+# Face Trainer). It plugs in the sparse model, model card, collator and argument classes, defaults
+# to SpladeLoss with SparseMultipleNegativesRankingLoss, and makes sure a SpladeLoss gets a
+# regularizer-weight warmup callback.
 from __future__ import annotations
 
 import logging
@@ -33,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 
 class SparseEncoderTrainer(BaseTrainer):
+    # [CLASS DOC]
+    # Trainer for SparseEncoder models. Class attributes (defined in the class body) select the model
+    # class, model card data/callback classes, data collator class and training arguments class used
+    # by BaseTrainer. Overrides default loss creation and loss preparation.
     """
     SparseEncoderTrainer is a simple but feature-complete training and eval loop for PyTorch
     based on the SentenceTransformerTrainer that based on 🤗 Transformers :class:`~transformers.Trainer`.
@@ -136,6 +145,11 @@ class SparseEncoderTrainer(BaseTrainer):
         optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None = None,
         preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Forwards every argument (model, args, datasets, loss or loss factories, evaluator(s), collator,
+        # processing class, model_init, metrics, callbacks, optimizers, optimizer class and kwargs, logits
+        # preprocessing) to BaseTrainer and narrows the type hints of model, args and data_collator. The
+        # deprecated keyword tokenizer is accepted as processing_class.
         super().__init__(
             model=model,
             args=args,
@@ -157,6 +171,10 @@ class SparseEncoderTrainer(BaseTrainer):
         self.data_collator: SparseEncoderDataCollator
 
     def get_default_loss(self, model: SparseEncoder) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Logs at info level and returns the default loss: SpladeLoss wrapping
+        # SparseMultipleNegativesRankingLoss with query regularizer weight 5e-5 and document regularizer
+        # weight 3e-5.
         logger.info(
             "No `loss` passed, using `SpladeLoss` with `SparseMultipleNegativesRankingLoss` as the default. "
             "Note: `query_regularizer_weight` and `document_regularizer_weight` are sensitive parameters "
@@ -174,6 +192,14 @@ class SparseEncoderTrainer(BaseTrainer):
         loss: Callable[[SparseEncoder], torch.nn.Module] | torch.nn.Module,
         model: SparseEncoder,
     ) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Prepares a loss via the parent (which may build it from a factory taking the model). If the loss
+        # is a SpladeLoss, ensures a SpladeRegularizerWeightSchedulerCallback sits at position 0 or 1 of the
+        # callback list: an existing one further down is moved to position 1; if none exists, logs a
+        # warning and inserts a new one for this loss at position 1 (right after the default flow
+        # callback). Mutates the trainer's callback list. Returns the loss.
+        # KNOWN ISSUE: When several SpladeLoss instances are used (a dict of losses), only the first gets a
+        # scheduler callback, because the check finds the already inserted callback for later ones.
         loss = super().prepare_loss(loss, model)
 
         is_splade_loss = isinstance(loss, SpladeLoss) if loss is not None else False

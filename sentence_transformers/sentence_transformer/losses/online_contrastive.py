@@ -1,3 +1,5 @@
+# [MODULE DOC] Online contrastive loss: a contrastive loss on labeled pairs that only penalizes hard positives (positive pairs
+# farther apart than the closest negative) and hard negatives (negative pairs closer than the farthest positive).
 from __future__ import annotations
 
 import warnings
@@ -14,9 +16,12 @@ from .contrastive import SiameseDistanceMetric
 
 
 class OnlineContrastiveLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, margin (default 0.5), distance_metric (pairwise distance on two aligned tensors,
+    # default cosine distance), and a one-time label check flag.
     def __init__(
         self, model: SentenceTransformer, distance_metric=SiameseDistanceMetric.COSINE_DISTANCE, margin: float = 0.5
     ) -> None:
+        # [FUNCTION DOC] Store the model, margin and distance metric; labels not yet checked.
         """
         This Online Contrastive loss is similar to :class:`ConstrativeLoss`, but it selects hard positive (positives that
         are far apart) and hard negative pairs (negatives that are close) and computes the loss only for these pairs.
@@ -76,10 +81,19 @@ class OnlineContrastiveLoss(nn.Module):
         self._checked_labels = False
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor, size_average=False) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared helper and compute the loss.
+        # KNOWN ISSUE: The size_average argument is accepted but ignored; the loss is always a sum.
         embeddings = embed_columns(self.model, sentence_features)
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] On the first call only, warn (UserWarning) if labels other than 0 or 1 are present (such pairs are ignored).
+        # Compute distances between the first two columns' aligned embeddings; split into negative (label 0) and positive
+        # (label 1) distances. Hard negatives: negatives below the maximum positive distance (or below the negative mean
+        # when there is at most one positive). Hard positives: positives above the minimum negative distance (or above the
+        # positive mean when there is at most one negative). Returns the sum of squared hard-positive distances plus the sum
+        # of squared positive parts of margin minus hard-negative distance.
+        # KNOWN ISSUE: With exactly one positive (or negative) in the batch, the threshold falls back to the other set's mean instead of using that single value, and an empty set yields NaN thresholds or an empty selection.
         if not self._checked_labels:
             self._checked_labels = True
             if labels.ne(0).logical_and(labels.ne(1)).any().item():
@@ -104,6 +118,7 @@ class OnlineContrastiveLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric (named via the SiameseDistanceMetric namespace when it matches) and margin.
         distance_metric_name = getattr(self.distance_metric, "__name__", str(self.distance_metric))
         for name, value in vars(SiameseDistanceMetric).items():
             if value == self.distance_metric:

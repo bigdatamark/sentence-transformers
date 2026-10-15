@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests model-card generation for MultiVectorEncoder: the usage snippet produced by MultiVectorEncoderModelCardData for text and multimodal
+# examples (positional split into one query and the remaining documents, shape comments), default card tags/names/type, the full rendered card
+# after constructing a trainer with zero to fifty datasets, and rendering of query/document length limits. Skipped without the training extra.
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,6 +31,9 @@ TEST_MODEL_ID = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
 @pytest.fixture(scope="session")
 def _bert_tiny_mve_model() -> MultiVectorEncoder:
+    # [FUNCTION DOC]
+    # HELPER: Session-scoped fixture loading the tiny MultiVectorEncoder, setting its card base_model to the test id if missing and disabling
+    # widget example generation. Network on first use.
     model = MultiVectorEncoder(TEST_MODEL_ID)
     if not model.model_card_data.base_model:
         model.model_card_data.base_model = TEST_MODEL_ID
@@ -36,6 +43,8 @@ def _bert_tiny_mve_model() -> MultiVectorEncoder:
 
 @pytest.fixture()
 def bert_tiny_mve_model(_bert_tiny_mve_model: MultiVectorEncoder) -> MultiVectorEncoder:
+    # [FUNCTION DOC]
+    # HELPER: Per-test fixture returning a deep copy of the session model so tests can mutate it freely.
     from copy import deepcopy
 
     return deepcopy(_bert_tiny_mve_model)
@@ -43,6 +52,10 @@ def bert_tiny_mve_model(_bert_tiny_mve_model: MultiVectorEncoder) -> MultiVector
 
 @pytest.fixture(scope="session")
 def dummy_dataset():
+    # [FUNCTION DOC]
+    # HELPER: Session-scoped fixture returning a 10-row Dataset with anchor/positive/negative columns of numbered strings.
+    # KNOWN ISSUE: Dataset is only imported when the datasets library is available, but this fixture uses it unconditionally (the module only skips
+    # when the training extra is missing), so a missing datasets install would surface as a NameError rather than a skip.
     return Dataset.from_dict(
         {
             "anchor": [f"anchor {i}" for i in range(1, 11)],
@@ -53,6 +66,9 @@ def dummy_dataset():
 
 
 def _make_data(**kwargs) -> MultiVectorEncoderModelCardData:
+    # [FUNCTION DOC]
+    # HELPER: Builds MultiVectorEncoderModelCardData with the given keyword arguments and clears its similarities and model fields so snippets can
+    # be generated without a model.
     data = MultiVectorEncoderModelCardData(**kwargs)
     data.similarities = None
     data.model = None
@@ -60,7 +76,11 @@ def _make_data(**kwargs) -> MultiVectorEncoderModelCardData:
 
 
 class TestGenerateUsageSnippetTextOnly:
+    # [CLASS DOC]
+    # Tests the text-only usage snippet.
     def test_uses_multi_vector_encoder_class_name(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the snippet imports and instantiates MultiVectorEncoder with the placeholder model id and never mentions SentenceTransformer or SparseEncoder.
         data = _make_data()
         data.usage_examples = ["A", "B"]
         snippet = data.generate_usage_snippet()
@@ -71,6 +91,8 @@ class TestGenerateUsageSnippetTextOnly:
         assert "SparseEncoder" not in snippet
 
     def test_custom_model_id(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a custom model_id appears in the constructor call.
         data = _make_data(model_id="my-org/my-mve-model")
         data.usage_examples = ["test"]
         snippet = data.generate_usage_snippet()
@@ -78,6 +100,8 @@ class TestGenerateUsageSnippetTextOnly:
         assert 'MultiVectorEncoder("my-org/my-mve-model")' in snippet
 
     def test_encode_query_and_document_calls(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the snippet calls encode_query, encode_document and similarity between query and document embeddings.
         data = _make_data()
         data.usage_examples = ["q1", "q2"]
         snippet = data.generate_usage_snippet()
@@ -87,6 +111,8 @@ class TestGenerateUsageSnippetTextOnly:
         assert "model.similarity(query_embeddings, document_embeddings)" in snippet
 
     def test_default_examples_when_none(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts that without usage examples the snippet falls back to built-in retrieval sentences with queries and documents lists.
         data = _make_data()
         data.usage_examples = None
         snippet = data.generate_usage_snippet()
@@ -97,6 +123,8 @@ class TestGenerateUsageSnippetTextOnly:
         assert "documents = [" in snippet
 
     def test_default_examples_shape_comment(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts three examples produce a "[1, 2]" count comment (one query, two documents).
         data = _make_data()
         data.usage_examples = ["a", "b", "c"]
         snippet = data.generate_usage_snippet()
@@ -104,6 +132,8 @@ class TestGenerateUsageSnippetTextOnly:
         assert "# [1, 2]" in snippet  # positional split: 1 query, 2 documents
 
     def test_shape_comment_uses_measured_shapes_when_available(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts measured query/document token-embedding shapes are rendered in the shape comment.
         data = _make_data()
         data.usage_examples = ["q", "d1", "d2"]
         data.usage_query_shape = (32, 128)
@@ -113,6 +143,8 @@ class TestGenerateUsageSnippetTextOnly:
         assert "# (32, 128) (47, 128)" in snippet
 
     def test_shape_comment_placeholder_without_measured_shapes(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a placeholder shape comment with token-count names is used when no shapes were measured.
         data = _make_data()
         data.usage_examples = ["q", "d"]
         snippet = data.generate_usage_snippet()
@@ -121,7 +153,11 @@ class TestGenerateUsageSnippetTextOnly:
 
 
 class TestGenerateUsageSnippetMultimodal:
+    # [CLASS DOC]
+    # Tests the usage snippet when examples include images.
     def test_dispatch_on_image_item(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a text query followed by an image produces queries and documents lists.
         # The split is positional (first example is the query, the rest are documents), matching
         # how the base sources IR usage examples from the first two dataset columns.
         data = _make_data()
@@ -133,6 +169,8 @@ class TestGenerateUsageSnippetMultimodal:
         assert "documents = [" in snippet
 
     def test_single_example_uses_symmetric_lists(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a single image example is used as both query and document, with a "[1, 1]" count comment.
         # One example cannot split into query + documents, so it is used as both.
         data = _make_data()
         data.usage_examples = [Image.new("RGB", (8, 8))]
@@ -143,6 +181,8 @@ class TestGenerateUsageSnippetMultimodal:
         assert "# [1, 1]" in snippet
 
     def test_mixed_text_and_image_splits_queries_documents(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the text query appears in the snippet before the documents list.
         data = _make_data()
         image = Image.new("RGB", (8, 8))
         data.usage_examples = ["What is shown in the chart?", image]
@@ -153,6 +193,8 @@ class TestGenerateUsageSnippetMultimodal:
         assert snippet.index("What is shown in the chart?") < snippet.index("documents = [")
 
     def test_uses_multi_vector_encoder_class_name(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the multimodal snippet imports MultiVectorEncoder and never mentions SentenceTransformer.
         data = _make_data()
         data.usage_examples = ["What is shown in the chart?", Image.new("RGB", (8, 8))]
         snippet = data.generate_usage_snippet()
@@ -161,6 +203,8 @@ class TestGenerateUsageSnippetMultimodal:
         assert "SentenceTransformer" not in snippet
 
     def test_shape_comment_uses_query_and_document_counts(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts four examples (text, text, image, image) produce a "[1, 3]" count comment.
         data = _make_data()
         data.usage_examples = ["Q1", "doc text", Image.new("RGB", (8, 8)), Image.new("RGB", (8, 8))]
         snippet = data.generate_usage_snippet()
@@ -170,16 +214,24 @@ class TestGenerateUsageSnippetMultimodal:
 
 
 class TestModelCardDataDefaults:
+    # [CLASS DOC]
+    # Tests default values of MultiVectorEncoderModelCardData.
     def test_default_tags_include_colbert_family(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the default tags include sentence-transformers, multi-vector, colbert and late-interaction.
         data = MultiVectorEncoderModelCardData()
         for tag in ("sentence-transformers", "multi-vector", "colbert", "late-interaction"):
             assert tag in data.tags
 
     def test_default_model_name(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the default model name is "Multi-Vector Encoder".
         data = MultiVectorEncoderModelCardData()
         assert data.get_default_model_name() == "Multi-Vector Encoder"
 
     def test_model_type(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the model type is "Multi-Vector Encoder".
         data = MultiVectorEncoderModelCardData()
         assert data.model_type == "Multi-Vector Encoder"
 
@@ -249,6 +301,10 @@ def test_model_card_base(
     expected_substrings: list[str],
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over dataset counts 0 (single unnamed dataset), 1, 2, 10 (collapsible details per dataset) and 50 (summarized as "on 50 datasets").
+    # With Hub access disabled for the card, builds a trainer (which records dataset and loss info into the card data) for the dummy dataset or a
+    # DatasetDict of copies, generates the card, and asserts every expected substring is present and there are no triple newlines.
     model = bert_tiny_mve_model
     model.model_card_data.local_files_only = True  # don't hit the Hub during the test
 
@@ -296,6 +352,10 @@ def test_model_card_base(
 def test_model_card_renders_query_and_document_lengths(
     bert_tiny_mve_model: MultiVectorEncoder, knobs: dict[str, Any], expected_rows: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over transformer settings for document_length, query_length and query expansion. Sets them on the first module, generates the card,
+    # and asserts the line after Maximum Sequence Length lists the expected per-task caps: fixed expansion overrides query_length with its length,
+    # while min expansion leaves query_length as the cap. Asserts no triple newlines.
     # The generic Maximum Sequence Length row alone is misleading for ColBERT-style models: the
     # summary must also list the real per-task caps when the Transformer carries them.
     model = bert_tiny_mve_model

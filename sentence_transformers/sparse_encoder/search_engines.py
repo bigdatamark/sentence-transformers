@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Helpers to run sparse-embedding semantic search on external search engines: Qdrant, Elasticsearch,
+# Seismic and OpenSearch. Each function optionally builds a new index from corpus embeddings
+# (connecting to a local server, a network side effect), runs one search per query for the top_k
+# hits, and returns per-query lists of hits (dicts with corpus_id and score), the search time in
+# seconds, and optionally the index for reuse. Client libraries are imported lazily.
 from __future__ import annotations
 
 import logging
@@ -40,6 +46,15 @@ def semantic_search_qdrant(
     tuple[list[list[dict[str, int | float]]], float]
     | tuple[list[list[dict[str, int | float]]], float, tuple[QdrantClient, str]]
 ):
+    # [FUNCTION DOC]
+    # Searches Qdrant with sparse COO tensors. Raises ImportError if qdrant-client is missing, and
+    # ValueError if the queries are not a 1D/2D sparse COO tensor, if neither corpus embeddings nor an
+    # index is given, or if the corpus is not sparse COO. Without corpus_index, connects to
+    # localhost:6333 (extra kwargs go to the client), creates a collection named with the current Unix
+    # time with one in-memory sparse vector field "text", and uploads each corpus row (its non-zero
+    # indices and values) in batches of 10000 with ids equal to row numbers, showing a progress bar.
+    # Then for each query row sends a sparse query on "text" with limit top_k. Returns the hits, the
+    # search time (excluding indexing), and the (client, collection name) pair if output_index.
     """
     Performs semantic search using sparse embeddings with Qdrant.
 
@@ -172,6 +187,16 @@ def semantic_search_elasticsearch(
     tuple[list[list[dict[str, int | float]]], float]
     | tuple[list[list[dict[str, int | float]]], float, tuple[Elasticsearch, str]]
 ):
+    # [FUNCTION DOC]
+    # Searches Elasticsearch with decoded embeddings (per text, a list of (token, weight) pairs).
+    # Raises ImportError if the client is missing and ValueError for malformed inputs or when neither
+    # corpus nor index is given. Without corpus_index, connects to localhost:9200 (extra kwargs to the
+    # client), creates (replacing if it exists) an index named with the Unix time whose "tokens" field
+    # is rank_features, and bulk-inserts documents in batches of 1000 with ids equal to their position
+    # and token names having dots replaced by underscores; then refreshes the index. Each query becomes
+    # a bool query of rank_feature clauses (one per token, boosted by its weight, at least one must
+    # match) with size top_k. Returns hits with integer corpus ids, the search time and optionally the
+    # (client, index name) pair.
     """
     Performs semantic search using sparse embeddings with Elasticsearch.
 
@@ -309,6 +334,14 @@ def semantic_search_seismic(
     index_kwargs: dict[str, Any] | None = None,
     search_kwargs: dict[str, Any] | None = None,
 ) -> tuple[list[list[dict[str, int | float]]], float] | tuple[list[list[dict[str, int | float]]], float, SeismicIndex]:
+    # [FUNCTION DOC]
+    # Searches a Seismic in-process index with decoded embeddings. Raises ImportError if Seismic is
+    # missing and ValueError for malformed inputs or when neither corpus nor index is given. Without
+    # corpus_index, adds every document (id as its position string, token strings and float32 weights)
+    # to a Seismic dataset and builds an index with index_kwargs. Builds per-query token and weight
+    # arrays and runs one batch search with k top_k, defaulting search_kwargs query_cut to 10 and
+    # heap_factor to 0.7 (mutating the given search_kwargs). Places results by the query id inside each
+    # result (queries with no match stay empty). Returns the hits, search time and optionally the index.
     """
     Performs semantic search using sparse embeddings with Seismic.
 
@@ -439,6 +472,16 @@ def semantic_search_opensearch(
     tuple[list[list[dict[str, int | float]]], float]
     | tuple[list[list[dict[str, int | float]]], float, tuple[OpenSearch, str]]
 ):
+    # [FUNCTION DOC]
+    # Searches OpenSearch with decoded embeddings. Raises ImportError if opensearch-py is missing and
+    # ValueError for malformed inputs or when neither corpus nor index is given. Without corpus_index,
+    # connects to localhost:9200 (extra kwargs to the client), creates (replacing if it exists) an
+    # index named with the Unix time whose "tokens" field is rank_features, bulk-inserts documents in
+    # batches of 1000 with ids equal to their position, and refreshes. Each query is a neural_sparse
+    # query on "tokens" with the query's token weights and size top_k. Returns hits with integer corpus
+    # ids, the search time and optionally the (client, index name) pair.
+    # KNOWN ISSUE: Unlike the Elasticsearch variant, token names containing dots are not escaped,
+    # although rank_features field names treat dots as object paths.
     """
     Performs semantic search using sparse embeddings with OpenSearch.
 

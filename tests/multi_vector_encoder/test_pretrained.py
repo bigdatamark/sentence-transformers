@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Slow cross-library parity tests for real pretrained late-interaction checkpoints loaded as MultiVectorEncoder (ColBERT-family text models and
+# ColPali/ColQwen-family image models). Module data: a fixed query and four planet documents, expected MaxSim scores per text model (mostly from
+# PyLate), two chart questions with four revision-pinned document image URLs and expected score matrices per image model, the set of models that
+# need trust_remote_code, a minimum VRAM threshold for float32 image models, and legacy checkpoints expected to seed a punctuation skiplist.
+# All tests download large models (network) and free GPU memory afterwards.
 from __future__ import annotations
 
 import gc
@@ -140,6 +146,10 @@ _MIN_IMAGE_MAXSIM_VRAM_BYTES = 16 * 1024**3
 @pytest.mark.parametrize("model_name, expected_score", MODELS_TO_MAXSIM.items())
 @pytest.mark.slow
 def test_pretrained_multi_vector_maxsim(model_name: str, expected_score: list[float]) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over text checkpoints. Loads the model (trusting remote code where needed), encodes the query and documents, computes the MaxSim
+    # similarity row as float32 on CPU, and asserts it matches the expected scores within 1e-3 relative and absolute tolerance. Frees the model,
+    # runs gc and empties the CUDA cache.
     model = MultiVectorEncoder(model_name, trust_remote_code=model_name in MODELS_NEEDING_REMOTE_CODE)
     query_embeddings = model.encode_query([QUERY])
     document_embeddings = model.encode_document(DOCUMENTS)
@@ -155,6 +165,10 @@ def test_pretrained_multi_vector_maxsim(model_name: str, expected_score: list[fl
 @pytest.mark.parametrize("model_name", MODELS_TO_MAXSIM)
 @pytest.mark.slow
 def test_pretrained_prompt_prefix_stays_one_token(model_name: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over text checkpoints. Asserts the model carries non-blank prompts, and for each task that the tokenized prompt starts with the
+    # task's legacy prefix (or the prompt itself) as a single piece, with or without trailing whitespace, and that a prompt equal to its prefix
+    # tokenizes to exactly one piece. Frees memory afterwards.
     """The checkpoints insert the prefix as a token while we prepend it as text, which only agree
     while the prefix tokenizes to one piece (with or without its trailing space). A save that pairs a
     prefix with a prompt composes the two, so the prefix must survive as the leading piece."""
@@ -185,6 +199,10 @@ def test_pretrained_prompt_prefix_stays_one_token(model_name: str) -> None:
 )
 @pytest.mark.slow
 def test_pretrained_image_document_maxsim(model_name: str, expected_scores: list[list[float]]) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over image checkpoints; skipped without a CUDA device of at least 16 GiB. Loads in float32, encodes the questions and image URLs
+    # (downloaded), asserts the 2x4 MaxSim matrix matches expected values within 1e-3 and that each query's best document is its own page (diagonal).
+    # Frees memory afterwards.
     """Cross-library parity for image documents, covering every multimodal load path."""
     model = MultiVectorEncoder(
         model_name,
@@ -218,6 +236,9 @@ LEGACY_SKIPLIST_CASES: list[tuple[str, list[str]]] = [
 @pytest.mark.parametrize("model_name, expected_skiplist", LEGACY_SKIPLIST_CASES)
 @pytest.mark.slow
 def test_pretrained_legacy_save_seeds_punctuation_skiplist(model_name: str, expected_skiplist: list[str]) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over legacy checkpoints. Asserts the third module is MultiVectorMask whose skiplist words equal all ASCII punctuation and whose
+    # resolved skiplist token ids are non-empty. Frees memory afterwards.
     """Legacy saves still get the punctuation skiplist after the bare-HF default flipped to empty."""
     model = MultiVectorEncoder(model_name)
     mask_module = model[2]
@@ -236,6 +257,10 @@ def test_pretrained_legacy_save_seeds_punctuation_skiplist(model_name: str, expe
 )
 @pytest.mark.slow
 def test_pretrained_colpali_multimodal() -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Loads ColPali v1.3 (bfloat16), encodes two questions and four image URLs, and asserts structure: 128-D embeddings, non-empty
+    # query token matrices, at least 1024 tokens per image, unit-norm document tokens within 0.05, a 2x4 score matrix whose argmax is the diagonal.
+    # Frees memory afterwards.
     """End-to-end image path. The checkpoint loads in bfloat16, so the assertions stay structural."""
     model = MultiVectorEncoder("vidore/colpali-v1.3-merged")
 
@@ -280,6 +305,11 @@ def test_pretrained_colpali_multimodal() -> None:
 )
 @pytest.mark.slow
 def test_pretrained_colqwen2_hf_for_retrieval(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Loads the transformers-native ColQwen2ForRetrieval checkpoint and asserts the pipeline is only Transformer then MultiVectorMask
+    # with the retrieval task, the auto model class, and dimension 128. Asserts query input ids equal the HF processor's process_queries ids, encodes
+    # queries and images with expected shapes, unit-norm document tokens, diagonal retrieval. Saves to tmp_path, reloads, asserts the same pipeline,
+    # task and dimension, and that a reloaded query embedding has the same shape and per-token cosine above 0.99 with the original. Frees memory.
     """Auto-recognition of transformers-native ``*ForRetrieval`` checkpoints, whose head projects
     and normalises internally: the pipeline must be ``Transformer -> MultiVectorMask`` alone."""
     from transformers import AutoProcessor, ColQwen2ForRetrieval

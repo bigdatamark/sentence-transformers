@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# The CrossEncoder model class. A CrossEncoder is a sequential pipeline of modules built on the shared
+# BaseModel (which handles loading from disk or the Hugging Face Hub, saving, prompts, devices, backends,
+# multi-process pools, preprocessing via its input module and model cards). The pipeline jointly encodes an
+# input pair and emits a "scores" tensor: either a sequence-classification transformer whose logits are the
+# scores, or a causal LM followed by a LogitScore module. This module adds pair prediction, ranking,
+# activation-function handling and multi-process prediction.
 from __future__ import annotations
 
 import logging
@@ -33,6 +40,12 @@ logger = transformers_logging.get_logger(__name__)
 
 
 class CrossEncoder(BaseModel, FitMixin):
+    # [CLASS DOC]
+    # CrossEncoder model, also inheriting the legacy fit methods. Class attributes: model card data class,
+    # default Hub organization "cross-encoder", a model-id placeholder for cards, and model type name. Instance
+    # state of note: the activation function applied in predict (stored as a plain attribute, not a submodule,
+    # and serialized by its qualified name in the model config). The number of labels is derived from the last
+    # scoring module.
     """
     Loads or creates a CrossEncoder model that takes a sentence pair as input and outputs a score or label.
 
@@ -170,6 +183,12 @@ class CrossEncoder(BaseModel, FitMixin):
         max_length: int | None = None,
         activation_fn: Callable | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Construct the model. The init decorator normalizes legacy argument names first. Temporarily sets the
+        # activation to None, injects num_labels into the config kwargs and max_length into the processor kwargs
+        # (as the tokenizer's model max length) when given, then defers to BaseModel construction with all loading
+        # options (may download from the Hub, read disk, and load weights). Afterwards the activation is the explicit
+        # argument if given, else any value restored from the saved config during loading, else the default.
         # Set before super().__init__() so _parse_model_config can check these
         self.activation_fn = None
 
@@ -221,6 +240,13 @@ class CrossEncoder(BaseModel, FitMixin):
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Build default modules for a plain Hugging Face checkpoint. Merges token, trust-remote-code, revision and
+        # local-only flags into model, processor and config kwargs; records the base model in the model card unless
+        # local-only; loads the config (Hub/disk I/O). If the first architecture name ends in "ForCausalLM", builds a
+        # text-generation Transformer and a LogitScore using the tokenizer ids of "yes" and "no" (ValueError if either
+        # is missing). Otherwise builds a sequence-classification Transformer. Returns the module list and an empty
+        # extra-config dict.
         shared_kwargs = {
             "token": token,
             "trust_remote_code": trust_remote_code,
@@ -289,6 +315,13 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = None,
         **predict_kwargs,
     ):
+        # [FUNCTION DOC]
+        # HELPER: Multi-process prediction. Forces per-worker progress bars off. If no pool is given but a device list
+        # is, starts a pool (and stops it afterward, even on error). Chunk size defaults to about a tenth of inputs
+        # per process, capped at 5000 and at least 1. Puts (chunk id, chunk, kwargs) jobs on the input queue, collects
+        # one result per chunk (optional progress bar), and sorts by chunk id. Raises RuntimeError if any worker
+        # reported an error. Concatenates tensors, numpy arrays, or lists; with no chunks returns an empty tensor,
+        # empty array or empty list depending on the conversion flags.
         convert_to_tensor = predict_kwargs.get("convert_to_tensor", False)
         convert_to_numpy = predict_kwargs.get("convert_to_numpy", True)
         predict_kwargs["show_progress_bar"] = False
@@ -360,6 +393,10 @@ class CrossEncoder(BaseModel, FitMixin):
         input_queue: Queue,
         results_queue: Queue,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Worker loop for multi-process prediction. Repeatedly takes a job from the input queue, predicts
+        # the chunk on the worker's device, moves tensor results to CPU, and puts (chunk id, scores) on the results
+        # queue. On an exception logs it, tries to put (chunk id, None, error message) and exits the loop.
         """
         Internal working process to predict input pairs in a multi-process setup.
 
@@ -393,6 +430,9 @@ class CrossEncoder(BaseModel, FitMixin):
                 break
 
     def _resolve_activation_fn(self, activation_fn_path: str) -> Callable | None:
+        # [FUNCTION DOC]
+        # HELPER: Instantiate an activation function from a dotted import path. Allowed when trust-remote-code is on
+        # or the path starts with "torch."; otherwise logs a warning and returns None.
         """Instantiate an activation function from a dotted path string, respecting trust_remote_code."""
         if self.trust_remote_code or activation_fn_path.startswith("torch."):
             return import_from_string(activation_fn_path)()
@@ -404,6 +444,10 @@ class CrossEncoder(BaseModel, FitMixin):
         return None
 
     def get_default_activation_fn(self) -> Callable:
+        # [FUNCTION DOC]
+        # Return the default activation. Reads an activation path from the config's sentence_transformers section,
+        # or from the legacy config attribute (which is then deleted from the config, a mutation). If a path resolves,
+        # returns that instance; otherwise sigmoid for single-label models and identity for multi-label ones.
         activation_fn_path = None
         config = self.config
         if hasattr(config, "sentence_transformers") and "activation_fn" in config.sentence_transformers:
@@ -428,10 +472,15 @@ class CrossEncoder(BaseModel, FitMixin):
 
     @property
     def model(self) -> PreTrainedModel | None:
+        # [FUNCTION DOC]
+        # Return the underlying Hugging Face model (or None) from the base class.
         return self.transformers_model
 
     @property
     def num_labels(self) -> int:
+        # [FUNCTION DOC]
+        # Return the number of output labels by scanning modules from last to first: a Dense module writing "scores"
+        # gives its output size, a Transformer gives its HF config's label count, a LogitScore gives 1; default 1.
         for module in reversed(self):
             if isinstance(module, Dense) and module.module_output_name == "scores":
                 return module.out_features
@@ -443,6 +492,9 @@ class CrossEncoder(BaseModel, FitMixin):
         return 1
 
     def __setattr__(self, name: str, value: Any) -> None:
+        # [FUNCTION DOC]
+        # Attribute setter that stores "activation_fn" as a plain attribute (bypassing torch submodule
+        # registration); all other names use the normal module setter.
         # We don't want activation_fn to be registered as a module, instead we want it as a normal attribute
         # This avoids issues with saving/loading the model
         if name == "activation_fn":
@@ -452,11 +504,15 @@ class CrossEncoder(BaseModel, FitMixin):
     @property
     @deprecated("The `max_length` property was renamed and is now deprecated. Please use `max_seq_length` instead.")
     def max_length(self) -> int:
+        # [FUNCTION DOC]
+        # Deprecated alias getter returning the max sequence length (emits a deprecation warning).
         return self.max_seq_length
 
     @max_length.setter
     @deprecated("The `max_length` property was renamed and is now deprecated. Please use `max_seq_length` instead.")
     def max_length(self, value: int) -> None:
+        # [FUNCTION DOC]
+        # Deprecated alias setter that sets the max sequence length (emits a deprecation warning).
         self.max_seq_length = value
 
     @property
@@ -465,6 +521,8 @@ class CrossEncoder(BaseModel, FitMixin):
         "Please use `activation_fn` instead."
     )
     def default_activation_function(self) -> Callable:
+        # [FUNCTION DOC]
+        # Deprecated alias returning the activation function (emits a deprecation warning).
         return self.activation_fn
 
     # Ordered overloads: the first match wins, so the all-defaults signatures come first and each
@@ -486,6 +544,8 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC]
+        # Typing overload: default conversion returns a numpy array.
 
     @overload
     def predict(
@@ -505,6 +565,8 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> torch.Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload: tensor conversion requested returns a single tensor.
 
     @overload
     def predict(
@@ -524,6 +586,8 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> torch.Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload: one pair without numpy conversion returns a tensor.
 
     @overload
     def predict(
@@ -543,6 +607,8 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[torch.Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload: many pairs without numpy conversion returns a list of tensors.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from rank) still resolve.
     @overload
@@ -562,6 +628,8 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[torch.Tensor] | np.ndarray | torch.Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload: catch-all for union-typed arguments.
 
     @torch.inference_mode()
     @cross_encoder_predict_rank_args_decorator
@@ -581,6 +649,20 @@ class CrossEncoder(BaseModel, FitMixin):
         chunk_size: int | None = None,
         **kwargs,
     ) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
+        # [FUNCTION DOC]
+        # Predict scores for one pair or many pairs, under inference mode, after the decorator normalizes legacy
+        # argument names. Inputs: pairs (strings, images or multimodal dicts), optional prompt name or prompt text,
+        # batch size, progress bar (default on at INFO/DEBUG logging), optional activation override, softmax flag,
+        # conversion flags, device or device list, optional worker pool, chunk size, and extra kwargs forwarded to
+        # preprocessing and forward. Raises ValueError for non-positive batch size. A single pair (including a 1D
+        # string numpy array) is wrapped into a list; other non-list inputs are materialized to a list. With a pool or
+        # a device list, delegates to multi-process prediction and unwraps a single result. Otherwise resolves the
+        # prompt, moves the model to the device (default current) and sets eval mode, sorts inputs by descending
+        # length (interleaving when flattened inputs are supported), and per batch preprocesses, moves to device, runs
+        # the forward, takes "scores", upcasts sub-32-bit floats, applies the activation (override or the model's),
+        # softmax over classes if requested, and squeezes single-label outputs. Restores the original order. Returns a
+        # stacked tensor (empty tensor if no inputs) when tensor conversion is on, else a numpy array when numpy
+        # conversion is on, else a list of tensors; a single input returns just its element.
         """
         Performs predictions with the CrossEncoder on the given input pairs.
 
@@ -765,6 +847,11 @@ class CrossEncoder(BaseModel, FitMixin):
         pool: dict[Literal["input", "output", "processes"], Any] | None = None,
         chunk_size: int | None = None,
     ) -> list[dict[Literal["corpus_id", "score", "text"], int | float | str]]:
+        # [FUNCTION DOC]
+        # Rank documents for one query. Raises ValueError unless the model has one label. Predicts scores for each
+        # (query, document) pair as a tensor (passing prompt, batch, activation, softmax, device and pool options),
+        # builds a list of dicts with "corpus_id" (document index), "score" and optionally "text", sorts by score
+        # descending and returns the first top-k (all when top-k is None).
         """
         Performs ranking with the CrossEncoder on the given query and documents. Returns a sorted list with the document indices and scores.
 
@@ -866,6 +953,10 @@ class CrossEncoder(BaseModel, FitMixin):
         return results[:top_k]
 
     def is_singular_input(self, inputs: PairInput | Sequence[PairInput]) -> TypeIs[PairInput]:
+        # [FUNCTION DOC]
+        # Return whether the input is a single pair rather than a batch. For lists, tuples or datasets Columns: single
+        # if non-empty and the first element is not itself such a sequence. For string/object numpy arrays: empty is a
+        # batch, otherwise single when fewer than two dimensions. Anything else counts as single.
         """
         Check if the input represents a single example or a batch of examples.
         Declared with :class:`~typing_extensions.TypeIs` so type checkers narrow the
@@ -894,11 +985,16 @@ class CrossEncoder(BaseModel, FitMixin):
         return True
 
     def _get_model_config(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the base model config extended with the activation function's qualified name.
         return super()._get_model_config() | {
             "activation_fn": fullname(self.activation_fn),
         }
 
     def _parse_model_config(self, model_config: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Parse the saved model config via the base, then if it names an activation path that resolves (trust rules
+        # apply), set it as the model's activation.
         super()._parse_model_config(model_config)
         if "activation_fn" in model_config:
             activation_fn_path = model_config["activation_fn"]
@@ -908,6 +1004,9 @@ class CrossEncoder(BaseModel, FitMixin):
                     self.activation_fn = resolved
 
     def _push_to_hub_usage_tip(self, repo_id: str) -> str:
+        # [FUNCTION DOC]
+        # Return markdown text appended to Hub pull requests showing how to load the PR revision with this class and
+        # backend and test predict and rank.
         class_name = self.__class__.__name__
         backend = self.get_backend()
         return f"""\

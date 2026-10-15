@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Defines BaseTrainer, the abstract training loop shared by all model families, built on the Hugging Face transformers
+# Trainer. It adapts the Trainer to models that take several input columns per sample and arbitrary loss modules:
+# building the data collator, wrapping/initialising losses (single, per dataset, or factories taking the model),
+# splitting collated batches into per-column feature dicts, accumulating and logging dict-valued loss components,
+# running a custom evaluator alongside the evaluation loss, choosing batch samplers (including multi-dataset
+# samplers), building dataloaders, saving and loading checkpoints in the library's own format (also for Hub pushes),
+# adding a lazy dataset-name column for multi-dataset setups, generating the model card, and building optimizer
+# parameter groups that include loss parameters and per-pattern learning rates. Logs via logging; optionally uses the
+# Trackio callback.
 from __future__ import annotations
 
 import inspect
@@ -74,6 +84,13 @@ except ImportError:
 
 
 class BaseTrainer(Trainer, ABC):
+    # [CLASS DOC]
+    # Abstract trainer. Class attributes select the family-specific classes: model_class, model_card_data_class,
+    # model_card_callback_class, data_collator_class and training_args_class. Instance attributes beyond the transformers
+    # Trainer: loss (a loss module or a dict from dataset name to loss module), evaluator (an evaluator, lists being wrapped
+    # in a SequentialEvaluator, or None), accum_loss_components (per "train"/"eval" running sums of loss components plus a
+    # step counter), can_return_loss (always True) and a cache of evaluation dataloaders. Subclasses implement
+    # get_default_loss.
     """
     BaseTrainer is a simple but feature-complete training and eval loop for PyTorch
     based on the 🤗 Transformers :class:`~transformers.Trainer`.
@@ -171,6 +188,21 @@ class BaseTrainer(Trainer, ABC):
         optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None = None,
         preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Sets up training (the deprecated "tokenizer" keyword is mapped to processing_class by a decorator). Raises
+        # RuntimeError if training dependencies (accelerate, datasets) are missing. Defaults args to the family's training
+        # arguments with output_dir "tmp_trainer" (info log); raises ValueError if args has the wrong type. Uses model_init to
+        # create the model if no model is given (RuntimeError if neither is given; a warning if both are). Warns that
+        # compute_metrics is unsupported. Computes the default argument dict (for the model card), copies hub_model_id into the
+        # card data if unset, takes the model's processor as processing_class when it is a known transformers processing type,
+        # and builds the data collator if none is given. Raises ValueError for iterable datasets without features (suggesting
+        # features inferred from a first sample). Converts plain dicts of datasets into DatasetDicts. Raises ValueError if
+        # evaluation is enabled without an eval dataset or evaluator. Initialises the parent Trainer (no model when model_init
+        # is used; a placeholder eval dataset when only an evaluator is given, reset to None afterwards). Sets the W&B/Trackio
+        # project environment variables to "sentence-transformers" if unset and those callbacks are active. Uses the default
+        # loss if none is given, prepares the loss(es); for a loss dict, every provided dataset must be a dict whose keys all
+        # have a loss (ValueError otherwise). Wraps an evaluator list in a SequentialEvaluator. Preprocesses the train and eval
+        # datasets and adds the model card callback (which immediately runs its init hook).
         if not is_training_available():
             raise RuntimeError(
                 f"To train a {self.model_class.__name__} model, you need to install the `accelerate` and `datasets` modules. "
@@ -237,6 +269,9 @@ class BaseTrainer(Trainer, ABC):
                 naive_type_mapping = {str: "string", int: "int64", float: "float32", bool: "bool"}
 
                 def naive_feature(value: Any) -> Any:
+                    # [FUNCTION DOC]
+                    # HELPER: returns a datasets feature guess for a sample value: a Sequence of the first element's feature (string for
+                    # empty lists) for lists/tuples, otherwise a Value typed from the Python type (string, int64, float32, bool, else null).
                     if isinstance(value, (list, tuple)):
                         return Sequence(naive_feature(value[0]) if value else Value("string"))
                     return Value(naive_type_mapping.get(type(value), "null"))
@@ -344,6 +379,10 @@ class BaseTrainer(Trainer, ABC):
         | ProcessorMixin
         | None = None,
     ) -> BaseDataCollator:
+        # [FUNCTION DOC]
+        # Returns the family's data collator built with the model's preprocess function, the router mapping and prompts from
+        # the arguments, and max_length if the arguments define it. Raises ValueError if the model has a direct Router child but
+        # no router mapping is configured.
         """
         Load the data collator for the trainer.
 
@@ -378,6 +417,9 @@ class BaseTrainer(Trainer, ABC):
         )
 
     def add_model_card_callback(self, default_args_dict: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Creates the model card callback with the default argument dict, registers it, and calls its init-end hook right away
+        # with the current args, state, control, model and trainer.
         """
         Add a callback responsible for automatically tracking data required for the automatic model card generation
 
@@ -397,6 +439,10 @@ class BaseTrainer(Trainer, ABC):
         model_card_callback.on_init_end(self.args, self.state, self.control, model=self.model, trainer=self)
 
     def call_model_init(self, trial=None) -> BaseModel:
+        # [FUNCTION DOC]
+        # Creates a new model via the parent implementation. If losses already exist, rebinds them to the new model: loss
+        # factories (non-module entries) are called with the model, and initialised losses that store a model get the new
+        # model swapped in (for a loss dict, entry by entry). Returns the model.
         model = super().call_model_init(trial=trial)
         # If the Trainer already has a loss, then we'll want to override the model in the loss function
         if not hasattr(self, "loss"):
@@ -422,6 +468,10 @@ class BaseTrainer(Trainer, ABC):
         return model
 
     def override_model_in_loss(self, loss: torch.nn.Module, model: BaseModel) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Recursively replaces, inside the loss and its submodules, every child named "model" that is a BaseModel with the
+        # given model. Before replacing, copies the preprocess and get_embedding_dimension methods of the old model onto the new
+        # one if it lacks them (for distributed/compiled wrappers). Mutates and returns the loss.
         from sentence_transformers.base.model import BaseModel
 
         for name, child in loss.named_children():
@@ -442,6 +492,10 @@ class BaseTrainer(Trainer, ABC):
         loss: Callable[[BaseModel], torch.nn.Module] | torch.nn.Module,
         model: BaseModel,
     ) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Moves a loss module to the model's device, or calls a loss factory with the model and moves the result. If any
+        # submodule of the loss requests media counts, enables media count tracking on the model's input module(s) (each route's
+        # first module for a Router). Returns the loss.
         if isinstance(loss, torch.nn.Module):
             loss = loss.to(model.device)
         else:
@@ -462,6 +516,8 @@ class BaseTrainer(Trainer, ABC):
 
     @abstractmethod
     def get_default_loss(self, model: BaseModel) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Abstract: returns the default loss module for the model when no loss is given.
         pass
 
     def compute_loss(
@@ -471,6 +527,12 @@ class BaseTrainer(Trainer, ABC):
         return_outputs: bool = False,
         num_items_in_batch=None,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Computes the training/evaluation loss for a collated batch. Pops "dataset_name" from the inputs, splits the rest into
+        # per-column features and labels, selects the per-dataset loss when the loss is a dict and a name is present, and, when
+        # called with the wrapped model and the loss stores a different model, swaps the wrapped model into the loss. Calls the
+        # loss with features and labels; a dict result is recorded as loss components and summed. Returns the loss, or the loss
+        # and an empty outputs dict when return_outputs is set. Mutates the inputs dict.
         """
         Computes the loss for the BaseModel model.
 
@@ -517,6 +579,10 @@ class BaseTrainer(Trainer, ABC):
         return loss
 
     def track_loss_components(self, loss: dict[str, torch.Tensor]) -> None:
+        # [FUNCTION DOC]
+        # Accumulates detached loss components into the "train" or "eval" accumulator (chosen by the model's training mode).
+        # With the NaN/Inf logging filter enabled, a NaN or infinite value is replaced by zero (first occurrence) or by the
+        # running sum divided by the number of steps since the last log. Increments a per-accumulator step counter tensor.
         training_type = "train" if self.model.training else "eval"
         for key, value in loss.items():
             # Accumulate free of the autograd graph, which would otherwise stay alive (with the
@@ -541,6 +607,11 @@ class BaseTrainer(Trainer, ABC):
         self.accum_loss_components[training_type]["steps"] += 1
 
     def log(self, logs: dict[str, float], start_time: float | None = None) -> None:
+        # [FUNCTION DOC]
+        # Extends logging: for logs containing "loss" (train) or "eval_loss" (eval), copies the logs, gathers the accumulated
+        # loss components across processes, and adds each component's mean over the gathered steps (rounded to 4 decimals;
+        # prefixed with "eval_" for evaluation), resetting the accumulators and step counter. Then calls the parent log, with
+        # start_time only when given (compatibility with older transformers).
         training_type = None
         if "loss" in logs:
             training_type = "train"
@@ -584,6 +655,11 @@ class BaseTrainer(Trainer, ABC):
     def collect_features(
         self, inputs: dict[str, torch.Tensor | Any]
     ) -> tuple[list[dict[str, torch.Tensor]], torch.Tensor | None]:
+        # [FUNCTION DOC]
+        # Splits a collated batch into per-column feature dicts and labels. Each key ending with an underscore followed by a
+        # known feature suffix (input_ids, sentence_embedding, pixel_values, input_features, input_values, pixel_values_videos)
+        # defines a column prefix (everything before the suffix); for each new prefix, all keys starting with it are collected
+        # with the prefix removed. Returns the list of feature dicts in first-seen order and the "label" entry (or None).
         """Turn the inputs from the dataloader into the separate model inputs & the labels.
 
         Example::
@@ -630,6 +706,9 @@ class BaseTrainer(Trainer, ABC):
         ignore_keys: list[str] | None = None,
         metric_key_prefix: str = "eval",
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Preprocesses an explicitly given eval dataset (not None or a name string) and delegates to the parent evaluate.
+        # Returns the metrics dict.
         # None and str pass through: the superclass recurses over a dict self.eval_dataset by name
         if eval_dataset is not None and not isinstance(eval_dataset, str):
             eval_dataset = self.preprocess_dataset(eval_dataset, dataset_name="eval")
@@ -643,6 +722,13 @@ class BaseTrainer(Trainer, ABC):
         ignore_keys: list[str] | None = None,
         metric_key_prefix: str = "eval",
     ) -> EvalLoopOutput:
+        # [FUNCTION DOC]
+        # Runs the parent evaluation loop and then, if an evaluator is set, the evaluator. During training with several eval
+        # datasets, the evaluator runs only for the first dataset, with its metrics prefixed by plain "eval". The evaluator is
+        # called on the main process with logging enabled (other processes have info logging suppressed), with an "eval"
+        # subfolder of the output dir (created) as output path, the current epoch and global step. A non-dict result is wrapped
+        # as {"evaluator": value}; all keys lacking the metric prefix get it. The metrics are merged into the output, which is
+        # returned.
         output = super().evaluation_loop(
             dataloader=dataloader,
             description=description,
@@ -685,6 +771,9 @@ class BaseTrainer(Trainer, ABC):
         return output
 
     def _load_best_model(self) -> None:
+        # [FUNCTION DOC]
+        # Records the best checkpoint's step (parsed from the checkpoint folder suffix, errors ignored) in the card data and
+        # loads the best checkpoint's weights; on failure, logs an error and returns. Logs at info level.
         # Attempt to load the model from self.state.best_model_checkpoint
         logger.info(f"Loading best model from {self.state.best_model_checkpoint} (score: {self.state.best_metric}).")
 
@@ -702,6 +791,9 @@ class BaseTrainer(Trainer, ABC):
             return
 
     def validate_column_names(self, dataset: Dataset, dataset_name: str | None = None) -> None:
+        # [FUNCTION DOC]
+        # Raises ValueError if the dataset (or any dataset in a dict, recursively) uses the reserved column names "return_loss"
+        # or "dataset_name".
         if isinstance(dataset, dict):
             for dataset_name, dataset in dataset.items():
                 self.validate_column_names(dataset, dataset_name=dataset_name)
@@ -722,6 +814,12 @@ class BaseTrainer(Trainer, ABC):
         generator: torch.Generator | None = None,
         seed: int = 0,
     ) -> BatchSampler | None:
+        # [FUNCTION DOC]
+        # Returns the batch sampler for one dataset according to args.batch_sampler: a DefaultBatchSampler subclass or any
+        # callable is called with the dataset and the batch size, drop_last, label columns, generator and seed. For iterable
+        # datasets returns None (warning if a non-default sampler was requested). Otherwise maps the enum: no-duplicates,
+        # no-duplicates with precomputed hashes, group-by-label, or the default batch sampler over a random sampler using the
+        # generator. Returns None for an unrecognised value.
         """
         Returns the appropriate batch sampler based on the ``batch_sampler`` argument in ``self.args``.
         This batch sampler class supports ``__len__`` and ``__iter__`` methods, and is used as the ``batch_sampler``
@@ -785,6 +883,10 @@ class BaseTrainer(Trainer, ABC):
         generator: torch.Generator | None = None,
         seed: int | None = 0,
     ) -> BatchSampler:
+        # [FUNCTION DOC]
+        # Returns the multi-dataset batch sampler according to args.multi_dataset_batch_sampler: a MultiDatasetDefaultBatchSampler
+        # subclass or a callable is called with the concatenated dataset, the per-dataset samplers, generator and seed;
+        # otherwise the round-robin or proportional sampler is created. Returns None for an unrecognised value.
         """
         Returns the appropriate multi-dataset batch sampler based on the ``multi_dataset_batch_sampler`` argument
         in ``self.args``. This batch sampler class supports ``__len__`` and ``__iter__`` methods, and is used as the
@@ -828,6 +930,13 @@ class BaseTrainer(Trainer, ABC):
         batch_size: int,
         dataset_kind: str,
     ) -> DataLoader:
+        # [FUNCTION DOC]
+        # HELPER: builds a DataLoader for a dataset. Creates a generator seeded with args.seed (if set) and dataloader
+        # options (collator, workers, pin memory, persistent workers, prefetch factor). Iterable datasets use a plain batch
+        # size and drop_last (warning if a batch sampler was requested). Iterable dataset dicts, and dataset dicts containing
+        # iterable datasets, raise ValueError. Dataset dicts get one batch sampler per sub-dataset, are concatenated, and use
+        # the multi-dataset batch sampler. Single datasets use the batch sampler. Other types raise ValueError mentioning the
+        # dataset kind.
         """Shared logic for building train/eval/test DataLoaders.
 
         Args:
@@ -911,6 +1020,10 @@ class BaseTrainer(Trainer, ABC):
         return DataLoader(dataset, **dataloader_params)
 
     def get_train_dataloader(self) -> DataLoader:
+        # [FUNCTION DOC]
+        # Raises ValueError without a training dataset. Sets the accelerator's even_batches to False (to avoid padding the last
+        # batch with repeated samples in multi-dataset training), builds the training dataloader with the training batch size,
+        # prepares it with the accelerator, stores and returns it.
         """
         Returns the training [`~torch.utils.data.DataLoader`].
 
@@ -934,6 +1047,12 @@ class BaseTrainer(Trainer, ABC):
     def get_eval_dataloader(
         self, eval_dataset: str | Dataset | DatasetDict | IterableDataset | None = None
     ) -> DataLoader:
+        # [FUNCTION DOC]
+        # Returns the evaluation dataloader. If no eval dataset exists anywhere, returns an empty DataLoader when an evaluator
+        # is set, else raises ValueError. With persistent workers, dataloaders for the stored dataset or a named sub-dataset
+        # are cached and reused by key ("eval" or the name). A name selects that sub-dataset of the stored eval dataset; None uses
+        # the stored dataset. Sets even_batches to True, builds and prepares the dataloader with the eval batch size, and caches
+        # it when allowed.
         """
         Returns the evaluation [`~torch.utils.data.DataLoader`].
 
@@ -978,6 +1097,9 @@ class BaseTrainer(Trainer, ABC):
         return dataloader
 
     def get_test_dataloader(self, test_dataset: Dataset | DatasetDict | IterableDataset) -> DataLoader:
+        # [FUNCTION DOC]
+        # Sets even_batches to True and returns the accelerator-prepared dataloader for the test dataset with the eval batch
+        # size.
         """
         Returns the test [`~torch.utils.data.DataLoader`].
 
@@ -997,6 +1119,10 @@ class BaseTrainer(Trainer, ABC):
         )
 
     def _save(self, output_dir: str | None = None, state_dict=None) -> None:
+        # [FUNCTION DOC]
+        # Saves a checkpoint to output_dir (default args.output_dir, created): saves the model in the library format (passing
+        # the safetensors flag when the arguments still have it), saves the processing class if any, and saves the training
+        # arguments with torch. Logs at info level.
         # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -1017,6 +1143,11 @@ class BaseTrainer(Trainer, ABC):
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
     def _push_from_checkpoint(self, checkpoint_folder: str) -> None:
+        # [FUNCTION DOC]
+        # Before the parent's Hub push of a checkpoint (on the main process, when the hub strategy is not "end" and no push is
+        # running or always-push is set), copies every file and folder of the checkpoint except training state, RNG state,
+        # global step folders and files the parent copies itself into output_dir, so the full library layout is uploaded. Then
+        # calls the parent implementation.
         # The parent only copies a transformers-layout subset into output_dir before uploading.
         # Extend it with the rest of the sentence-transformers layout (modules.json, README.md,
         # module subfolders, ...) so mid-training pushes aren't missing files. Super still runs
@@ -1041,6 +1172,10 @@ class BaseTrainer(Trainer, ABC):
         super()._push_from_checkpoint(checkpoint_folder)
 
     def _checkpoint_push_skip_names(self, checkpoint_folder: str) -> set[str]:
+        # [FUNCTION DOC]
+        # HELPER: returns the set of checkpoint file names not to copy: optimizer, scheduler, scaler, trainer state, training
+        # args, config, generation config, weight files and indices, adapter files (when peft is available), and every weight
+        # shard listed in a weights index present in the checkpoint.
         # Training state files (never pushed) + files the parent will copy itself (avoid
         # double-writing large weight shards). Mirrors `modeling_files` in
         # `Trainer._push_from_checkpoint`, including shards listed in a weights index.
@@ -1068,6 +1203,10 @@ class BaseTrainer(Trainer, ABC):
         return skip
 
     def _load_from_checkpoint(self, checkpoint_path: str) -> None:
+        # [FUNCTION DOC]
+        # Loads a checkpoint of the model being trained: builds a new model of the same class from the checkpoint, resolving
+        # module types to the classes already used by the current model and passing the model's trust_remote_code flag, then
+        # copies its state dict into the current model.
         # Our own checkpoint of the model being trained, so its module classes are already imported here,
         # yet a programmatically built model never carries trust_remote_code (#3801). Handing those classes
         # over leaves the backbone on the model's own flag, where stale remote code stays unused.
@@ -1082,6 +1221,9 @@ class BaseTrainer(Trainer, ABC):
     def preprocess_dataset(
         self, dataset: DatasetDict | Dataset | None = None, dataset_name: str | None = None
     ) -> DatasetDict | Dataset | None:
+        # [FUNCTION DOC]
+        # Returns the dataset unchanged if it is None or already marked as preprocessed. Otherwise validates reserved column
+        # names, adds a lazy dataset name column when needed, marks the dataset as preprocessed (attribute flag) and returns it.
         """
         Preprocess the dataset by optionally lazily adding a dataset name column, required for multi-dataset training
         with multiple losses or for dataset-specific router mappings.
@@ -1115,6 +1257,9 @@ class BaseTrainer(Trainer, ABC):
         args: BaseTrainingArguments,
         loss: nn.Module | dict[str, nn.Module],
     ) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if the dataset is a (iterable) dataset dict and either the loss is a dict, the prompts are a dict, or
+        # the router mapping is a dict whose first value is itself a dict (per-dataset mappings).
         """
         We should add a dataset name column to the dataset, if the dataset is a DatasetDict, *and* one of:
 
@@ -1137,6 +1282,11 @@ class BaseTrainer(Trainer, ABC):
         dataset: DatasetDict | IterableDatasetDict | Dataset | IterableDataset,
         dataset_name: str | None = None,
     ) -> DatasetDict | Dataset | None:
+        # [FUNCTION DOC]
+        # Adds a "dataset_name" column. For dataset dicts, recurses into each sub-dataset with its key as the name (mutating
+        # the dict) and returns it. Without a name, returns the dataset unchanged. For a Dataset, sets a format transform that
+        # applies the existing format options/transform and then adds the name. For an IterableDataset, adds a string feature
+        # for the column and maps the same transform in batches. Other types raise ValueError.
         if isinstance(dataset, (IterableDatasetDict, DatasetDict)):
             for dataset_name, inner_dataset in dataset.items():
                 dataset[dataset_name] = self.add_dataset_name_column(
@@ -1187,6 +1337,10 @@ class BaseTrainer(Trainer, ABC):
         transform: Callable[[dict[str, list[Any]]], dict[str, list[Any]]] | None = None,
         **kwargs,
     ) -> dict[str, list[Any]]:
+        # [FUNCTION DOC]
+        # Static: batch transform that first applies an optional prior transform, then (if the batch has columns, a non-empty
+        # first column and a dataset name) adds a "dataset_name" list repeating the name for every row. Extra keyword arguments
+        # (format options) are ignored. Mutates and returns the batch.
         """A transform/map function that adds the dataset name to the batch.
 
         Args:
@@ -1227,6 +1381,9 @@ class BaseTrainer(Trainer, ABC):
         dataset_args: str | list[str] | None = None,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # On the main process only: applies the given language, license and tags to the card data, then writes the model card
+        # into the output directory with the optional model name. Other parameters are accepted for compatibility and ignored.
         if not self.is_world_process_zero():
             return
 
@@ -1242,6 +1399,15 @@ class BaseTrainer(Trainer, ABC):
     def get_optimizer_cls_and_kwargs(
         self, args: BaseTrainingArguments, model: BaseModel | None = None
     ) -> tuple[Any, Any]:
+        # [FUNCTION DOC]
+        # Returns the optimizer class and kwargs computed over the loss module(s) (a Sequential of the loss dict values when
+        # there are several), so loss parameters (e.g. classifier heads) are trained too. If the parent did not set a parameter
+        # key, sets "optimizer_dict" to two groups of trainable parameters: those eligible for weight decay (with
+        # args.weight_decay) and the others (no decay). Then, for every pattern in args.learning_rate_mapping, finds parameters
+        # whose names match the regular expression (ValueError if none), removes them from all existing groups, and appends new
+        # groups with the pattern's learning rate, split by weight decay eligibility.
+        # KNOWN ISSUE: parameters matched by a learning rate pattern are added regardless of whether they require gradients,
+        # so frozen parameters matching a pattern are handed to the optimizer.
         """
         We have to override the optimizer_grouped_parameters because the Trainer superclass bases it on the `model`
         itself, but the BaseModel losses can have weights that should be updated as well, e.g.

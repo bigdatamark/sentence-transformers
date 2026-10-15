@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests MultiVectorEncoder evaluators (information retrieval, triplet, reranking, NanoBEIR, distillation) built on late-interaction scoring
+# (MaxSim and variants): metric keys and primary metrics, late binding of the model's similarity function, chunked scoring budgets, prompt
+# handling, CSV output, margin configuration and input validation. Uses a module-scoped tiny MultiVectorEncoder downloaded from the Hub.
 from __future__ import annotations
 
 import pytest
@@ -15,10 +19,15 @@ from sentence_transformers.multi_vector_encoder.evaluation import (
 
 @pytest.fixture(scope="module")
 def model() -> MultiVectorEncoder:
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture returning a tiny MultiVectorEncoder built from the BERT-tiny test checkpoint (network on first use).
     return MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
 
 
 def test_information_retrieval_evaluator(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates two queries against a four-document corpus without CSV and asserts the results contain "ir_smoke_maxsim_ndcg@10", which is also the
+    # primary metric and lies in [0, 1].
     queries = {"q0": "What is the capital of France?", "q1": "Who painted the Mona Lisa?"}
     corpus = {
         "d0": "Paris is the capital of France.",
@@ -42,6 +51,9 @@ def test_information_retrieval_evaluator(model: MultiVectorEncoder) -> None:
 
 
 def test_information_retrieval_evaluator_rejects_xtr_scoring() -> None:
+    # [FUNCTION DOC]
+    # Asserts that passing an XTR scorer (the function, an XTRScores instance, or a partial of the function) in score_functions raises ValueError
+    # mentioning XTR at construction.
     """XTR's global top-k is incompatible with the evaluator's per-chunk corpus scoring, so an XTR
     scorer in ``score_functions`` must raise at construction rather than emit per-chunk-wrong metrics.
     """
@@ -65,6 +77,9 @@ def test_information_retrieval_evaluator_rejects_xtr_scoring() -> None:
 
 
 def test_ir_evaluator_defers_scoring_resolution_to_call_time(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts the evaluator has no score functions after construction, and after a call records the model's similarity function name as the only
+    # score function name and reports ndcg@10 under that name.
     """Default scoring resolves from the evaluated model's ``similarity_fn_name`` inside
     ``__call__``, not eagerly at init: a model carrying a different multi-vector similarity is
     scored and labeled with its own function."""
@@ -82,6 +97,9 @@ def test_ir_evaluator_defers_scoring_resolution_to_call_time(model: MultiVectorE
 
 
 def test_ir_evaluator_chunk_elements_reaches_scoring(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Builds an evaluator with chunk_elements 1; asserts no score functions before the call, that after the call the resolved scorer is a partial
+    # bound with chunk_elements 1, and that its results equal those of an evaluator with the default budget.
     """The budget is bound onto the model-resolved scorer and actually invoked: a one-document-per-
     chunk budget must score identically to the default."""
     kwargs = {
@@ -99,6 +117,10 @@ def test_ir_evaluator_chunk_elements_reaches_scoring(model: MultiVectorEncoder) 
 
 
 def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog, clear_warning_once_cache) -> None:
+    # [FUNCTION DOC]
+    # Loads a model with "[Q] "/"[D] " prompts. Asserts an explicit query_prompt that does not start with the model's query marker logs a warning
+    # that it replaces the registered prompt; with no explicit prompt, or a prompt starting with the marker, no such warning appears (the once-only
+    # warning cache is cleared between cases via the clear_warning_once_cache fixture). Uses caplog; network.
     """An explicit query_prompt replaces the model's registered marker prompt instead of composing
     with it, so the evaluator warns once."""
     prompted_model = MultiVectorEncoder(
@@ -153,6 +175,9 @@ def test_ir_evaluator_warns_when_explicit_prompt_replaces_model_prompt(caplog, c
 
 
 def test_ir_evaluator_rejects_chunk_elements_with_score_functions() -> None:
+    # [FUNCTION DOC]
+    # Asserts combining chunk_elements with explicit score_functions raises ValueError whose message starts with "chunk_elements only configures",
+    # while either option alone constructs fine.
     """chunk_elements only configures the default model-resolved scoring, so pairing it
     with score_functions raises instead of being silently ignored."""
     from sentence_transformers.util import maxsim
@@ -178,6 +203,8 @@ def test_ir_evaluator_rejects_chunk_elements_with_score_functions() -> None:
 
 
 def test_triplet_evaluator(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates one triplet and asserts "triplet_smoke_maxsim_accuracy" is reported within [0, 1].
     evaluator = MultiVectorTripletEvaluator(
         anchors=["What is the capital of France?"],
         positives=["Paris is the capital of France."],
@@ -191,6 +218,8 @@ def test_triplet_evaluator(model: MultiVectorEncoder) -> None:
 
 
 def test_triplet_evaluator_writes_csv_rows(model: MultiVectorEncoder, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Evaluates one triplet with CSV output to tmp_path and asserts the CSV exists with a header and at least one data row.
     # Regression: the prior bespoke ``__call__`` registered CSV headers but never wrote rows, so
     # ``write_csv=True`` produced a header-only CSV.
     evaluator = MultiVectorTripletEvaluator(
@@ -208,6 +237,9 @@ def test_triplet_evaluator_writes_csv_rows(model: MultiVectorEncoder, tmp_path) 
 
 
 def test_triplet_evaluator_config_dict_margin() -> None:
+    # [FUNCTION DOC]
+    # Asserts the default margin is absent from get_config_dict; a float margin fans out to maxsim and meanmaxsim; a partial dict margin fills the
+    # missing key with 0.
     # Regression: the default-margin check compared against the dense similarity keys, so the
     # default {"maxsim": 0} margin was recorded in every model card as if it were non-default.
     evaluator = MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"])
@@ -224,12 +256,17 @@ def test_triplet_evaluator_config_dict_margin() -> None:
 
 
 def test_triplet_evaluator_rejects_dense_margin_keys() -> None:
+    # [FUNCTION DOC]
+    # Asserts a margin dict keyed by a dense similarity name (cosine) raises ValueError naming the unexpected key.
+    # KNOWN ISSUE: The inline comment says "maxsim" is the only similarity here, but the evaluator's margin config covers both maxsim and meanmaxsim.
     # "maxsim" is the only similarity here, so the dense keys would silently score nothing.
     with pytest.raises(ValueError, match=r"unexpected keys \['cosine'\]"):
         MultiVectorTripletEvaluator(anchors=["a"], positives=["p"], negatives=["n"], margin={"cosine": 0.5})
 
 
 def test_reranking_evaluator(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates one reranking sample (one positive, two negatives) and asserts "rerank_smoke_ndcg@10" is reported and is the primary metric.
     evaluator = MultiVectorRerankingEvaluator(
         samples=[
             {
@@ -247,6 +284,9 @@ def test_reranking_evaluator(model: MultiVectorEncoder) -> None:
 
 
 def test_nano_beir_evaluator_emits_lowercase_maxsim_key(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Subclasses the NanoBEIR evaluator so dataset loading returns a small in-memory IR evaluator, evaluates "msmarco", and asserts the aggregate key
+    # "NanoBEIR_mean_maxsim_ndcg@10" (lowercase maxsim) is reported and primary. No dataset download.
     # The four training examples set ``metric_for_best_model="eval_NanoBEIR_mean_maxsim_ndcg@10"``,
     # so a regression in the lowercase ``maxsim`` segment would break ``load_best_model_at_end``.
     queries = {"q0": "What is the capital of France?"}
@@ -254,7 +294,11 @@ def test_nano_beir_evaluator_emits_lowercase_maxsim_key(model: MultiVectorEncode
     qrels = {"q0": {"d0"}}
 
     class _StubNanoBEIR(MultiVectorNanoBEIREvaluator):
+        # [CLASS DOC]
+        # HELPER: NanoBEIR evaluator whose per-dataset loader is replaced by an in-memory IR evaluator.
         def _load_dataset(self, dataset_name: str, **ir_kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Returns an IR evaluator over the fixed query/corpus/qrels named "Nano" plus the dataset name, forwarding extra keyword arguments.
             return MultiVectorInformationRetrievalEvaluator(
                 queries=queries, corpus=corpus, relevant_docs=qrels, name=f"Nano{dataset_name}", **ir_kwargs
             )
@@ -266,6 +310,8 @@ def test_nano_beir_evaluator_emits_lowercase_maxsim_key(model: MultiVectorEncode
 
 
 def test_distillation_evaluator(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates two query/document pairs with teacher scores and asserts spearman and kl_divergence metrics are reported with spearman as primary.
     evaluator = MultiVectorDistillationEvaluator(
         queries=["What is the capital of France?", "Who painted the Mona Lisa?"],
         documents=["Paris is the capital of France.", "Leonardo da Vinci painted the Mona Lisa."],
@@ -280,6 +326,9 @@ def test_distillation_evaluator(model: MultiVectorEncoder) -> None:
 
 
 def test_distillation_evaluator_per_query_candidate_sets(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # With two candidate documents per query and 2-D teacher scores (knowledge-distillation format), asserts spearman and a non-negative per-query
+    # KL divergence are reported.
     """The KD training format: N candidate documents per query with 2-D teacher scores. The KL is
     computed per query over its own candidate set, mirroring MultiVectorDistillKLDivLoss."""
     evaluator = MultiVectorDistillationEvaluator(
@@ -299,6 +348,9 @@ def test_distillation_evaluator_per_query_candidate_sets(model: MultiVectorEncod
 
 
 def _student_kd_scores(model: MultiVectorEncoder, queries: list[str], documents: list[list[str]]) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Mirrors the evaluator's student scoring: encodes queries and the flattened candidate documents, computes pairwise MaxSim between each query
+    # and its candidate at each position (taking every n-th document), and stacks the result into a queries by candidates CPU tensor.
     """Mirror the evaluator's student MaxSim scoring so teacher scores can be built from it."""
     n_ways = len(documents[0])
     query_embeddings = model.encode_query(queries)
@@ -310,6 +362,9 @@ def _student_kd_scores(model: MultiVectorEncoder, queries: list[str], documents:
 
 
 def test_distillation_evaluator_spearman_is_per_query(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Builds teacher scores equal to the student's own scores plus a per-query offset of 0 or 100 (both orderings), and asserts Spearman is 1.0 in both
+    # cases, proving correlation is computed within each query rather than globally.
     """A student reproducing the teacher's within-query ranking exactly must score Spearman 1.0,
     regardless of the per-query score bands."""
     queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
@@ -338,6 +393,9 @@ def test_distillation_evaluator_spearman_is_per_query(model: MultiVectorEncoder)
 
 
 def test_distillation_evaluator_spearman_skips_constant_queries(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a constant teacher row is skipped from the Spearman mean (the remaining query, equal to the student's scores, yields 1.0), and that when
+    # every row is constant Spearman is reported as 0.0.
     # A constant teacher row has no defined rank correlation: it is skipped from the mean, and 0.0
     # is reported when every query is skipped.
     queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
@@ -361,6 +419,10 @@ def test_distillation_evaluator_spearman_skips_constant_queries(model: MultiVect
 
 
 def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # For default, shared temperature, split student/teacher temperatures and a length-normalized MeanMaxSim scorer, computes the
+    # MultiVectorDistillKLDivLoss value without gradients on freshly tokenized features and asserts the evaluator's KL divergence with the mirrored
+    # settings matches within 1e-3 relative; also asserts the four configurations yield four distinct KL values.
     """The nested-path KL equals what MultiVectorDistillKLDivLoss reports for the same queries,
     documents and teacher scores, for shared, per-side, and MeanMaxSim-mirrored settings alike."""
     from functools import partial
@@ -377,6 +439,8 @@ def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVe
     temperature = 0.25
 
     def tokenize(texts: list[str], task: str) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Tokenizes texts for the given task with the model and moves tensors to the model device.
         features = model.tokenize(texts, task=task)
         return {
             key: value.to(model.device) if isinstance(value, torch.Tensor) else value
@@ -419,6 +483,9 @@ def test_distillation_evaluator_temperature_matches_training_loss(model: MultiVe
 
 
 def test_distillation_evaluator_flat_kl_is_full_sum(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # With flat (one document per query) inputs, computes the expected summed KL divergence between softmaxes of teacher and student scores over the
+    # whole dataset (asserted above 0.1), and asserts the evaluator reports it for the original data and for every pair duplicated.
     """The flat-path KL is the full divergence between the two dataset-level distributions, not
     divided by the number of pairs, so duplicating every pair leaves it unchanged."""
     queries = ["What is the capital of France?", "Who painted the Mona Lisa?"]
@@ -448,6 +515,9 @@ def test_distillation_evaluator_flat_kl_is_full_sum(model: MultiVectorEncoder) -
 
 
 def test_distillation_evaluator_config_dict() -> None:
+    # [FUNCTION DOC]
+    # Asserts get_config_dict is empty for defaults, lists only explicitly set temperatures, and renders a partial similarity function with its
+    # keyword arguments.
     # Only non-default values reach the model card.
     default = MultiVectorDistillationEvaluator(queries=["q"], documents=[["d1", "d2"]], scores=[[1.0, 0.0]])
     assert default.get_config_dict() == {}
@@ -471,6 +541,8 @@ def test_distillation_evaluator_config_dict() -> None:
 
 
 def test_distillation_evaluator_rejects_non_positive_temperature() -> None:
+    # [FUNCTION DOC]
+    # Asserts a zero temperature or a negative student_temperature raises ValueError naming the parameter.
     with pytest.raises(ValueError, match="temperature"):
         MultiVectorDistillationEvaluator(queries=["q"], documents=["d"], scores=[1.0], temperature=0.0)
     with pytest.raises(ValueError, match="student_temperature"):
@@ -478,6 +550,9 @@ def test_distillation_evaluator_rejects_non_positive_temperature() -> None:
 
 
 def test_distillation_evaluator_rejects_mismatched_nested_shapes() -> None:
+    # [FUNCTION DOC]
+    # Asserts ragged candidate lists raise ValueError about equal length, 1-D scores with nested documents raise one about 2-D, and 2-D scores with
+    # flat documents raise one about 1-D.
     # Ragged candidate lists are rejected up front instead of failing deep inside encode.
     with pytest.raises(ValueError, match="same length"):
         MultiVectorDistillationEvaluator(
@@ -502,6 +577,8 @@ def test_distillation_evaluator_rejects_mismatched_nested_shapes() -> None:
 
 
 def test_evaluators_reject_truncate_dim() -> None:
+    # [FUNCTION DOC]
+    # Asserts the IR, NanoBEIR and triplet multi-vector evaluators raise ValueError when given truncate_dim.
     """MultiVectorEncoder has no Matryoshka-style truncation: passing truncate_dim must fail loud
     instead of logging a truncation and computing full-dimension metrics."""
     queries = {"q0": "What is the capital of France?"}

@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Tests for the SparseEncoder model class: decoding sparse embeddings into (token, weight) lists (shapes, types,
+# top_k limits, sparse/dense input, empty and invalid inputs, sorting), inference-free SPLADE routing and max
+# sequence length propagation, max_active_dims handling for SPLADE and CSR models, architecture detection
+# (fill-mask backbones become SPLADE, others CSR), sparsity statistics, pooling chunk size, embedding
+# intersection, encoding from datasets and numpy arrays, empty inputs, extra keyword argument validation (also
+# through a Router), similarity functions and their persistence, prompts and their persistence, query/document
+# prompt resolution in encode_query and encode_document, forward hooks, and converting saved models of other
+# families.
 from __future__ import annotations
 
 import copy
@@ -35,6 +44,9 @@ from sentence_transformers.util.similarity import SimilarityFunction
 def test_decode_shapes(
     splade_bert_tiny_model: SparseEncoder, texts: list[str] | str, top_k: int, expected_shape: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over text inputs and top_k. Encodes and decodes, asserting the decoded length (one list per
+    # input text, or top_k tuples for a bare string) and, for lists, that each item is a list no longer than top_k.
     model = splade_bert_tiny_model
     embeddings = model.encode(texts)
     decoded = model.decode(embeddings, top_k=top_k)
@@ -62,6 +74,8 @@ def test_decode_shapes(
     ],
 )
 def test_decode_token_types(splade_bert_tiny_model: SparseEncoder, text: str, expected_token_types: type) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over texts; asserts every decoded pair of a single string is a string token with a float weight.
     model = splade_bert_tiny_model
     embeddings = model.encode(text)
     decoded = model.decode(embeddings)
@@ -81,6 +95,8 @@ def test_decode_token_types(splade_bert_tiny_model: SparseEncoder, text: str, ex
     ],
 )
 def test_decode_top_k_respects_limit(splade_bert_tiny_model: SparseEncoder, text: str, top_k: int) -> None:
+    # [FUNCTION DOC]
+    # Asserts decoding a one-item list with top_k gives at most top_k entries.
     model = splade_bert_tiny_model
     embeddings = model.encode([text])
     decoded = model.decode(embeddings, top_k=top_k)
@@ -99,6 +115,11 @@ def test_decode_top_k_respects_limit(splade_bert_tiny_model: SparseEncoder, text
 def test_decode_handles_sparse_dense_inputs(
     splade_bert_tiny_model: SparseEncoder, texts: list[str] | str, format_type: str
 ):
+    # [FUNCTION DOC]
+    # Parametrized over inputs; decodes the sparse and dense forms of the embeddings and asserts equal lengths (and,
+    # for batches, equal per-item lengths).
+    # KNOWN ISSUE: The 2-D branch sorts both decoded results "to ensure consistent comparison" but then only compares
+    # lengths, so the token/weight contents of sparse and dense decoding are never compared.
     model = splade_bert_tiny_model
     # Get embeddings and test both sparse and dense format handling
     embeddings = model.encode(texts)
@@ -132,6 +153,8 @@ def test_decode_handles_sparse_dense_inputs(
 
 
 def test_decode_empty_tensor(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts decoding an empty 1 x vocabulary sparse tensor gives no entries.
     model = splade_bert_tiny_model
     # Create an empty sparse tensor
     empty_sparse = torch.sparse_coo_tensor(
@@ -146,6 +169,8 @@ def test_decode_empty_tensor(splade_bert_tiny_model: SparseEncoder) -> None:
 
 @pytest.mark.parametrize("top_k", [0, -1, -5])
 def test_decode_invalid_top_k(splade_bert_tiny_model: SparseEncoder, top_k: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over 0, -1, -5; asserts decode raises a ValueError requiring a positive top_k.
     model = splade_bert_tiny_model
     embeddings = model.encode("Hello world")
     with pytest.raises(ValueError, match="top_k must be a positive integer"):
@@ -153,12 +178,16 @@ def test_decode_invalid_top_k(splade_bert_tiny_model: SparseEncoder, top_k: int)
 
 
 def test_decode_invalid_input_type(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts decoding a plain list raises TypeError expecting a tensor.
     model = splade_bert_tiny_model
     with pytest.raises(TypeError, match="Expected torch.Tensor"):
         model.decode([1, 2, 3])
 
 
 def test_decode_invalid_ndim(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts decoding a 3-D tensor raises ValueError requiring 1-D or 2-D input.
     model = splade_bert_tiny_model
     tensor_3d = torch.zeros(2, 3, 4)
     with pytest.raises(ValueError, match="Input tensor must be 1D or 2D"):
@@ -166,6 +195,9 @@ def test_decode_invalid_ndim(splade_bert_tiny_model: SparseEncoder) -> None:
 
 
 def test_decode_batch_with_empty_sample(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts decoding a 2-row sparse batch whose second row is empty gives two entries for row 0 and an empty list
+    # for row 1.
     model = splade_bert_tiny_model
     vocab_size = model.get_embedding_dimension()
     # Create a batch where the first sample has values but the second is all zeros
@@ -192,6 +224,8 @@ def test_decode_batch_with_empty_sample(splade_bert_tiny_model: SparseEncoder) -
 def test_decode_returns_sorted_weights(
     splade_bert_tiny_model: SparseEncoder, texts: list[str] | str, top_k: int | None
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over texts and top_k; asserts decoded weights are in non-increasing order.
     model = splade_bert_tiny_model
     embeddings = model.encode(texts)
     decoded = model.decode(embeddings, top_k=top_k)
@@ -206,6 +240,10 @@ def test_decode_returns_sorted_weights(
 
 
 def test_inference_free_splade(inference_free_splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Encodes a query and a document with an inference-free model and asserts 1-D embeddings of the vocabulary
+    # size, query active dims equal to its token count, at least 50 document active dims, and that setting the
+    # model's max sequence length from 512 to 256 updates both router branches.
     model = inference_free_splade_bert_tiny_model
     dimensionality = model.get_embedding_dimension()
 
@@ -233,6 +271,9 @@ def test_inference_free_splade(inference_free_splade_bert_tiny_model: SparseEnco
 
 
 def test_inference_free_splade_max_active_dims_routing(inference_free_splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Asserts encoding with max_active_dims 50 keeps a subset of the baseline active indices with at most 50
+    # entries, for both query and document routes.
     model = inference_free_splade_bert_tiny_model
     query = "What is the capital of France?"
     document = "The capital of France is Paris."
@@ -258,12 +299,17 @@ def test_inference_free_splade_max_active_dims_routing(inference_free_splade_ber
 
 
 def test_encode_advanced_parameters(splade_bert_tiny_model: SparseEncoder, monkeypatch: pytest.MonkeyPatch):
+    # [FUNCTION DOC]
+    # Replaces encode with a recorder and asserts encode_query forwards normalization, batch size, progress bar,
+    # max_active_dims, chunk size and an arbitrary custom keyword.
     """Test that additional parameters are correctly passed to encode"""
     model = splade_bert_tiny_model
 
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the positional and keyword arguments of the call; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -289,6 +335,9 @@ def test_encode_advanced_parameters(splade_bert_tiny_model: SparseEncoder, monke
 
 
 def test_csr_max_active_dims_passed_to_forward(csr_bert_tiny_model: SparseEncoder, monkeypatch: pytest.MonkeyPatch):
+    # [FUNCTION DOC]
+    # Asserts the CSR model's last module is a SparseAutoEncoder with k 16, and, by spying on its forward, that an
+    # explicit max_active_dims of 5 is passed through and that otherwise the model-level default is passed.
     model = csr_bert_tiny_model
     assert isinstance(model[-1], SparseAutoEncoder)
     assert model[-1].k == 16
@@ -298,6 +347,8 @@ def test_csr_max_active_dims_passed_to_forward(csr_bert_tiny_model: SparseEncode
     original_forward = model[-1].forward
 
     def spy_forward(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the keyword arguments and delegates to the original forward.
         forward_calls.append(kwargs)
         return original_forward(*args, **kwargs)
 
@@ -315,6 +366,9 @@ def test_csr_max_active_dims_passed_to_forward(csr_bert_tiny_model: SparseEncode
 
 
 def test_max_active_dims_set_init(splade_bert_tiny_model: SparseEncoder, csr_bert_tiny_model: SparseEncoder, tmp_path):
+    # [FUNCTION DOC]
+    # Saves SPLADE and CSR models to a temp directory and asserts reloaded max_active_dims is None for SPLADE, 16 for
+    # CSR (from k), and 13 when given explicitly.
     splade_bert_tiny_model.save_pretrained(str(tmp_path / "splade_bert_tiny"))
     csr_bert_tiny_model.save_pretrained(str(tmp_path / "csr_bert_tiny"))
 
@@ -331,6 +385,8 @@ def test_max_active_dims_set_init(splade_bert_tiny_model: SparseEncoder, csr_ber
 
 
 def test_detect_mlm():
+    # [FUNCTION DOC]
+    # Asserts loading a DistilBERT checkpoint (network) yields a fill-mask Transformer followed by SpladePooling.
     model = SparseEncoder("distilbert/distilbert-base-uncased")
 
     assert isinstance(model[0], Transformer)
@@ -339,6 +395,8 @@ def test_detect_mlm():
 
 
 def test_default_to_csr():
+    # [FUNCTION DOC]
+    # Asserts loading the tiny STSB BERT checkpoint yields Transformer, Pooling and SparseAutoEncoder (CSR).
     # NOTE: bert-tiny is actually MLM-based, but the config isn't modern enough to allow us to detect it,
     # so we should default to CSR here.
     model = SparseEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -348,6 +406,9 @@ def test_default_to_csr():
 
 
 def test_sparsity(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Asserts sparsity statistics of two query embeddings report between 1 and 99 active dims and a ratio in
+    # [0.99, 1), identical for the dense form, and that the batch active dims equal the mean of the per-row values.
     model = splade_bert_tiny_model
 
     # Check that the sparsity is applied correctly
@@ -370,6 +431,8 @@ def test_sparsity(splade_bert_tiny_model: SparseEncoder):
 
 
 def test_splade_pooling_chunk_size(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Asserts the pooling chunk size defaults to None and setting it updates the SpladePooling module.
     model = splade_bert_tiny_model
 
     # The chunk size defaults to None, i.e. no chunking
@@ -382,6 +445,9 @@ def test_splade_pooling_chunk_size(splade_bert_tiny_model: SparseEncoder):
 
 
 def test_intersection(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Asserts the intersection of a query and document embedding is a 1-D tensor with fewer active dims than either,
+    # and that intersecting one query with two documents gives a 2 x vocabulary tensor decodable into two lists.
     model = splade_bert_tiny_model
 
     # Test intersection with a single text
@@ -419,6 +485,8 @@ def test_intersection(splade_bert_tiny_model: SparseEncoder):
 
 
 def test_encode_with_dataset_column(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts encoding a datasets column gives a 2 x vocabulary tensor.
     """Test that encode can handle a dataset column as input."""
     model = splade_bert_tiny_model
     from datasets import Dataset
@@ -434,6 +502,8 @@ def test_encode_with_dataset_column(splade_bert_tiny_model: SparseEncoder) -> No
 
 
 def test_encode_per_call_processing_kwargs(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts per-call processing kwargs truncating text to 4 tokens give a different embedding than the full text.
     """Per-call ``processing_kwargs`` should be accepted by ``encode`` and reach ``preprocess``.
 
     If the kwarg were silently dropped (or rejected by encode's allowlist), truncated and full
@@ -453,6 +523,8 @@ def test_encode_per_call_processing_kwargs(splade_bert_tiny_model: SparseEncoder
 
 
 def test_encode_numpy_1d_string_array(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a 1-D numpy string array is encoded per element, matching the list input.
     """Regression test for #3718: encoding a 1D numpy string array should produce one embedding per element."""
     model = splade_bert_tiny_model
     texts = np.array(["Access Management", "Press Coordination", "Financial Reports"])
@@ -463,6 +535,8 @@ def test_encode_numpy_1d_string_array(splade_bert_tiny_model: SparseEncoder) -> 
 
 
 def test_encode_numpy_2d_string_array(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a 2-D numpy string array of pairs matches encoding the nested list.
     """Encoding a 2D numpy string array should match encoding the equivalent nested list."""
     model = splade_bert_tiny_model
     pairs = np.array([["what is AI?", "AI is artificial intelligence."], ["what is ML?", "ML is machine learning."]])
@@ -473,6 +547,8 @@ def test_encode_numpy_2d_string_array(splade_bert_tiny_model: SparseEncoder) -> 
 
 
 def test_encode_numpy_empty(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts an empty numpy string array encodes to an empty tensor equal to encoding an empty list.
     """Encoding an empty string ndarray should return an empty tensor, like ``encode([])``."""
     model = splade_bert_tiny_model
     embeddings = model.encode(np.array([], dtype=str), convert_to_tensor=True, save_to_cpu=True)
@@ -492,6 +568,9 @@ def test_empty_encode(
     save_to_cpu: bool,
     max_active_dims: int | None,
 ):
+    # [FUNCTION DOC]
+    # Parametrized over tensor/sparse conversion, CPU saving and max_active_dims; asserts encoding an empty list
+    # gives an empty tensor on the right device with the right sparsity, or an empty list without tensor conversion.
     model = splade_bert_tiny_model
     embeddings = model.encode(
         [],
@@ -518,6 +597,12 @@ def test_empty_encode(
 
 
 def test_get_model_kwargs(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts get_model_kwargs is empty by default and unknown encode kwargs raise ValueError; after setting
+    # forward kwargs on the modules, asserts they are listed, unknown kwargs still raise, and passing them reaches the
+    # modules (raising TypeError since they do not really accept them); then replaces the pooling module with a Router
+    # of differently configured copies and asserts the kwargs include both routes plus task and modality, with the same
+    # error behaviour. Mutates the fixture model.
     """Test that get_model_kwargs returns the correct keyword arguments."""
     model = splade_bert_tiny_model
 
@@ -611,6 +696,10 @@ def test_get_model_kwargs(splade_bert_tiny_model: SparseEncoder) -> None:
     [v for v in SimilarityFunction.possible_values() if v in SparseEncoder.SUPPORTED_SIMILARITY_FN_NAMES],
 )
 def test_similarity_score(splade_bert_tiny_model: SparseEncoder, similarity_fn_name: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over supported similarity names; encodes four sentences densely and asserts a 4x4 score matrix
+    # with self-similarities of 1 for cosine, 0 for euclidean/manhattan and positive for dot, and a pairwise score
+    # vector of length two.
     model = splade_bert_tiny_model
     model.similarity_fn_name = similarity_fn_name
     sentences = [
@@ -635,6 +724,8 @@ def test_similarity_score(splade_bert_tiny_model: SparseEncoder, similarity_fn_n
 
 
 def test_similarity_score_save(splade_bert_tiny_model: SparseEncoder, tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Asserts the default similarity is dot, and a cosine setting survives save and reload.
     model = splade_bert_tiny_model
     assert model.similarity_fn_name == "dot"
 
@@ -645,6 +736,8 @@ def test_similarity_score_save(splade_bert_tiny_model: SparseEncoder, tmp_path: 
 
 
 def test_similarity_fn_name_set_via_enum(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts setting the similarity via the enum stores the string name.
     model = splade_bert_tiny_model
     model.similarity_fn_name = SimilarityFunction.COSINE
     assert model.similarity_fn_name == "cosine"
@@ -653,6 +746,8 @@ def test_similarity_fn_name_set_via_enum(splade_bert_tiny_model: SparseEncoder) 
 
 
 def test_similarity_fn_name_constructor_overrides_saved(splade_bert_tiny_model: SparseEncoder, tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Asserts a similarity name given to the constructor overrides the saved one.
     splade_bert_tiny_model.similarity_fn_name = "cosine"
     splade_bert_tiny_model.save(str(tmp_path))
     model = SparseEncoder(str(tmp_path), similarity_fn_name="dot")
@@ -660,6 +755,10 @@ def test_similarity_fn_name_constructor_overrides_saved(splade_bert_tiny_model: 
 
 
 def test_prompts(splade_bert_tiny_model: SparseEncoder, caplog: pytest.LogCaptureFixture) -> None:
+    # [FUNCTION DOC]
+    # Asserts default prompts are empty; that prompted texts embed differently; that passing the prompt directly,
+    # or by name, reproduces the manually prompted embedding; that passing both logs a single warning and uses the
+    # prompt; and that an unknown prompt name raises ValueError.
     model = splade_bert_tiny_model
     assert model.prompts == {"query": "", "document": ""}
     assert model.default_prompt_name is None
@@ -706,6 +805,10 @@ def test_prompts(splade_bert_tiny_model: SparseEncoder, caplog: pytest.LogCaptur
 
 
 def test_save_load_prompts() -> None:
+    # [FUNCTION DOC]
+    # Asserts an unknown default prompt name raises ValueError at construction; then that given prompts are merged
+    # with an empty document prompt, saved to the config JSON in a temp directory, and restored on reload together
+    # with the default prompt name. Downloads the model from the Hub.
     with pytest.raises(
         ValueError,
         match=re.escape(
@@ -755,12 +858,18 @@ def test_encode_query(
     prompt: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # [FUNCTION DOC]
+    # Parametrized over inputs, conversion flags, prompt name and prompt. Replaces encode with a recorder and asserts
+    # encode_query passes the inputs, flags and prompt through, sets task "query", and resolves the prompt name to
+    # the given name, else None when a prompt is given, else "query".
     model = splade_bert_tiny_model
     model.prompts = {"query": "query: ", "custom": "custom: "}
 
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the call's arguments; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -805,12 +914,17 @@ def test_encode_document(
     prompt: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # [FUNCTION DOC]
+    # Same as the previous test for encode_document, whose fallback prompt name is "document" and whose task is
+    # "document".
     model = splade_bert_tiny_model
     model.prompts = {"document": "document: ", "passage": "passage: ", "corpus": "corpus: ", "custom": "custom: "}
 
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the call's arguments; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -842,6 +956,9 @@ def test_encode_document(
 
 
 def test_encode_document_prompt_priority(splade_bert_tiny_model: SparseEncoder, monkeypatch: pytest.MonkeyPatch):
+    # [FUNCTION DOC]
+    # Asserts encode_document picks the prompt name "document", then "passage", then "corpus" depending on which are
+    # configured, and None when none of them is.
     """Test that proper prompt priority is respected when multiple options are available"""
     model = splade_bert_tiny_model
     model.prompts = {
@@ -853,6 +970,8 @@ def test_encode_document_prompt_priority(splade_bert_tiny_model: SparseEncoder, 
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the call's arguments; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -884,6 +1003,9 @@ def test_encode_document_prompt_priority(splade_bert_tiny_model: SparseEncoder, 
 
 
 def test_encode_routes_through_module_call(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Registers a forward hook, encodes once (removing the hook in a finally block) and asserts the hook fired, so
+    # encode calls the model through its call method.
     """encode() must run the forward pass via __call__ so that model.compile() applies to inference."""
     model = splade_bert_tiny_model
     calls = []
@@ -896,6 +1018,8 @@ def test_encode_routes_through_module_call(splade_bert_tiny_model: SparseEncoder
 
 
 def test_similarity_fn_name_rejects_multi_vector_names(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts setting a multi-vector similarity name raises a ValueError mentioning MultiVectorEncoder.
     """MaxSim scores ragged token embeddings: setting it on a sparse model would produce wrong shapes
     silently, so it must fail loud with a pointer to MultiVectorEncoder."""
     with pytest.raises(ValueError, match="MultiVectorEncoder"):
@@ -903,6 +1027,9 @@ def test_similarity_fn_name_rejects_multi_vector_names(splade_bert_tiny_model: S
 
 
 def test_parse_model_config_ignores_multi_vector_similarity(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Temporarily clears the stored similarity name, parses a config with "maxsim", asserts it stays unset, and
+    # restores the original in a finally block.
     """A saved multi-vector similarity falls through to the default instead of raising in the strict
     setter during config parsing."""
     model = splade_bert_tiny_model
@@ -916,6 +1043,9 @@ def test_parse_model_config_ignores_multi_vector_similarity(splade_bert_tiny_mod
 
 
 def test_conversion_ignores_source_prompts_and_similarity(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a MultiVectorEncoder with custom prompts and default prompt name, loads it as a SparseEncoder and asserts
+    # the default empty prompts, no default prompt name, and dot similarity.
     """Converting a MultiVectorEncoder save rebuilds this family's default modules, so the source's
     prompts, default_prompt_name and similarity_fn_name are not inherited (they would silently apply
     to every encode call and persist on save). SentenceTransformer saves are the exception: their
@@ -934,6 +1064,9 @@ def test_conversion_ignores_source_prompts_and_similarity(tmp_path) -> None:
 
 
 def test_conversion_from_sentence_transformer_keeps_prompts_and_similarity(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a SentenceTransformer with a query prompt, loads it as a SparseEncoder and asserts a SparseAutoEncoder is
+    # appended and the prompt and cosine similarity are kept.
     """The SentenceTransformer branch reuses the saved modules and appends a SparseAutoEncoder
     (CSR), so the source's prompts and similarity stay meaningful for the kept backbone and survive.
     Carrying the dense base's "cosine" over is what the CSR recipe wants, rather than the "dot" that

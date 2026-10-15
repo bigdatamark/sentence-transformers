@@ -1,3 +1,5 @@
+# [MODULE DOC] Softmax classification loss (the original SBERT NLI objective): a linear classifier over combined features of two
+# sentence embeddings, trained with cross-entropy (or a custom loss).
 from __future__ import annotations
 
 import logging
@@ -17,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class SoftmaxLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, num_labels, the three feature flags (concatenate u and v, absolute difference,
+    # element-wise product), classifier (linear layer on the model device from the concatenated width to num_labels,
+    # trained with the loss), loss_fct (default cross-entropy; a single shared default instance).
     @deprecated_kwargs(sentence_embedding_dimension="embedding_dimension")
     def __init__(
         self,
@@ -28,6 +33,10 @@ class SoftmaxLoss(nn.Module):
         concatenation_sent_multiplication: bool = False,
         loss_fct: Callable = nn.CrossEntropyLoss(),
     ) -> None:
+        # [FUNCTION DOC] The deprecated keyword sentence_embedding_dimension is remapped to embedding_dimension by a decorator. Counts
+        # concatenated vectors (2 for u and v, plus 1 each for the difference and the product); raises ValueError if the
+        # count is 0. Logs the count, creates the classifier and stores the loss function. Logs a warning when the installed
+        # transformers is older than 4.43.0, where the classifier cannot be updated.
         """
         This loss was used in our SBERT publication (https://huggingface.co/papers/1908.10084) to train the SentenceTransformer
         model on NLI data. It adds a softmax classifier on top of the output of two transformer networks.
@@ -122,6 +131,9 @@ class SoftmaxLoss(nn.Module):
     def forward(
         self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor
     ) -> Tensor | tuple[Tensor, Tensor]:
+        # [FUNCTION DOC] Embed the two input columns, build the feature vector from u, v, absolute difference and product per the flags,
+        # and apply the classifier. With labels, returns the loss of logits against the flattened labels; without labels,
+        # returns a tuple (list of embeddings, logits), as used by the label accuracy evaluator.
         reps = embed_columns(self.model, sentence_features)
         rep_a, rep_b = reps
 
@@ -147,6 +159,7 @@ class SoftmaxLoss(nn.Module):
             return reps, output
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with num_labels and the three feature flags.
         return {
             "num_labels": self.num_labels,
             "concatenation_sent_rep": self.concatenation_sent_rep,
@@ -156,6 +169,7 @@ class SoftmaxLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for Sentence-BERT.
         return """
 @inproceedings{reimers-2019-sentence-bert,
     title = "Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks",

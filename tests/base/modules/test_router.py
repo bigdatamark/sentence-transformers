@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Tests for the Router module (task- and modality-based routing of inputs to different module
+# sequences, also exported under the softly deprecated name Asym). Covers construction and
+# validation, default routes, max_seq_length propagation, routing during encode, save/load,
+# training with router mappings, modality handling, legacy config formats and model-ready hooks.
+# Skips the whole module when the datasets library is missing. Defines small mock modules and a
+# key-recording ModuleDict used as test doubles; shared fixtures (static_embedding,
+# stsb_bert_tiny_model, ...) come from conftest.
 from __future__ import annotations
 
 import importlib
@@ -29,92 +37,146 @@ else:
 
 
 class MockModule(InputModule):
+    # [CLASS DOC]
+    # HELPER: Minimal InputModule test double: identity forward, tokenize returns an empty dict, no-op save.
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Calls the base initializer only.
         super().__init__()
 
     def forward(self, features):
+        # [FUNCTION DOC]
+        # HELPER: Identity forward.
         return features
 
     def tokenize(self, texts, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Returns an empty feature dict.
         return {}
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # HELPER: No-op save.
         pass
 
 
 class HookRecordingModule(Module):
+    # [CLASS DOC]
+    # HELPER: Plain Module test double that records the model passed to its on_model_ready hook.
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Initializes ready_model to None.
         super().__init__()
         self.ready_model = None
 
     def forward(self, features):
+        # [FUNCTION DOC]
+        # HELPER: Identity forward.
         return features
 
     def on_model_ready(self, model) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stores the given model in ready_model.
         self.ready_model = model
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # HELPER: No-op save.
         pass
 
 
 class MockModuleWithModalities(MockModule):
+    # [CLASS DOC]
+    # HELPER: Mock input module that reports a configurable list of modalities.
     def __init__(self, modalities: list[Modality]):
+        # [FUNCTION DOC]
+        # HELPER: Stores the given modalities list.
         super().__init__()
         self._modalities = modalities
 
     @property
     def modalities(self) -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: Property returning the stored modalities.
         return self._modalities
 
 
 class MockModuleWithMaxLength(MockModule):
+    # [CLASS DOC]
+    # HELPER: Mock input module carrying a max_seq_length attribute.
     def __init__(self, max_seq_length=32):
+        # [FUNCTION DOC]
+        # HELPER: Sets max_seq_length (default 32).
         super().__init__()
         self.max_seq_length = max_seq_length
 
 
 class TaskRecordingModule(MockModule):
+    # [CLASS DOC]
+    # HELPER: Mock input module whose preprocess appends the received task argument to seen_tasks.
     """Records the ``task`` its preprocess was called with, so routing and per-task preprocessing
     can be told apart."""
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Initializes the empty seen_tasks list.
         super().__init__()
         self.seen_tasks = []
 
     def preprocess(self, inputs, prompt=None, task=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records task in seen_tasks and returns an empty dict.
         self.seen_tasks.append(task)
         return {}
 
 
 class InvertMockModule(MockModule):
+    # [CLASS DOC]
+    # HELPER: Mock module whose forward negates the "sentence_embedding" feature in place.
     def forward(self, features):
+        # [FUNCTION DOC]
+        # HELPER: Replaces features["sentence_embedding"] by its negation and returns the dict.
         features["sentence_embedding"] = -features["sentence_embedding"]
         return features
 
 
 # Create a custom ModuleDict subclass to track access
 class TaskTypesTrackingModuleDict(nn.ModuleDict):
+    # [CLASS DOC]
+    # HELPER: ModuleDict subclass that appends every key looked up (via get or indexing) to its tasks
+    # list, to observe which routes the Router selects.
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Builds the ModuleDict and an empty tasks list.
         super().__init__(*args, **kwargs)
         self.tasks = []
 
     def get(self, key, default=None):
+        # [FUNCTION DOC]
+        # HELPER: Records key, then performs the normal get with default.
         self.tasks.append(key)
         return super().get(key, default)
 
     def __getitem__(self, key):
+        # [FUNCTION DOC]
+        # HELPER: Records key, then performs the normal item lookup (KeyError if missing).
         self.tasks.append(key)
         return super().__getitem__(key)
 
 
 @pytest.mark.parametrize("routes", [{}, None])
 def test_router_empty_routes_raises_value_error(routes):
+    # [FUNCTION DOC]
+    # Router with empty or None routes raises ValueError mentioning "cannot be empty".
     """Test that Router raises ValueError when initialized with empty routes dictionary or None."""
     with pytest.raises(ValueError, match="cannot be empty"):
         Router(routes)
 
 
 def test_router_max_seq_length_edges():
+    # [FUNCTION DOC]
+    # Model max_seq_length is None when no routed module has one, equals the single defined value, or
+    # the maximum across routes; setting it on the model propagates to every routed module.
     # Fabricate a module without max_seq_length to test the default behavior
     module = MockModule()
     router = Router({"route_1": [module]})
@@ -148,6 +210,9 @@ def test_router_max_seq_length_edges():
 
 
 def test_router_init_basic():
+    # [FUNCTION DOC]
+    # Routes become nn.Sequential entries of a ModuleDict in insertion order, and the default route is
+    # the first key (since empty keys are allowed by default).
     """Test basic initialization of Router."""
     query_module = MockModuleWithMaxLength(256)
     doc_module = MockModuleWithMaxLength(512)
@@ -179,6 +244,8 @@ def test_router_init_basic():
 
 
 def test_router_init_with_default_route():
+    # [FUNCTION DOC]
+    # An explicit default_route is honored.
     """Test initialization with explicit default route."""
     query_module = MockModuleWithMaxLength()
     doc_module = MockModuleWithMaxLength()
@@ -189,6 +256,8 @@ def test_router_init_with_default_route():
 
 
 def test_router_init_without_default_route():
+    # [FUNCTION DOC]
+    # With allow_empty_key False and no default given, default_route is None.
     """Test initialization without default route and allow_empty_key=False."""
     query_module = MockModuleWithMaxLength()
     doc_module = MockModuleWithMaxLength()
@@ -199,6 +268,8 @@ def test_router_init_without_default_route():
 
 
 def test_router_init_invalid_default_route():
+    # [FUNCTION DOC]
+    # A default_route not among the route keys raises ValueError.
     """Test initialization with invalid default route raises ValueError."""
     module = MockModuleWithMaxLength()
 
@@ -207,6 +278,8 @@ def test_router_init_invalid_default_route():
 
 
 def test_router_init_multiple_modules_per_route():
+    # [FUNCTION DOC]
+    # Multiple modules per route are kept in order as the route's children.
     """Test initialization with multiple modules per route."""
     module1 = MockModuleWithMaxLength()
     module2 = MockModuleWithMaxLength()  # Technically, this should be a Module subclass, not an InputModule subclass
@@ -219,6 +292,8 @@ def test_router_init_multiple_modules_per_route():
 
 
 def test_router_init_invalid_route_mapping():
+    # [FUNCTION DOC]
+    # route_mappings pointing to a nonexistent route raises ValueError.
     """Test initialization with route_mappings pointing to non-existent routes raises ValueError."""
     module = MockModuleWithMaxLength()
 
@@ -233,6 +308,10 @@ def test_router_init_invalid_route_mapping():
 
 
 def test_router_encode(static_embedding):
+    # [FUNCTION DOC]
+    # Using a tracking ModuleDict, checks encode_query uses "query", encode_document uses "document",
+    # plain encode uses the default route (and follows changes to it), an unknown task raises a
+    # ValueError listing available routes, and with no default route an untasked encode raises.
     """Test encoding with Router."""
     # Create a Router with StaticEmbedding modules
     router = Router({"query": [static_embedding], "document": [static_embedding]})
@@ -284,6 +363,9 @@ def test_router_encode(static_embedding):
 
 
 def test_router_task_not_forwarded_to_auto_model(stsb_bert_tiny_model, monkeypatch):
+    # [FUNCTION DOC]
+    # Spies on the wrapped transformer's forward (monkeypatched) and checks the routing "task" key is
+    # not passed to it while input_ids are, and the embedding shape is correct.
     """Router.preprocess stamps features["task"] for routing, but that bookkeeping key must not
     reach the wrapped auto_model.forward (ONNX backends warn on every such unexpected kwarg)."""
     transformer, pooling = stsb_bert_tiny_model[0], stsb_bert_tiny_model[1]
@@ -294,6 +376,8 @@ def test_router_task_not_forwarded_to_auto_model(stsb_bert_tiny_model, monkeypat
     original_forward = transformer.model.forward
 
     def spy(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records keyword arguments and calls the original forward.
         captured.update(kwargs)
         return original_forward(**kwargs)
 
@@ -306,12 +390,17 @@ def test_router_task_not_forwarded_to_auto_model(stsb_bert_tiny_model, monkeypat
 
 
 def test_router_is_alias_for_asym():
+    # [FUNCTION DOC]
+    # Router and Asym are the same class object.
     """Test that Router is an alias for Asym."""
 
     assert Router is Asym
 
 
 def test_router_backwards_compatibility(static_embedding):
+    # [FUNCTION DOC]
+    # Single-key dict inputs naming a task ("query"/"document") are unwrapped and encoded; a batch
+    # mixing different task keys raises ValueError.
     """Test that passing task types as dictionary keys still works via backwards compatibility."""
 
     asym_model = Asym({"query": [static_embedding], "document": [static_embedding]})
@@ -352,6 +441,8 @@ def test_router_backwards_compatibility(static_embedding):
     ],
 )
 def test_asym_import(module_name: str) -> None:
+    # [FUNCTION DOC]
+    # Asym and Router are importable from the legacy and new module paths and resolve to the same objects.
     module = importlib.import_module(module_name)
     for module_attribute in [Asym, Router]:
         obj = getattr(module, module_attribute.__name__, None)
@@ -359,6 +450,9 @@ def test_asym_import(module_name: str) -> None:
 
 
 def test_router_save_load(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # Saving and reloading a router model keeps one Router module, both routes, default "query", and
+    # exactly equal query/document embeddings.
     """Test saving and loading a SentenceTransformer model with Router."""
     # Create a Router with StaticEmbedding modules
     router = Router({"query": [static_embedding], "document": [static_embedding]})
@@ -396,6 +490,8 @@ def test_router_save_load(static_embedding: StaticEmbedding, tmp_path: Path):
 
 
 def test_router_save_load_with_custom_default_route(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # A custom default route ("document") survives save/load and plain encode then equals encode_document.
     """Test saving and loading a model with custom default route."""
     router = Router({"query": [static_embedding], "document": [static_embedding]}, default_route="document")
     model = SentenceTransformer(modules=[router])
@@ -417,6 +513,9 @@ def test_router_save_load_with_custom_default_route(static_embedding: StaticEmbe
 
 
 def test_router_save_load_without_default_route(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # A router without default route reloads with default_route None and an untasked encode raises
+    # ValueError whose message suggests passing task or setting a default route.
     """Test saving and loading a model without a default route."""
     router = Router({"query": [static_embedding], "document": [static_embedding]}, allow_empty_key=False)
     model = SentenceTransformer(modules=[router])
@@ -441,6 +540,10 @@ def test_router_save_load_without_default_route(static_embedding: StaticEmbeddin
 
 
 def test_router_save_load_with_multiple_modules_per_route(static_embedding: StaticEmbedding, tmp_path: Path, caplog):
+    # [FUNCTION DOC]
+    # Routes of different lengths (query: static, Dense to 128, Normalize; document: static, Normalize)
+    # reload with 3 and 2 modules; the model's embedding dimension comes from the first route (128) with a
+    # "Different embedding dimensions" warning, and becomes 768 after reordering the routes.
     """Test saving and loading a model with multiple modules per route."""
     # Create two different mock modules for testing
     static_embedding_one = deepcopy(static_embedding)
@@ -484,6 +587,10 @@ def test_router_save_load_with_multiple_modules_per_route(static_embedding: Stat
 
 
 def test_router_with_trainer(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # Trains a router model on a two-row question/answer dataset with router_mapping question to query
+    # and answer to document, and checks via the tracking ModuleDict that routes were looked up in
+    # alternating query/document order six times each.
     """Test Router works correctly with a training setup using router_mapping."""
 
     # Create a Router with StaticEmbedding modules
@@ -526,6 +633,9 @@ def test_router_with_trainer(static_embedding: StaticEmbedding, tmp_path: Path):
 
 
 def test_router_with_trainer_without_router_mapping(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # Creating a trainer for a router model without a default route and without router_mapping raises a
+    # ValueError explaining that router_mapping is required.
     """Test Router crashes with a useful ValueError when training without router_mapping."""
 
     # Create a Router with StaticEmbedding modules
@@ -558,16 +668,27 @@ def test_router_with_trainer_without_router_mapping(static_embedding: StaticEmbe
 
 
 def test_router_module_forward_kwargs():
+    # [FUNCTION DOC]
+    # Defines local input modules declaring different forward_kwargs sets and checks that Router.forward
+    # passes each sub-module only the encode keyword arguments it declares (including "task" when declared),
+    # and only for the selected route.
     """Test that Router's forward method passes kwargs correctly to sub-modules."""
 
     class ExampleModuleWithForwardKwargsOne(InputModule):
+        # [CLASS DOC]
+        # HELPER: Local input module declaring forward kwarg "one" and recording the kwargs it receives.
         forward_kwargs = {"one"}
 
         def __init__(self):
+            # [FUNCTION DOC]
+            # HELPER: Initializes the empty kwargs_tracker set.
             super().__init__()
             self.kwargs_tracker = set()
 
         def forward(self, features, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Adds every received keyword name to kwargs_tracker and ensures a random 1x768
+            # "sentence_embedding" exists in the features; returns the features.
             # Just return the features for testing
             for key in kwargs.keys():
                 self.kwargs_tracker.add(key)
@@ -575,15 +696,23 @@ def test_router_module_forward_kwargs():
             return features
 
         def tokenize(self, texts, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Returns an empty feature dict.
             return {}
 
         def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+            # [FUNCTION DOC]
+            # HELPER: No-op save.
             pass
 
     class ExampleModuleWithForwardKwargsTwo(ExampleModuleWithForwardKwargsOne):
+        # [CLASS DOC]
+        # HELPER: Variant declaring forward kwargs "two" and "task".
         forward_kwargs = {"two", "task"}
 
     class ExampleModuleWithForwardKwargsThree(ExampleModuleWithForwardKwargsOne):
+        # [CLASS DOC]
+        # HELPER: Variant declaring forward kwargs "three_a" and "three_b".
         forward_kwargs = {"three_a", "three_b"}
 
     module_one = ExampleModuleWithForwardKwargsOne()
@@ -647,6 +776,11 @@ def test_router_module_forward_kwargs():
 def test_router_load_with_config(
     legacy_config: bool, module_in_root: bool, static_embedding: StaticEmbedding, tmp_path: Path
 ):
+    # [FUNCTION DOC]
+    # Saves a router model, checks router_config.json is written, then optionally renames it to the legacy
+    # config.json name or moves the document route's module files into the root directory (rewriting the
+    # config to reference the root), and checks the reloaded router has the same routes and default route.
+    # The combination of both variants is skipped.
     """Test that Router can be loaded from a saved directory with config file."""
     if module_in_root and legacy_config:
         pytest.skip("Cannot have both module in root and legacy config at the same time.")
@@ -693,6 +827,10 @@ def test_router_load_with_config(
 def test_router_load_forwards_trust_remote_code(
     static_embedding: StaticEmbedding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches the router's class importer to record calls, loads a saved router model with
+    # trust_remote_code, token, cache folder and local_files_only, and checks each of the two child
+    # resolutions received those options, the model path, a revision key and the StaticEmbedding class reference.
     """Router.load() forwards trust_remote_code, revision, and Hub auth/cache kwargs to
     import_module_class so repository-local custom child class refs (e.g.
     modeling_my_model.MyModule) can be resolved via the dynamic-module mechanism, including
@@ -703,6 +841,8 @@ def test_router_load_forwards_trust_remote_code(
     captured = []
 
     def fake_import_module_class(class_ref, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the class reference and keyword arguments, returns the StaticEmbedding class.
         captured.append({"class_ref": class_ref, **kwargs})
         return StaticEmbedding
 
@@ -728,6 +868,11 @@ def test_router_load_forwards_trust_remote_code(
 
 
 def test_router_as_middle_module(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # Uses a router between a static embedding and Normalize, with one negating module on the query route
+    # and two on the document route. Checks route selection counts, output dimensions, default route
+    # behavior, that query and document embeddings of the same text are exact negatives, and that all of this
+    # survives save/load (with trust_remote_code, since the test module class is not part of the library).
     """Test SentenceTransformer with multiple modules including a Router."""
 
     # Create a Router with different module configurations for each route
@@ -820,6 +965,9 @@ def test_router_as_middle_module(static_embedding: StaticEmbedding, tmp_path: Pa
 
 
 def test_router_for_query_document_with_explicit_none_default_route(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Router.for_query_document respects an explicit None default route (with empty keys disallowed) and
+    # otherwise defaults to "document".
     """Test that for_query_document allows explicit None for default_route."""
     # Test with explicit None (should respect it)
     router = Router.for_query_document(
@@ -839,6 +987,9 @@ def test_router_for_query_document_with_explicit_none_default_route(static_embed
 
 
 def test_router_route_mappings_basic(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # With exact (task, modality) route mappings, encoding with task "query" or "document" succeeds
+    # (only checks that results are produced, not which route ran).
     """Test basic route_mappings functionality."""
     route_mappings = {
         ("query", "text"): "query",
@@ -862,6 +1013,8 @@ def test_router_route_mappings_basic(static_embedding: StaticEmbedding):
 
 
 def test_router_route_mappings_with_none_task(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # A (None, "text") mapping routes text inputs to its route for any task.
     """Test route_mappings with None task (any task with specific modality)."""
     route_mappings = {
         (None, "text"): "text_route",
@@ -890,6 +1043,8 @@ def test_router_route_mappings_with_none_task(static_embedding: StaticEmbedding)
 
 
 def test_router_route_mappings_with_none_modality(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # (task, None) mappings route by task regardless of modality (text and image modality arguments).
     """Test route_mappings with None modality (any modality with specific task)."""
     route_mappings = {
         ("query", None): "query_route",
@@ -919,6 +1074,8 @@ def test_router_route_mappings_with_none_modality(static_embedding: StaticEmbedd
 
 
 def test_router_route_mappings_with_both_none(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # A (None, None) catch-all mapping is used for any task/modality combination.
     """Test route_mappings with both None (catch-all)."""
     route_mappings = {
         (None, None): "default_route",
@@ -946,6 +1103,9 @@ def test_router_route_mappings_with_both_none(static_embedding: StaticEmbedding)
 
 
 def test_router_route_mappings_priority(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Mapping priority: exact (task, modality) beats (task, None), which beats (None, modality), which
+    # beats (None, None); checked through the last route recorded by the tracking ModuleDict.
     """Test that route_mappings follow correct priority order."""
     # Priority: (task, modality) > (task, None) > (None, modality) > (None, None)
     route_mappings = {
@@ -994,6 +1154,8 @@ def test_router_route_mappings_priority(static_embedding: StaticEmbedding):
 
 
 def test_router_route_mappings_save_load(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # route_mappings, including None components, are saved and restored unchanged.
     """Test that route_mappings are saved and loaded correctly."""
     route_mappings = {
         ("query", "text"): "text_query",
@@ -1023,6 +1185,8 @@ def test_router_route_mappings_save_load(static_embedding: StaticEmbedding, tmp_
 
 
 def test_router_tokenize_with_task(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Router.preprocess with an explicit task returns features containing that "task" and the input_ids.
     """Test tokenize method with task parameter."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
 
@@ -1041,6 +1205,8 @@ def test_router_tokenize_with_task(static_embedding: StaticEmbedding):
 
 
 def test_router_tokenize_with_dict_input(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Router.preprocess on single-key task dicts infers the task ("query") and returns input_ids.
     """Test tokenize method with dictionary input."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
 
@@ -1057,6 +1223,8 @@ def test_router_tokenize_with_dict_input(static_embedding: StaticEmbedding):
 
 
 def test_router_tokenize_with_mixed_dict_raises_error(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Router.preprocess on dicts with different task keys raises ValueError.
     """Test that tokenize raises error with mixed dictionary keys."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
 
@@ -1070,6 +1238,8 @@ def test_router_tokenize_with_mixed_dict_raises_error(static_embedding: StaticEm
 
 
 def test_router_tokenize_with_modality(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Router.preprocess with explicit task and modality stores both in the returned features.
     """Test tokenize method with modality parameter."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
 
@@ -1084,6 +1254,8 @@ def test_router_tokenize_with_modality(static_embedding: StaticEmbedding):
 
 
 def test_router_preprocess_empty_inputs(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Router.preprocess on an empty list returns a dict instead of failing on the first-element check.
     """preprocess with an empty list should not crash on the backwards-compat inputs[0] check."""
     router = Router(
         {"query": [static_embedding], "document": [static_embedding]},
@@ -1094,6 +1266,8 @@ def test_router_preprocess_empty_inputs(static_embedding: StaticEmbedding):
 
 
 def test_router_tokenizer_property(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # The tokenizer property returns the first route's first module's tokenizer.
     """Test the tokenizer property."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
 
@@ -1103,6 +1277,8 @@ def test_router_tokenizer_property(static_embedding: StaticEmbedding):
 
 
 def test_router_tokenizer_property_no_tokenizer():
+    # [FUNCTION DOC]
+    # The tokenizer property is None when the routed module has no tokenizer.
     """Test the tokenizer property when no tokenizer exists."""
     module = MockModule()
     router = Router({"query": [module]})
@@ -1112,13 +1288,22 @@ def test_router_tokenizer_property_no_tokenizer():
 
 
 def test_router_get_embedding_dimension():
+    # [FUNCTION DOC]
+    # Router.get_embedding_dimension returns the value of the last module in the route that reports one,
+    # or None if none does.
     """Test get_embedding_dimension method."""
 
     class ModuleWithDimension(MockModule):
+        # [CLASS DOC]
+        # HELPER: Mock module reporting embedding dimension 768.
         def get_embedding_dimension(self):
+            # [FUNCTION DOC]
+            # HELPER: Returns 768.
             return 768
 
     class ModuleWithoutDimension(MockModule):
+        # [CLASS DOC]
+        # HELPER: Mock module without an embedding dimension method override.
         pass
 
     # Test with module that has dimension
@@ -1137,6 +1322,9 @@ def test_router_get_embedding_dimension():
 
 
 def test_router_resolve_route_error_messages(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Encoding with an unknown task, or without task and no default route, raises ValueErrors with the
+    # documented messages.
     """Test error messages from route resolution."""
     router = Router(
         {"query": [static_embedding], "document": [static_embedding]},
@@ -1157,6 +1345,8 @@ def test_router_resolve_route_error_messages(static_embedding: StaticEmbedding):
 
 
 def test_router_resolve_route_training_mode_error(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # In training mode, resolving a route with no task or modality raises a ValueError asking for router_mapping.
     """Test error message in training mode when no route can be determined."""
     router = Router(
         {"query": [static_embedding], "document": [static_embedding]},
@@ -1175,6 +1365,8 @@ def test_router_resolve_route_training_mode_error(static_embedding: StaticEmbedd
 
 
 def test_router_direct_lookup_by_task(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # The private route-name resolver maps a task directly to the identically named route when no mappings exist.
     """Test direct lookup by task name when not in route_mappings."""
     router = Router(
         {"query": [static_embedding], "document": [static_embedding]},
@@ -1190,6 +1382,8 @@ def test_router_direct_lookup_by_task(static_embedding: StaticEmbedding):
 
 
 def test_router_direct_lookup_by_modality(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # The private route-name resolver maps a modality directly to the identically named route.
     """Test direct lookup by modality when not in route_mappings."""
     router = Router(
         {"text": [static_embedding], "image": [static_embedding]},
@@ -1205,6 +1399,8 @@ def test_router_direct_lookup_by_modality(static_embedding: StaticEmbedding):
 
 
 def test_router_get_routes_string():
+    # [FUNCTION DOC]
+    # The private routes-description helper lists each route as task='<name>'.
     """Test _get_routes_string method for error messages."""
     module = MockModule()
 
@@ -1229,6 +1425,9 @@ def test_router_get_routes_string():
 
 
 def test_router_forward_with_task_in_features(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Resolving a route with task "query" (directly and via a value read from a features dict) returns "query".
+    # KNOWN ISSUE: despite its name and docstring, the test never calls forward; it only exercises the private route resolver.
     """Test that forward method can get task from features dict."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
 
@@ -1248,6 +1447,9 @@ def test_router_forward_with_task_in_features(static_embedding: StaticEmbedding)
 
 
 def test_router_forward_with_modality_in_features(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Resolving with modality "text" (read from a features dict) picks the (None, "text") mapped route.
+    # KNOWN ISSUE: like the task variant, forward is never called, only the private route resolver.
     """Test that forward method can get modality from features dict."""
     route_mappings = {
         (None, "text"): "text_route",
@@ -1270,6 +1472,8 @@ def test_router_forward_with_modality_in_features(static_embedding: StaticEmbedd
 
 
 def test_router_multimodal_modality_tuple(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # A single modality and a tuple modality resolve to their respective mapped routes.
     """Test routing with tuple modality (e.g., multimodal)."""
     route_mappings = {
         (None, "text"): "text_route",
@@ -1294,6 +1498,9 @@ def test_router_multimodal_modality_tuple(static_embedding: StaticEmbedding):
 
 
 def test_router_multimodal_modality_tuple_ordering(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Tuple modality keys in route_mappings are stored sorted, and both orderings of a tuple resolve to
+    # the same route whether the mapping was given sorted or unsorted.
     """Tuple modality keys in route_mappings and inferred from inputs are both sorted,
     so insertion-order variations should resolve to the same route."""
     # Register the route with one ordering of the tuple key
@@ -1326,6 +1533,8 @@ def test_router_multimodal_modality_tuple_ordering(static_embedding: StaticEmbed
 
 
 def test_router_save_with_safe_serialization(static_embedding: StaticEmbedding, tmp_path: Path):
+    # [FUNCTION DOC]
+    # Saving with safe serialization on and off both create the model directory.
     """Test saving with safe_serialization parameter."""
     router = Router({"query": [static_embedding], "document": [static_embedding]})
     model = SentenceTransformer(modules=[router])
@@ -1342,6 +1551,8 @@ def test_router_save_with_safe_serialization(static_embedding: StaticEmbedding, 
 
 
 def test_router_config_keys():
+    # [FUNCTION DOC]
+    # Router.config_keys includes default_route, allow_empty_key and route_mappings.
     """Test that Router has the correct config_keys."""
     assert "default_route" in Router.config_keys
     assert "allow_empty_key" in Router.config_keys
@@ -1349,17 +1560,24 @@ def test_router_config_keys():
 
 
 def test_router_config_file_name():
+    # [FUNCTION DOC]
+    # Router's config file name is "router_config.json".
     """Test that Router has the correct config_file_name."""
     assert Router.config_file_name == "router_config.json"
 
 
 def test_router_forward_kwargs_attribute():
+    # [FUNCTION DOC]
+    # Router.forward_kwargs includes "task" and "modality".
     """Test that Router has the correct forward_kwargs."""
     assert "task" in Router.forward_kwargs
     assert "modality" in Router.forward_kwargs
 
 
 def test_router_max_seq_length_warning(caplog):
+    # [FUNCTION DOC]
+    # Router.max_seq_length returns the maximum across routes when values differ.
+    # KNOWN ISSUE: the docstring says it tests that a warning is logged, but no assertion on the captured logs is made.
     """Test that max_seq_length logs a warning when different values exist."""
     import logging
 
@@ -1384,6 +1602,8 @@ def test_router_max_seq_length_warning(caplog):
 
 
 def test_router_max_seq_length_setter_no_modules_warning(caplog):
+    # [FUNCTION DOC]
+    # Setting max_seq_length when no routed module has the attribute logs a WARNING saying so.
     """Test that setting max_seq_length logs a warning when no modules have it."""
     import logging
 
@@ -1401,6 +1621,9 @@ def test_router_max_seq_length_setter_no_modules_warning(caplog):
 
 
 def test_router_tokenize_with_modality_inference_failure(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Preprocess with task "query" on plain text returns features tagged with that task.
+    # KNOWN ISSUE: the docstring promises a modality-inference failure case, but the input is ordinary text, so the failure path is never exercised.
     """Test tokenize when modality inference fails gracefully."""
     router = Router({"query": [static_embedding]})
 
@@ -1414,6 +1637,9 @@ def test_router_tokenize_with_modality_inference_failure(static_embedding: Stati
 
 
 def test_router_modalities():
+    # [FUNCTION DOC]
+    # Router.modalities is the de-duplicated union of the routed modules' modalities, including tuple and
+    # "message" modalities.
     """Test that Router.modalities returns the union of modalities from all sub-module input modules."""
     text_module = MockModuleWithModalities(["text"])
     image_module = MockModuleWithModalities(["image"])
@@ -1442,6 +1668,9 @@ def test_router_modalities():
 
 
 def test_router_forward_kwargs_overwrite_features():
+    # [FUNCTION DOC]
+    # A task keyword passed to forward overrides the features' "task" (query route negates the embedding);
+    # without the keyword the features' task (document, unchanged embedding) is used.
     """Test that task/modality passed as kwargs to forward take precedence over values in features dict."""
     query_module = InvertMockModule()
     doc_module = MockModule()
@@ -1470,6 +1699,9 @@ def test_router_forward_kwargs_overwrite_features():
 
 
 def test_router_forward_unsorted_tuple_modality_from_features():
+    # [FUNCTION DOC]
+    # An unsorted tuple modality in the features is sorted before resolution, selecting the negating route
+    # mapped under the sorted tuple.
     """Test that a tuple modality in features is normalized (sorted) before route resolution."""
     module_a = MockModule()
     module_b = InvertMockModule()
@@ -1492,6 +1724,8 @@ def test_router_forward_unsorted_tuple_modality_from_features():
 
 
 def test_router_forwards_on_model_ready_to_routed_modules():
+    # [FUNCTION DOC]
+    # Building a model with a router forwards the on_model_ready hook to modules inside every route.
     """Routed modules are invisible to the model's top-level module list, so the Router forwards the
     hook. Without it they never resolve their model-dependent state (e.g. MultiVectorMask's skiplist)."""
     query_hook = HookRecordingModule()
@@ -1505,6 +1739,8 @@ def test_router_forwards_on_model_ready_to_routed_modules():
 
 
 def test_router_forwards_task_to_sub_module_preprocess():
+    # [FUNCTION DOC]
+    # Router.preprocess passes the task through to the routed input modules' preprocess.
     """The route is resolved from ``task``, but input modules also read it to apply per-task
     preprocessing (e.g. a Transformer's ``query_length`` / ``document_length``), so it must reach
     them rather than being consumed by the routing."""

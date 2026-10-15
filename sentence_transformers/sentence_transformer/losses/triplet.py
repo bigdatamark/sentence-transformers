@@ -1,3 +1,5 @@
+# [MODULE DOC] Triplet loss: hinge loss requiring the anchor to be closer to the positive than to the negative by a margin, plus
+# an enumeration-style namespace of pairwise distance functions.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -13,6 +15,9 @@ from sentence_transformers.util import pairwise_cos_sim, pairwise_euclidean_sim,
 
 
 class TripletDistanceMetric(Enum):
+    # [CLASS DOC] Namespace of pairwise distance functions on two aligned tensors: cosine distance (one minus cosine similarity),
+    # Euclidean and Manhattan distance (negated pairwise similarities, i.e. positive distances). As plain functions
+    # they are Enum attributes rather than members and are called directly.
     """The metric for the triplet loss"""
 
     COSINE = lambda x, y: 1 - pairwise_cos_sim(x, y)
@@ -21,9 +26,11 @@ class TripletDistanceMetric(Enum):
 
 
 class TripletLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, distance_metric (default Euclidean), triplet_margin (default 5).
     def __init__(
         self, model: SentenceTransformer, distance_metric=TripletDistanceMetric.EUCLIDEAN, triplet_margin: float = 5
     ) -> None:
+        # [FUNCTION DOC] Store the model, distance metric and margin.
         """
         This class implements triplet loss. Given a triplet of (anchor, positive, negative),
         the loss minimizes the distance between anchor and positive while it maximizes the distance
@@ -81,11 +88,15 @@ class TripletLoss(nn.Module):
         self.triplet_margin = triplet_margin
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared helper and compute the loss.
         embeddings = embed_columns(self.model, sentence_features)
 
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Unpack exactly three embedding columns (anchor, positive, negative; ValueError otherwise), compute
+        # anchor-positive and anchor-negative distances, and return the mean of relu(positive distance minus negative
+        # distance plus margin). Labels are ignored.
         """
         Compute the Triplet loss from embeddings.
 
@@ -103,6 +114,8 @@ class TripletLoss(nn.Module):
         return losses.mean()
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric (named via the TripletDistanceMetric namespace when it matches) and
+        # the margin.
         distance_metric_name = getattr(self.distance_metric, "__name__", str(self.distance_metric))
         for name, value in vars(TripletDistanceMetric).items():
             if value == self.distance_metric:
@@ -113,6 +126,7 @@ class TripletLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for "In Defense of the Triplet Loss for Person Re-Identification".
         return """
 @misc{hermans2017defense,
     title={In Defense of the Triplet Loss for Person Re-Identification},

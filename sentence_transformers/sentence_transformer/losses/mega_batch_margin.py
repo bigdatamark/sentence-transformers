@@ -1,3 +1,6 @@
+# [MODULE DOC] MegaBatchMargin loss: for (anchor, positive) pairs in a large batch, mines each anchor's hardest negative among
+# the other anchors' positives and applies hinge margins on the positive and negative cosine similarities.
+# Optionally uses the shared gradient-cache mixin so very large batches fit in memory.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -18,6 +21,9 @@ from sentence_transformers.sentence_transformer.model import SentenceTransformer
 
 
 class MegaBatchMarginLoss(CachedLossMixin, nn.Module):
+    # [CLASS DOC] Loss module combining CachedLossMixin. Attributes: model, positive_margin (default 0.8), negative_margin (default
+    # 0.3), mini_batch_size, mini_batch_num_tokens, show_progress_bar, requires_media_counts and uses_gradient_cache
+    # (both true only in mini-batched mode), and forward (bound at construction to the mini-batched or plain variant).
     def __init__(
         self,
         model: SentenceTransformer,
@@ -28,6 +34,8 @@ class MegaBatchMarginLoss(CachedLossMixin, nn.Module):
         mini_batch_num_tokens: int | None = None,
         show_progress_bar: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Raises ValueError when the mini-batched mode is requested with a static-embedding model, or when the token budget
+        # is invalid. Stores settings and selects the forward implementation (instance attribute overriding the method).
         """
         Given a large batch (like 500 or more examples) of (anchor_i, positive_i) pairs, find for each pair in the batch
         the hardest negative, i.e. find j != i such that cos_sim(anchor_i, positive_j) is maximal. Then create from this a
@@ -136,6 +144,7 @@ class MegaBatchMarginLoss(CachedLossMixin, nn.Module):
 
     @staticmethod
     def _validate_input(sentence_features: list[dict[str, Tensor]]) -> None:
+        # [FUNCTION DOC] HELPER: Raise ValueError unless exactly two input columns (anchor, positive) are given.
         if len(sentence_features) != 2:
             raise ValueError(
                 f"MegaBatchMarginLoss expects exactly 2 input columns, (anchor, positive), but got "
@@ -147,6 +156,12 @@ class MegaBatchMarginLoss(CachedLossMixin, nn.Module):
     def calculate_loss(
         self, reps: list[list[Tensor]], labels: Tensor | None = None, *, with_backward: bool = False
     ) -> Tensor:
+        # [FUNCTION DOC] Concatenate the anchor and positive embedding chunks. Process anchor rows in chunks (mini_batch_size when
+        # back-propagating per chunk or without gradients, otherwise the full batch so only one graph is built). For each
+        # chunk compute cosine similarities against all positives; the positive score is the own diagonal entry; the hardest
+        # negative is the row maximum after setting the own entry to negative infinity. Chunk loss is the sum over rows of
+        # relu(positive_margin minus positive score) plus relu(hardest negative minus negative_margin), divided by the full
+        # batch size; with with_backward it is back-propagated and detached. Returns the sum over chunks. Labels are unused.
         """Compute the margin loss over the whole batch, from the per-mini-batch embeddings.
 
         The labels are unused: the negatives are mined from the other positives in the batch. For each
@@ -189,18 +204,21 @@ class MegaBatchMarginLoss(CachedLossMixin, nn.Module):
         return sum(losses)
 
     def forward_mini_batched(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Validate two columns and run the gradient-cached forward from the mixin.
         sentence_features = list(sentence_features)
         self._validate_input(sentence_features)
         return self.forward_cached(sentence_features, labels)
 
     ##### Non mini-batched version ###
     def forward_non_mini_batched(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Validate two columns, embed both with the shared helper and compute the loss on single-chunk lists.
         sentence_features = list(sentence_features)
         self._validate_input(sentence_features)
         reps = embed_columns(self.model, sentence_features)
         return self.calculate_loss([[rep] for rep in reps])
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with both margins and the mini-batch settings.
         return {
             "positive_margin": self.positive_margin,
             "negative_margin": self.negative_margin,
@@ -210,6 +228,7 @@ class MegaBatchMarginLoss(CachedLossMixin, nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the paraphrase mining paper this loss comes from.
         return """
 @inproceedings{wieting-gimpel-2018-paranmt,
     title = "{P}ara{NMT}-50{M}: Pushing the Limits of Paraphrastic Sentence Embeddings with Millions of Machine Translations",

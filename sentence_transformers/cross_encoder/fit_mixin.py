@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Legacy (pre-v4) training API for CrossEncoder. Provides a mixin adding fit (which converts an
+# InputExample DataLoader into a Hugging Face dataset and runs CrossEncoderTrainer) and old_fit (the
+# original manual training loop), plus trainer callbacks that reproduce the legacy evaluation, best-model
+# saving and user-callback behavior, and a loss adapter for plain torch loss functions.
 from __future__ import annotations
 
 import logging
@@ -35,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 
 class SaveModelCallback(TrainerCallback):
+    # [CLASS DOC]
+    # Trainer callback that saves the model to an output directory whenever an evaluation produces a new best
+    # value of the evaluator's primary metric. Attributes: output directory, evaluator, save-best flag, and the
+    # best metric seen (None initially).
     """A Callback to save the model to the `output_dir`.
 
     If save_best_model is True and evaluator is defined, then we save on evaluate, but only if the new model is
@@ -45,6 +54,8 @@ class SaveModelCallback(TrainerCallback):
     """
 
     def __init__(self, output_dir: str, evaluator: BaseEvaluator | None, save_best_model: bool) -> None:
+        # [FUNCTION DOC]
+        # Store the output directory, evaluator and flag; reset the best metric.
         super().__init__()
         self.output_dir = output_dir
         self.evaluator = evaluator
@@ -52,6 +63,9 @@ class SaveModelCallback(TrainerCallback):
         self.best_metric = None
 
     def is_better(self, new_metric: float) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Return whether a metric beats the best so far, using greater-is-better unless the evaluator says
+        # otherwise (via a "greater_is_better" attribute).
         if getattr(self.evaluator, "greater_is_better", True):
             return new_metric > self.best_metric
         return new_metric < self.best_metric
@@ -65,6 +79,10 @@ class SaveModelCallback(TrainerCallback):
         model: CrossEncoder,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # On evaluation, if an evaluator is set and best-model saving is on, for every metric whose key ends with the
+        # evaluator's primary metric name (default "evaluator"), saves the model to disk when it is the first or a
+        # better value, updating the best metric.
         if self.evaluator is not None and self.save_best_model:
             metric_key = getattr(self.evaluator, "primary_metric", "evaluator")
             for key, value in metrics.items():
@@ -75,6 +93,10 @@ class SaveModelCallback(TrainerCallback):
 
 
 class EvaluatorCallback(TrainerCallback):
+    # [CLASS DOC]
+    # Trainer callback running the evaluator at the end of every epoch (legacy fit behavior) and forwarding the
+    # results to the trainer's evaluate callbacks. Attributes: evaluator, output path (its "eval" subfolder),
+    # metric key prefix "eval", and the trainer reference which must be assigned after trainer creation.
     """The CrossEncoder.fit method always ran the evaluator on every epoch,
     in addition to every "evaluation_steps". This callback is responsible for that.
 
@@ -82,6 +104,9 @@ class EvaluatorCallback(TrainerCallback):
     """
 
     def __init__(self, evaluator: BaseEvaluator, output_path: str | None = None) -> None:
+        # [FUNCTION DOC]
+        # Store the evaluator; if an output path is given, use and create (on disk) its "eval" subdirectory. Set the
+        # key prefix and an unset trainer reference.
         super().__init__()
         self.evaluator = evaluator
         self.output_path = output_path
@@ -100,6 +125,10 @@ class EvaluatorCallback(TrainerCallback):
         model: CrossEncoder,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # At epoch end, run the evaluator with the current epoch and global step; wrap a non-dict result as
+        # {"evaluator": value}; prefix every key lacking "eval_" with it (mutating the dict); and if the trainer is
+        # set, dispatch the trainer's on-evaluate callbacks with these metrics.
         evaluator_metrics = self.evaluator(
             model, output_path=self.output_path, epoch=state.epoch, steps=state.global_step
         )
@@ -116,12 +145,17 @@ class EvaluatorCallback(TrainerCallback):
 
 
 class OriginalCallback(TrainerCallback):
+    # [CLASS DOC]
+    # Trainer callback invoking a user function (score, epoch, steps) after each evaluation with the value of the
+    # evaluator's primary metric.
     """A Callback to invoke the original callback function that was provided to CrossEncoder.fit()
 
     This callback has the following signature: `(score: float, epoch: int, steps: int) -> None`
     """
 
     def __init__(self, callback: Callable[[float, int, int], None], evaluator: BaseEvaluator) -> None:
+        # [FUNCTION DOC]
+        # Store the user callback and the evaluator.
         super().__init__()
         self.callback = callback
         self.evaluator = evaluator
@@ -134,6 +168,10 @@ class OriginalCallback(TrainerCallback):
         metrics: dict[str, Any],
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # On evaluation, find the first metric key ending with the evaluator's primary metric name (default
+        # "evaluator") and call the user callback with its value, the state's epoch and global step; returns the
+        # callback's result (otherwise None).
         metric_key = getattr(self.evaluator, "primary_metric", "evaluator")
         for key, value in metrics.items():
             if key.endswith(metric_key):
@@ -141,15 +179,27 @@ class OriginalCallback(TrainerCallback):
 
 
 class FitMixinLoss(nn.Module):
+    # [CLASS DOC]
+    # Loss module adapting a plain torch loss (taking logits and labels) to the trainer's loss interface for the
+    # legacy fit method. Attributes: model, inner loss function, activation.
     """A wrapper around the torch loss function that just accepts logits and labels, to be used in CrossEncoder.fit()"""
 
     def __init__(self, model: CrossEncoder, loss_fct: nn.Module, activation_fn: nn.Module = nn.Identity()) -> None:
+        # [FUNCTION DOC]
+        # Store the model, inner loss and activation function.
         super().__init__()
         self.model = model
         self.loss_fct = loss_fct
         self.activation_fn = activation_fn
 
     def forward(self, inputs: list[list[str]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss for two text columns: raises ValueError if not exactly two columns, tokenizes the pairs
+        # with padding and truncation directly via the model's tokenizer, moves tensors to the model device, runs the
+        # model and takes its first output as logits. For a single-label model, flattens the logits and casts labels
+        # to float; otherwise casts labels to long. Applies the activation and returns the inner loss.
+        # KNOWN ISSUE: The column-count error message names BinaryCrossEntropyLoss even though this is the generic
+        # fit-loss adapter.
         if len(inputs) != 2:
             raise ValueError(
                 f"BinaryCrossEntropyLoss expects a dataset with two non-label columns, but got a dataset with {len(inputs)} columns."
@@ -175,6 +225,10 @@ class FitMixinLoss(nn.Module):
 
 
 class FitMixin:
+    # [CLASS DOC]
+    # Mixin added to CrossEncoder providing the legacy fit and old_fit training methods and their collate
+    # helpers. Methods assume the host class exposes the inner Hugging Face model, tokenizer, config, max
+    # length, named parameters and save.
     """Mixin class for injecting the `fit` and `old_fit` methods into the CrossEncoder class"""
 
     def fit(
@@ -197,6 +251,21 @@ class FitMixin:
         callback: Callable[[float, int, int], None] | None = None,
         show_progress_bar: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Legacy training entry point implemented on top of CrossEncoderTrainer. Raises ImportError if the datasets
+        # library is missing. Replaces the dataloader's collate function with identity (mutation), infers the batch
+        # size (default 8) and the batch sampler (no-duplicates for the no-duplicates loader, group-by-label for a
+        # label dataset, otherwise plain). Iterates the dataloader once to collect texts and labels into a dataset
+        # with columns "sentence_0", "sentence_1", ... plus a "label" column unless every label is 0. Builds training
+        # arguments with an unused checkpoints directory, batch sizes, epochs, step evaluation when evaluation steps
+        # are positive, grad-norm clipping, fp16 if AMP, progress bar and no checkpoint saving. Creates the optimizer
+        # over the model parameters with weight decay except for bias/LayerNorm, and a named scheduler sized to
+        # dataset length over batch size times epochs. Default loss is binary cross entropy for one label or cross
+        # entropy otherwise (with the activation); a user loss is wrapped in the adapter. Adds epoch evaluator and
+        # user-callback callbacks when an evaluator is given, builds the trainer, adds the best-model saving callback
+        # when an output path is given, and trains (side effects: training, logging, disk writes).
+        # KNOWN ISSUE: If the scheduler is passed as an object rather than a name string, the local scheduler
+        # variable used for the trainer is never assigned, causing a NameError.
         """
         Deprecated training method from before Sentence Transformers v4.0, it is recommended to use
         :class:`~sentence_transformers.cross_encoder.trainer.CrossEncoderTrainer` instead. This method uses
@@ -256,6 +325,8 @@ class FitMixin:
 
         # Clear the dataloaders from collate functions as we just want raw InputExamples
         def identity(batch):
+            # [FUNCTION DOC]
+            # HELPER: Collate function returning the batch unchanged (raw InputExample list).
             return batch
 
         train_dataloader.collate_fn = identity
@@ -286,6 +357,9 @@ class FitMixin:
             train_dataset = train_dataset.add_column("label", labels)
 
         def _default_checkpoint_dir() -> str:
+            # [FUNCTION DOC]
+            # HELPER: Return "checkpoints/model", or the first "checkpoints/model_<n>" (n from 1) that does not exist or
+            # is empty. Reads the file system.
             dir_name = "checkpoints/model"
             idx = 1
             while Path(dir_name).exists() and len(list(Path(dir_name).iterdir())) != 0:
@@ -359,6 +433,12 @@ class FitMixin:
         trainer.train()
 
     def smart_batching_collate(self, batch: list[InputExample]) -> tuple[BatchEncoding, Tensor]:
+        # [FUNCTION DOC]
+        # Legacy collate: from a list of InputExamples, gathers stripped texts per position, tokenizes them as text
+        # pairs (padding, longest-first truncation, tensors), builds a label tensor (float for one label, long
+        # otherwise) and moves everything to the inner model's device. Returns the tokenized batch and labels.
+        # KNOWN ISSUE: The max-length assertion checks the batch dimension of the input ids instead of the sequence
+        # length, so it does not verify what it intends.
         texts = [[] for _ in range(len(batch[0].texts))]
         labels = []
 
@@ -385,6 +465,10 @@ class FitMixin:
         return tokenized, labels
 
     def smart_batching_collate_text_only(self, batch: list[InputExample]) -> BatchEncoding:
+        # [FUNCTION DOC]
+        # Legacy text-only collate: from a list of text tuples, gathers stripped texts per position, tokenizes them
+        # (padding, truncation, tensors) and moves them to the inner model's device. Returns the tokenized batch.
+        # KNOWN ISSUE: Same assertion problem as the labeled collate (checks batch size against max length).
         texts = [[] for _ in range(len(batch[0]))]
 
         for example in batch:
@@ -424,6 +508,15 @@ class FitMixin:
         callback: Callable[[float, int, int], None] | None = None,
         show_progress_bar: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Original manual training loop. Sets the dataloader's collate to the labeled legacy collate, creates an AMP
+        # gradient scaler (NPU, CUDA or generic) if requested, creates the output directory, resets the best score,
+        # and builds the optimizer (no decay for bias/LayerNorm) and a named scheduler over dataloader length times
+        # epochs. Default loss is BCE-with-logits for one label or cross entropy otherwise. For each epoch and batch:
+        # forward through the inner model, apply the activation (flatten for one label), compute the loss, back-
+        # propagate (scaled under AMP), clip gradients, step the optimizer, zero gradients, step the scheduler unless
+        # the AMP scale changed. Every evaluation-steps batches and at each epoch end, evaluates via the helper and
+        # resets the model to training mode.
         """
         Deprecated training method from before Sentence Transformers v4.0, it is recommended to use
         :class:`~sentence_transformers.cross_encoder.trainer.CrossEncoderTrainer` instead. This method should
@@ -560,6 +653,12 @@ class FitMixin:
                 self._eval_during_training(evaluator, output_path, save_best_model, epoch, -1, callback)
 
     def _eval_during_training(self, evaluator, output_path, save_best_model, epoch, steps, callback) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Run the evaluator (if any) with output path, epoch and steps, call the user callback with the
+        # result, reduce a dict result to its primary metric when present, and when the score beats the best score,
+        # store it and save the model to the output path if best-model saving is on.
+        # KNOWN ISSUE: The user callback receives the raw result (possibly a whole metrics dict) before it is reduced
+        # to the primary metric, contrary to the documented float score; and saving with no output path passes None.
         """Runs evaluation during the training"""
         if evaluator is not None:
             score = evaluator(self, output_path=output_path, epoch=epoch, steps=steps)

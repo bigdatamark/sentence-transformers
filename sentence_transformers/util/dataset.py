@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Dataset utilities for training data that references texts by ID. resolve_ids builds a picklable
+# batched transform (for datasets' set_transform or map) that replaces ID columns, such as query_id
+# or a list of document_ids, with the values looked up from separate lookup datasets, optionally
+# expanding ID lists into numbered columns, and passes label columns through.
 from __future__ import annotations
 
 import ast
@@ -19,6 +24,9 @@ DEFAULT_LABEL_COLUMNS: tuple[str, ...] = ("label", "labels", "score", "scores")
 
 
 def _infer_id_col(dataset: Dataset, input_col: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the single column of the lookup dataset named "id" or ending in "_id"; raises
+    # ValueError naming the candidates if there is not exactly one.
     candidates = [col for col in dataset.column_names if col == "id" or col.endswith("_id")]
     if len(candidates) != 1:
         raise ValueError(
@@ -30,6 +38,9 @@ def _infer_id_col(dataset: Dataset, input_col: str) -> str:
 
 
 def _infer_value_col(dataset: Dataset, id_col: str, input_col: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the single lookup dataset column other than the ID column; raises ValueError if
+    # there is not exactly one.
     remaining = [col for col in dataset.column_names if col != id_col]
     if len(remaining) != 1:
         raise ValueError(
@@ -41,6 +52,10 @@ def _infer_value_col(dataset: Dataset, id_col: str, input_col: str) -> str:
 
 
 def _output_col(input_col: str, plural: bool = False) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Derives an output column name from an input ID column name. In normal mode strips a
+    # trailing "_ids", "_id" or "_idx". In plural mode turns "y_ids" into "ies", "_ids" into "s", and
+    # strips "_id" or "_idx". Names without these suffixes are returned unchanged.
     # Strip the ID suffix ("query_id" -> "query"), or pluralise in plural mode ("document_ids" -> "documents").
     suffixes = {"y_ids": "ies", "_ids": "s", "_id": "", "_idx": ""} if plural else {"_ids": "", "_id": "", "_idx": ""}
     for suffix, replacement in suffixes.items():
@@ -50,10 +65,17 @@ def _output_col(input_col: str, plural: bool = False) -> str:
 
 
 def _is_string_encoded_list(value: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns true if the value is a string whose first non-whitespace character is an opening
+    # square bracket (a list stored as text).
     return isinstance(value, str) and value.lstrip().startswith("[")
 
 
 def _parse_string_encoded_lists(column: list, col_name: str) -> list:
+    # [FUNCTION DOC]
+    # HELPER: Parses each row of a column holding lists stored as text using a safe literal evaluator
+    # and returns the rows as lists. Raises ValueError, naming the column and showing the start of the
+    # row, if a row fails to parse or does not parse to a list or tuple.
     # Some KD datasets (e.g. lightonai/ms-marco-en-bge-gemma) store ID and score lists as strings.
     parsed = []
     for row in column:
@@ -74,6 +96,9 @@ def _parse_string_encoded_lists(column: list, col_name: str) -> list:
 
 
 class _SortedIdIndex:
+    # [CLASS DOC]
+    # HELPER: Memory-efficient ID-to-row-position lookup over sorted numpy arrays, used for numeric or
+    # narrow string IDs. Attributes: keys (sorted unique IDs) and positions (their row positions).
     """``id -> row position`` lookup backed by sorted numpy arrays.
 
     A python dict retains a hash table plus every key object, and rebuilds that table in each
@@ -88,6 +113,10 @@ class _SortedIdIndex:
     __slots__ = ("keys", "positions")
 
     def __init__(self, keys: np.ndarray) -> None:
+        # [FUNCTION DOC]
+        # Stable-sorts the keys, and for runs of equal keys keeps only the last occurrence (matching dict
+        # semantics where a later duplicate wins), storing the sorted unique keys and their original
+        # positions.
         order = np.argsort(keys, kind="stable")
         sorted_keys = keys[order]
         # Dict semantics: a duplicated ID resolves to its last occurrence. Stable sort keeps
@@ -99,9 +128,14 @@ class _SortedIdIndex:
         self.positions = order[keep]
 
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of unique keys.
         return len(self.keys)
 
     def lookup(self, ids: np.ndarray) -> np.ndarray:
+        # [FUNCTION DOC]
+        # Returns the row positions for an array of IDs via binary search. Raises KeyError with the first
+        # missing ID (as a Python number for numeric IDs, else a string), including when the index is empty.
         """Return the row positions for ``ids``, raising ``KeyError(missing_id)`` on a miss."""
         if len(self.keys) == 0:
             missing = ids[0]
@@ -116,6 +150,13 @@ class _SortedIdIndex:
 
 
 def _take(ids: list, value_view, index: _SortedIdIndex | dict, value_col: str, input_col: str) -> list:
+    # [FUNCTION DOC]
+    # HELPER: Looks up the values for a list of IDs: returns an empty list for no IDs; maps IDs to row
+    # positions with a _SortedIdIndex (raising KeyError for the first ID if the ID array type does not
+    # match the key type) or a dict, then returns the value column of those rows from the value view.
+    # Converts a TypeError (unhashable IDs, typically from a formatted dataset) into a TypeError with
+    # advice to remove the format, and a KeyError into a KeyError naming the missing ID and input
+    # column (with a hint when it looks like a list stored as text).
     if not ids:
         return []
     try:
@@ -146,6 +187,9 @@ def _take(ids: list, value_view, index: _SortedIdIndex | dict, value_col: str, i
 
 
 def _add_output_column(resolved: dict[str, Any], name: str, values: list) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Adds a named column of values to the output dict (mutating it); raises ValueError if the
+    # name already exists.
     # Output names depend on the data (list-ness, list length), so collisions are caught here.
     if name in resolved:
         raise ValueError(
@@ -163,6 +207,18 @@ def _resolve_ids_batch(
     max_list_length: int | None,
     output_format: Literal["columns", "lists"],
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: The batched transform. Raises TypeError if the batch is not a mapping. For each configured
+    # input column: raises TypeError if the column is not a list (formatted dataset); parses lists stored
+    # as text; then, if rows are lists and output_format is "columns", truncates rows to
+    # max_list_length, requires all rows to have the same non-zero length (else ValueError), looks up
+    # all IDs at once and adds one column per position named with the stripped name plus an underscore
+    # and the one-based position; if rows are lists and output_format is "lists", truncates rows, looks
+    # up all IDs and adds a nested list column under the plural name; otherwise looks up the scalar IDs
+    # and adds them under the stripped name. Then passes through each keep column present in the batch
+    # (parsing lists stored as text and truncating per-row sequences to max_list_length). Raises
+    # ValueError on output name collisions. Returns the new batch dict containing only resolved and
+    # kept columns.
     # The batched transform built by resolve_ids, bound via functools.partial. Module-level rather
     # than a closure so that datasets carrying it via set_transform stay picklable, which DataLoader
     # workers require on spawn-start platforms.
@@ -243,6 +299,19 @@ def resolve_ids(
     max_list_length: int | None = None,
     output_format: Literal["columns", "lists"] = "columns",
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Builds and returns the ID-resolving batched transform. Raises ImportError without the datasets
+    # library, TypeError if keep_columns is a string, ValueError if max_list_length is below 1 or
+    # output_format is not "columns" or "lists". For each lookups entry (a Dataset, or a tuple of
+    # dataset and ID column, optionally with a value column; other tuple lengths raise ValueError),
+    # raises TypeError for a DatasetDict or non-Dataset, removes any format from the dataset, infers or
+    # validates the ID and value columns (ValueError if missing), and builds an ID index shared by
+    # entries with the same original dataset object and ID column. The index reads IDs in batches of
+    # 50000; it is a _SortedIdIndex for one-dimensional numeric or string IDs of at most 128 bytes,
+    # else a dict. Logs a one-time warning if duplicate IDs exist (the last occurrence wins). Stores a
+    # single-column value view, the index, value column and stripped/plural output names per input
+    # column. Returns a partial application of the module-level batch function with these settings, so
+    # it stays picklable.
     """Build a batched transform that resolves ID columns to their values via a join against lookup
     datasets. Useful for IR datasets that store query / document IDs alongside separate text (or
     image) datasets, e.g. `lightonai/ms-marco-en-bge <https://huggingface.co/datasets/lightonai/ms-marco-en-bge>`_.

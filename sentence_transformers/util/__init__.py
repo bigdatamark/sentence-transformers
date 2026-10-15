@@ -1,3 +1,11 @@
+# [PACKAGE DOC]
+# Utility package shared across sentence-transformers. Re-exports helpers from its submodules:
+# dataset id resolution, Hub save decorators, distributed gather helpers, environment and package
+# checks, file and Hub I/O, hard-negative mining, logging setup, miscellaneous helpers (class
+# names, dynamic imports, CSV row appending, teacher target checks), embedding quantization,
+# retrieval utilities (semantic search, paraphrase mining, community detection), similarity
+# functions, and tensor helpers (device moves, padding, normalization, sparse top-k selection,
+# count vectors). Has no behavior beyond these imports.
 from __future__ import annotations
 
 from .dataset import resolve_ids

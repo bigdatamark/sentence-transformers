@@ -1,3 +1,5 @@
+# [MODULE DOC] MSE embedding distillation loss: the embedding distillation loss fixed to mean squared error, the classic setup
+# for distilling a teacher into a student of the same dimension (e.g. multilingual knowledge distillation).
 from __future__ import annotations
 
 from typing import Any
@@ -8,11 +10,13 @@ from .embed_distill import EmbedDistillLoss
 
 
 class MSELoss(EmbedDistillLoss):
+    # [CLASS DOC] Subclass of EmbedDistillLoss with distance metric "mse"; all computation is inherited.
     def __init__(
         self,
         model: SentenceTransformer,
         projection_dim: int | None = None,
     ) -> None:
+        # [FUNCTION DOC] Initialize the parent with the model, the "mse" metric and an optional projection dimension.
         """
         Computes the MSE loss between the student's embedding and a pre-computed
         target embedding (passed as a label). Used to extend embeddings
@@ -96,10 +100,12 @@ class MSELoss(EmbedDistillLoss):
         super().__init__(model, distance_metric="mse", projection_dim=projection_dim)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with only projection_dim.
         return {"projection_dim": self.projection_dim}
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the multilingual knowledge distillation paper.
         return """
 @inproceedings{reimers-2020-multilingual-sentence-bert,
     title = "Making Monolingual Sentence Embeddings Multilingual using Knowledge Distillation",

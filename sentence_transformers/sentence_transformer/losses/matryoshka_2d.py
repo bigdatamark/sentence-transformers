@@ -1,3 +1,5 @@
+# [MODULE DOC] 2D Matryoshka loss modifier: combines the adaptive layer modifier (train earlier layers) with the Matryoshka
+# modifier (train truncated dimensions), following 2DMSE.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -12,6 +14,8 @@ from .matryoshka import MatryoshkaLoss
 
 
 class Matryoshka2dLoss(AdaptiveLayerLoss):
+    # [CLASS DOC] Subclass of AdaptiveLayerLoss whose wrapped loss is a MatryoshkaLoss built around the user's loss. Defaults sample
+    # one layer and one dimension per step.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -26,6 +30,9 @@ class Matryoshka2dLoss(AdaptiveLayerLoss):
         kl_temperature: float = 0.3,
         layer_weighting: Literal["uniform", "log", "linear"] | Callable[[int], float] = "uniform",
     ) -> None:
+        # [FUNCTION DOC] Build a MatryoshkaLoss from the model, loss, dims, weights and n_dims_per_step (which validates the dims), then
+        # initialize the adaptive layer parent with it and the layer settings (n_layers_per_step, last/prior layer weights,
+        # KL weight and temperature, layer weighting).
         """
         The Matryoshka2dLoss can be seen as a loss *modifier* that combines the :class:`AdaptiveLayerLoss` and the
         :class:`MatryoshkaLoss`. This allows you to train an embedding model that 1) allows users to specify the number
@@ -140,6 +147,7 @@ class Matryoshka2dLoss(AdaptiveLayerLoss):
         )
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the adaptive layer config merged with the Matryoshka config (the latter's keys, including "loss", win).
         return {
             **super().get_config_dict(),
             **self.loss.get_config_dict(),
@@ -147,6 +155,7 @@ class Matryoshka2dLoss(AdaptiveLayerLoss):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for 2D Matryoshka Sentence Embeddings.
         return """
 @misc{li20242d,
     title={2D Matryoshka Sentence Embeddings},
