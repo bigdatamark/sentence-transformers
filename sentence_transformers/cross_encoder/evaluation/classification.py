@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Classification evaluator for CrossEncoder: binary metrics with threshold search for single-output models,
+# and F1 variants for multi-class models; logs and optionally appends results to CSV.
 from __future__ import annotations
 
 import csv
@@ -18,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 class CrossEncoderClassificationEvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # Evaluator holding sentence pairs, gold integer labels (as a numpy array), name, optional prompt name,
+    # batch size, progress-bar flag, CSV flag and CSV file name (class name, optional underscore name,
+    # "_results.csv"). CSV headers and the primary metric are set at call time based on the model's label count.
     """
     Evaluate a CrossEncoder model based on the accuracy of the predicted class vs. the gold labels.
     The evaluator expects a list of sentence pairs and a list of gold labels. If the model has a single output,
@@ -84,6 +91,10 @@ class CrossEncoderClassificationEvaluator(BaseEvaluator):
         write_csv: bool = True,
         **kwargs,
     ):
+        # [FUNCTION DOC]
+        # Validate and store settings. Raises ValueError if pairs and labels differ in length. A None progress-bar
+        # flag becomes true when the logger level is INFO or DEBUG.
+        # KNOWN ISSUE: Extra keyword arguments are accepted but silently ignored, so misspelled options pass unnoticed.
         if len(sentence_pairs) != len(labels):
             raise ValueError("sentence_pairs and labels must have the same length")
 
@@ -102,6 +113,15 @@ class CrossEncoderClassificationEvaluator(BaseEvaluator):
     def __call__(
         self, model: CrossEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Evaluate the model. Logs a header with epoch/step info, predicts scores for all pairs (numpy, configured
+        # prompt name, batch size, progress bar). For a single-output model: finds the best accuracy and its score
+        # threshold and the best F1 with its precision, recall and threshold (higher scores meaning positive, using
+        # the binary classification evaluator's helpers), computes average precision, logs them, sets the matching
+        # CSV headers and primary metric "average_precision". For multi-output models: takes the argmax class per
+        # pair, computes macro, micro and weighted F1, logs them, sets headers and primary metric "f1_macro".
+        # Appends a CSV row (creating directory/file and headers if needed) when an output path is given and CSV
+        # writing is on. Returns the metrics prefixed with the evaluator name after storing them in the model card.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"

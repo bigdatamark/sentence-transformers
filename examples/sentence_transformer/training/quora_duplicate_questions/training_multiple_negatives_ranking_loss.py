@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train stsb-distilbert-base with MultipleNegativesRankingLoss on the first 100k Quora duplicates
+# triplets (next 1000 rows as eval dataset), batch 64, 1 epoch, fp16, NO_DUPLICATES, eval/save every 250 steps.
+# A SequentialEvaluator runs BinaryClassificationEvaluator (last 1000 pair-class train rows), ParaphraseMiningEvaluator
+# (quora-duplicates-mining dev) and InformationRetrievalEvaluator (BeIR/quora validation qrels with the corpus shrunk to
+# relevant docs plus 10,000 unseeded random docs), with the IR score as main score; it runs before and during training.
+# Saves to output/training_mnrl-<timestamp>/final and tries a Hub push. Side effects: network, disk, GPU, logging.
 """
 This scripts demonstrates how to train a sentence embedding model for Information Retrieval.
 

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: unsupervised SimCSE on AskUbuntu questions with FacebookAI/roberta-base (max length 32, mean pooling).
+# Training questions exclude any text in the dev/test reranking sets; each row gets an identical copy column so
+# MultipleNegativesRankingLoss treats (text, text) as a positive pair (dropout provides the difference) with in-batch
+# negatives. Batch 128, 1 epoch, lr 5e-5, 10% warmup, fp16, eval every 10%, no checkpoints; RerankingEvaluators on dev
+# and test before and after training. Saves to output/askubuntu-simcse-...-latest and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
 import logging
 from datetime import datetime
 

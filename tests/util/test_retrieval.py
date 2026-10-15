@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for sentence_transformers.util.retrieval: semantic_search against a brute-force cosine top-k,
+# paraphrase_mining with a real model, and community_detection over small hand-built and random embeddings.
 from __future__ import annotations
 
 import numpy as np
@@ -10,6 +13,10 @@ from sentence_transformers.util.similarity import pytorch_cos_sim
 
 
 def test_semantic_search() -> None:
+    # [FUNCTION DOC]
+    # Searches 20 random queries against 1000 random 100-dimensional documents with top 10 and small query and
+    # corpus chunk sizes, then asserts the hit counts and that every hit's corpus id and score match the top-k
+    # of the full cosine similarity matrix (scores within 0.001).
     """Tests util.semantic_search function"""
     num_queries = 20
     num_k = 10
@@ -34,6 +41,9 @@ def test_semantic_search() -> None:
 
 @pytest.mark.slow
 def test_paraphrase_mining() -> None:
+    # [FUNCTION DOC]
+    # Slow: loads all-MiniLM-L6-v2 (network), mines paraphrases among eight sentences and asserts every pair
+    # scoring above 0.5 is one of the expected near-duplicate index pairs.
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     sentences = [
         "This is a test",
@@ -53,6 +63,8 @@ def test_paraphrase_mining() -> None:
 
 
 def test_community_detection_two_clear_communities():
+    # [FUNCTION DOC]
+    # Asserts two well-separated clusters of three points are returned as two communities at threshold 0.8.
     """Test case with two clear communities."""
     embeddings = torch.tensor(
         [
@@ -73,6 +85,8 @@ def test_community_detection_two_clear_communities():
 
 
 def test_community_detection_no_communities_high_threshold():
+    # [FUNCTION DOC]
+    # Asserts three orthogonal vectors with threshold 0.99 yield no communities.
     """Test case where no communities are found due to a high threshold."""
     embeddings = torch.tensor(
         [
@@ -87,6 +101,8 @@ def test_community_detection_no_communities_high_threshold():
 
 
 def test_community_detection_all_points_in_one_community():
+    # [FUNCTION DOC]
+    # Asserts three similar points form one community at threshold 0.5.
     """Test case where all points form a single community due to a low threshold."""
     embeddings = torch.tensor(
         [
@@ -103,6 +119,8 @@ def test_community_detection_all_points_in_one_community():
 
 
 def test_community_detection_min_community_size_filtering():
+    # [FUNCTION DOC]
+    # Asserts a minimum community size of 3 keeps only the three-point cluster.
     """Test case where communities are filtered based on minimum size."""
     embeddings = torch.tensor(
         [
@@ -120,6 +138,8 @@ def test_community_detection_min_community_size_filtering():
 
 
 def test_community_detection_overlapping_communities():
+    # [FUNCTION DOC]
+    # Asserts an in-between point is assigned to only one community, giving communities of four and two points.
     """Test case with overlapping communities (resolved by the function)."""
     embeddings = torch.tensor(
         [
@@ -140,6 +160,8 @@ def test_community_detection_overlapping_communities():
 
 
 def test_community_detection_numpy_input():
+    # [FUNCTION DOC]
+    # Asserts a numpy array input works and yields a single community.
     """Test case where input is a numpy array instead of a torch tensor."""
     embeddings = np.array(
         [
@@ -156,6 +178,9 @@ def test_community_detection_numpy_input():
 
 
 def test_community_detection_large_batch_size():
+    # [FUNCTION DOC]
+    # Runs on 1000 random 128-dimensional vectors with batch size 256 and asserts every returned community has
+    # at least 10 members.
     """Test case with a large dataset and batching."""
     embeddings = torch.rand(1000, 128)  # Random embeddings
     result = community_detection(embeddings, threshold=0.8, min_community_size=10, batch_size=256)
@@ -165,6 +190,9 @@ def test_community_detection_large_batch_size():
 
 @pytest.mark.parametrize("min_community_size", [5, 10, 30])
 def test_community_detection_similarities_equal_to_threshold(min_community_size: int):
+    # [FUNCTION DOC]
+    # Parametrized over minimum community sizes; with 200 identical rows and threshold exactly 1.0 asserts one
+    # community containing all 200 points (members at exactly the threshold are not truncated).
     """Members whose similarity equals the threshold exactly must not be truncated.
 
     The candidate window grew only while the smallest candidate was strictly greater than
@@ -184,6 +212,8 @@ def test_community_detection_similarities_equal_to_threshold(min_community_size:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
 def test_community_detection_gpu_support():
+    # [FUNCTION DOC]
+    # Skipped without CUDA: asserts community detection works on GPU tensors and yields one community.
     """Test case for GPU support (if available)."""
     embeddings = torch.tensor(
         [

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: shared utilities for the ONNX/OpenVINO backends: redirecting saves into a backend subfolder, deciding whether a
+# model must be exported or an existing exported file can be loaded (adjusting file_name/subfolder), warning users to save
+# exported models, and writing exported/optimized/quantized model files to a local directory or a Hub repository
+# (optionally as a pull request with a generated description).
 from __future__ import annotations
 
 import logging
@@ -19,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def _save_pretrained_wrapper(_save_pretrained_fn: Callable, subfolder: str) -> Callable[..., None]:
+    # [FUNCTION DOC]
+    # HELPER: wrap a save function so it saves into <save_directory>/<subfolder>. Input: the original function and subfolder
+    # name. Returns a wrapper taking save_directory and keyword arguments that creates the subfolder (if needed) and calls the
+    # original function with the subfolder path, returning its result.
     """
     Wraps the save_pretrained method of a model to save to a subfolder.
 
@@ -31,6 +40,8 @@ def _save_pretrained_wrapper(_save_pretrained_fn: Callable, subfolder: str) -> C
     """
 
     def wrapper(save_directory: str | Path, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Create <save_directory>/<subfolder> and delegate to the wrapped save function with that path and the given kwargs.
         os.makedirs(Path(save_directory) / subfolder, exist_ok=True)
         return _save_pretrained_fn(Path(save_directory) / subfolder, **kwargs)
 
@@ -45,6 +56,19 @@ def backend_should_export(
     target_file_glob: str,
     backend_name: str,
 ) -> tuple[bool, dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Decide whether to export the model to the backend or load an existing file, updating model_kwargs.
+    # Inputs: load_path (Path of the repo id or local dir), is_local, model_kwargs (reads/pops "export", reads "file_name",
+    # "subfolder", "revision", "token"), target_file_name (default file name), target_file_glob, backend_name (human-readable;
+    # lowercased it is also the backend subfolder name).
+    # Behavior: pops "export"; a truthy value is returned immediately. Otherwise builds the primary path
+    # (<subfolder>/<file_name> or <file_name>) and the secondary path inside the backend folder, and lists candidate files
+    # matching the glob recursively (local glob, or Hub list_repo_files filtered with fnmatch). If the primary path is absent but
+    # the secondary exists, sets subfolder to include the backend folder and file_name explicitly, warning when several
+    # candidates exist and no file_name was given. Export defaults to "no file found" unless export was explicitly False. If
+    # file_name contains directories, they are moved into subfolder and file_name becomes the last part. When exporting, logs a
+    # warning and, if other candidate files exist, a hint naming the first one.
+    # Returns (export flag, the same mutated model_kwargs dict). Side effects: filesystem glob or Hub API call, logging.
     """
     Determines whether the model should be exported to the backend, or if it can be loaded directly.
     Also update the `file_name` and `subfolder` model_kwargs if necessary.
@@ -136,6 +160,9 @@ def backend_should_export(
 
 
 def backend_warn_to_save(model_name_or_path: str, is_local: bool, backend_name: str) -> None:
+    # [FUNCTION DOC]
+    # Log a warning recommending saving a freshly exported model: suggests save_pretrained with the path for local models, or
+    # push_to_hub with create_pr for Hub models. Returns None.
     """
     Warns the user to save the model if they just exported it.
 
@@ -163,6 +190,19 @@ def save_or_push_to_hub_model(
     backend: str = "onnx",
     model: SentenceTransformer | SparseEncoder | CrossEncoder | MultiVectorEncoder | None = None,
 ):
+    # [FUNCTION DOC]
+    # Run an export function into a temporary directory and save its main output locally or upload it to the Hub.
+    # Inputs: export_function (called with the temp directory path), export_function_name (used in the PR text), config (its
+    # repr is shown in the PR description), model_name_or_path (local directory or repo id), push_to_hub, create_pr,
+    # file_suffix, backend ("onnx" or "openvino"), and model (used to pick the PR usage example).
+    # Behavior: target file name is model_<suffix>.onnx or openvino_model_<suffix>.xml. For OpenVINO, the exported
+    # openvino_model.xml/.bin inside the temp "openvino" subfolder are renamed to the suffixed names; for ONNX the suffixed file
+    # is moved into a temp "onnx" subfolder. When pushing, uploads that folder to path "<backend>" of the repo with a commit
+    # message, and with create_pr a Markdown description containing the formatted config and a loading example tailored to
+    # SparseEncoder, SentenceTransformer (also when model is None), MultiVectorEncoder or CrossEncoder (empty otherwise).
+    # Without pushing, copies the file (and the OpenVINO .bin) into <model_name_or_path>/<backend>, creating it.
+    # Returns None. Side effects: temporary files, local writes or Hub upload/PR creation.
+    # KNOWN ISSUE: any backend other than "onnx" or "openvino" leaves file_name unassigned and raises UnboundLocalError.
     from sentence_transformers import CrossEncoder, MultiVectorEncoder, SentenceTransformer, SparseEncoder
 
     if backend == "onnx":

@@ -1,3 +1,8 @@
+# [MODULE DOC] XTR (eXtendable Token Retrieval) scoring functions for multi-vector (ColBERT-style) models.
+# Provides a contrastive cross-product scorer, a knowledge-distillation (per-query N-way) scorer,
+# a pairwise scorer, and two small callable classes that store top_k / chunk_elements so they can be
+# passed as a loss similarity function. Scores are float32 tensors; inputs may be lists, numpy arrays
+# or tensors and are converted to tensors (integer embeddings upcast to float32).
 from __future__ import annotations
 
 import numpy as np
@@ -15,6 +20,26 @@ def xtr_scores(
     top_k: int = 256,
     chunk_elements: int | None = None,
 ) -> torch.Tensor:
+    # [FUNCTION DOC] Compute the full XTR score matrix between Q queries and Q groups of N documents each.
+    # Inputs: query token embeddings shaped (Q, query_tokens, dim); document embeddings shaped
+    # (Q, N, doc_tokens, dim); optional boolean-like masks for query tokens (Q, query_tokens) and document
+    # tokens (Q, N, doc_tokens); top_k (positive int, booleans rejected); chunk_elements (optional element
+    # budget for chunked matmul).
+    # Steps: raise ValueError if top_k is not a positive integer. Convert inputs to tensors, upcast integer
+    # ones to float. Flatten documents to (Q*N, doc_tokens, dim) and queries to (Q*query_tokens, dim). If no
+    # document mask is given, derive one marking all-zero rows as padding; same for queries. Compute every
+    # query-token vs document-token dot product (either in one matmul or in chunks of documents sized to
+    # stay under chunk_elements, then concatenated), giving (Q, query_tokens, Q*N, doc_tokens); fill padded
+    # document tokens with the dtype minimum. For each query token, flatten over all documents' tokens and
+    # keep only the global top min(top_k, total) values; every other position is reset to the dtype minimum
+    # (done in place on the score buffer). Build a boolean "retrieved" indicator per (query, query token,
+    # document) meaning at least one real token of that document was in the top-k (pad retrievals go to a
+    # discarded extra bucket). Take the per-document max over tokens in float32, set it to 0 where nothing was
+    # retrieved, zero it for padded query tokens, and drop those from the indicator. Score = sum over query
+    # tokens of the maxima divided by Z, the count of query tokens that retrieved the document (clamped to at
+    # least 1). Documents with no real tokens get a sentinel below all real scores via a helper.
+    # Returns a float32 tensor (Q, Q*N), column j*N+n is query j's n-th document; positive for query i is at
+    # column i*N. Side effects: none beyond in-place work on internal buffers.
     """XTR (eXtendable Token Retrieval) contrastive scoring with global top-k token retrieval.
 
     For each query token, the top-k matches are selected globally across all in-batch document tokens
@@ -135,6 +160,9 @@ def xtr_kd_scores(
     top_k: int = 256,
     chunk_elements: int | None = None,
 ) -> torch.Tensor:
+    # [FUNCTION DOC] Knowledge-distillation variant: compute the full XTR score matrix (same arguments as the contrastive
+    # scorer) and gather for each query i only its own N documents (columns i*N through i*N+N-1).
+    # Returns a float32 tensor (Q, N). Raises whatever the underlying scorer raises (ValueError for bad top_k).
     """XTR scoring for knowledge distillation.
 
     Same global top-k scoring as :func:`xtr_scores`, but returns each query's own N-way document scores
@@ -163,6 +191,10 @@ def xtr_scores_pairwise(
     top_k: int = 256,
     chunk_elements: int | None = None,
 ) -> torch.Tensor:
+    # [FUNCTION DOC] Score matched (query_i, document_i) pairs. If document embeddings are 3-D (Q, doc_tokens, dim), add a
+    # singleton N axis; likewise a 2-D document mask. Delegate to the KD scorer and squeeze the trailing N=1 axis.
+    # Returns a float32 1-D tensor of length Q. Because top-k is global over the batch, a pair's score depends
+    # on the other documents in the batch.
     """Pairwise XTR scoring: compute the XTR score for matched ``(query_i, document_i)`` pairs.
 
     Returns a float32 1D tensor of length ``batch_size``. XTR's top-k runs globally over the batch's
@@ -187,6 +219,9 @@ def xtr_scores_pairwise(
 
 
 class XTRScores:
+    # [CLASS DOC] Reusable callable configuration of the contrastive XTR scorer, for use as a loss similarity function.
+    # Attributes: top_k (int, default 256) and chunk_elements (optional int, keyword-only). No validation at
+    # construction; invalid top_k surfaces at call time.
     """Configured, reusable :func:`xtr_scores` callable for use as a loss ``similarity_fct``.
 
     Stores ``top_k`` / ``chunk_elements`` so they don't have to be re-passed on every call (the bare
@@ -199,10 +234,12 @@ class XTRScores:
     """
 
     def __init__(self, top_k: int = 256, *, chunk_elements: int | None = None) -> None:
+        # [FUNCTION DOC] Store top_k and chunk_elements on the instance.
         self.top_k = top_k
         self.chunk_elements = chunk_elements
 
     def get_config_dict(self) -> dict[str, int | None]:
+        # [FUNCTION DOC] Return a dict with keys "top_k" and "chunk_elements" holding the stored values (used for config/model cards).
         return {"top_k": self.top_k, "chunk_elements": self.chunk_elements}
 
     def __call__(
@@ -212,6 +249,8 @@ class XTRScores:
         queries_mask: torch.Tensor | None = None,
         documents_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # [FUNCTION DOC] Call the contrastive XTR scorer with the given embeddings and masks plus the stored top_k and
+        # chunk_elements; returns its (Q, Q*N) score tensor.
         return xtr_scores(
             queries_embeddings,
             documents_embeddings,
@@ -223,6 +262,7 @@ class XTRScores:
 
 
 class XTRKDScores(XTRScores):
+    # [CLASS DOC] Same as the contrastive callable class but its call returns the KD (Q, N) scores.
     """Configured, reusable :func:`xtr_kd_scores` callable (KD ``(Q, N)`` output). See :class:`XTRScores`."""
 
     def __call__(
@@ -232,6 +272,7 @@ class XTRKDScores(XTRScores):
         queries_mask: torch.Tensor | None = None,
         documents_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # [FUNCTION DOC] Call the KD XTR scorer with the given embeddings and masks plus the stored settings; returns (Q, N) scores.
         return xtr_kd_scores(
             queries_embeddings,
             documents_embeddings,

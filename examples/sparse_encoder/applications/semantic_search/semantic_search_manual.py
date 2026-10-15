@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Script: in-memory sparse semantic search. Encodes a 9-sentence corpus with SPLADE (naver/splade-cocondenser-ensembledistil)
+# via encode_document and 3 queries via encode_query, runs util.semantic_search with the model's similarity (dot product)
+# for the top 5 hits per query, and for each hit prints the score, sentence and the 10 tokens contributing most, computed
+# with model.intersection (element-wise product of query and document vectors) and decode. A trailing string shows
+# sample output. Side effects: model download, stdout.
 """
 This is a simple application for sparse encoder: semantic search
 

@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Similarity functions between embeddings and the SimilarityFunction enum that maps names to them.
+# Single-vector functions (cosine, dot, Manhattan, Euclidean, each in "all pairs" matrix form and
+# "aligned pairs" vector form) accept lists, numpy arrays or tensors, dense or sparse COO, and
+# upcast sub-float32 inputs to float32. Distance-based ones return negated distances so that higher
+# is more similar. The multi-vector MaxSim family (late interaction, ColBERT style) scores ragged
+# token-embedding collections with masks, processed in greedily packed chunks under an element
+# budget (default 100M elements) to bound memory; documents with no usable tokens get a sentinel
+# score of -1e9. Also includes the AnglE angle similarity. Uses the transformers logger.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -22,6 +31,9 @@ logger = logging.get_logger(__name__)
 
 
 def _match_layouts(a: Tensor, b: Tensor) -> tuple[Tensor, Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: If exactly one of the two tensors is sparse, converts the dense one to sparse COO;
+    # returns both tensors (otherwise unchanged).
     """
     Converts the dense tensor to sparse COO if exactly one of the two inputs is sparse, so that mixed inputs can
     reuse the all-sparse computations. The lone dense operand in such a mix typically still holds mostly zeros
@@ -43,6 +55,8 @@ def _match_layouts(a: Tensor, b: Tensor) -> tuple[Tensor, Tensor]:
 
 
 def pytorch_cos_sim(a: Tensor, b: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Legacy alias of cos_sim; returns its result.
     """
     Computes the cosine similarity between two tensors.
 
@@ -57,6 +71,9 @@ def pytorch_cos_sim(a: Tensor, b: Tensor) -> Tensor:
 
 
 def cos_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Cosine similarity matrix: converts both inputs to batched float tensors, L2-normalizes rows
+    # (dense or sparse), and returns the dense (len(a), len(b)) product of a with the transpose of b.
     """
     Computes the cosine similarity between two tensors.
 
@@ -76,6 +93,9 @@ def cos_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Ten
 
 
 def pairwise_cos_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Row-aligned cosine similarity: converts to float tensors, normalizes both, and returns the
+    # dense vector of per-row dot products. Sparse inputs use element-wise multiply and a row sum.
     """
     Computes the pairwise cosine similarity cos_sim(a[i], b[i]).
 
@@ -99,6 +119,8 @@ def pairwise_cos_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tenso
 
 
 def dot_score(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Dot product matrix: batched float tensors, returns the dense product of a with b transposed.
     """
     Computes the dot-product dot_prod(a[i], b[j]) for all i and j.
 
@@ -116,6 +138,8 @@ def dot_score(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> T
 
 
 def pairwise_dot_score(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Row-aligned dot product: element-wise product of the float tensors summed over the last axis, dense.
     """
     Computes the pairwise dot-product dot_prod(a[i], b[i]).
 
@@ -133,6 +157,10 @@ def pairwise_dot_score(a: list | np.ndarray | Tensor, b: list | np.ndarray | Ten
 
 
 def manhattan_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Negative Manhattan (L1) distance matrix. Dense inputs use the pairwise p=1 distance. If either
+    # is sparse, logs a one-time warning, matches layouts, converts to SciPy COO and computes the
+    # distances with scikit-learn, returning the negated float32 result on a's device.
     """
     Computes the manhattan similarity (i.e., negative distance) between two tensors.
     Handles sparse tensors without converting to dense when possible.
@@ -161,6 +189,9 @@ def manhattan_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) 
 
 
 def pairwise_manhattan_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Row-aligned negative Manhattan distance: float tensors with matched layouts, negated sum of
+    # absolute differences over the last axis, dense.
     """
     Computes the manhattan similarity (i.e., negative distance) between pairs of tensors.
 
@@ -179,6 +210,10 @@ def pairwise_manhattan_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray |
 
 
 def euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Negative Euclidean distance matrix. Dense inputs use the pairwise p=2 distance. Sparse inputs
+    # (after layout matching) use squared norms of each row, minus twice the dot products, plus the
+    # other side's squared norms, clamped at zero before the square root, negated and densified.
     """
     Computes the euclidean similarity (i.e., negative distance) between two tensors.
     Handles sparse tensors without converting to dense when possible.
@@ -211,6 +246,9 @@ def euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) 
 
 
 def pairwise_euclidean_sim(a: list | np.ndarray | Tensor, b: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Row-aligned negative Euclidean distance: float tensors with matched layouts, negated square root
+    # of the summed squared differences over the last axis, dense.
     """
     Computes the euclidean distance (i.e., negative distance) between pairs of tensors.
 
@@ -239,6 +277,11 @@ _EMPTY_DOCUMENT_SCORE = -1e9
 def _chunk_ranges(
     item_widths: list[int], per_item_token: int, element_budget: int, per_item_fixed: int = 0
 ) -> list[tuple[int, int]]:
+    # [FUNCTION DOC]
+    # HELPER: Greedily partitions items (given their token widths) into consecutive [start, end)
+    # ranges. Extending a chunk is refused once (per_item_token times the chunk's running max width plus
+    # per_item_fixed) times the item count would exceed element_budget; a chunk always holds at least
+    # one item. Returns the list of ranges covering all items in order.
     """Greedily pack items into ``(start, end)`` chunks whose padded cost of
     ``(per_item_token * chunk_width + per_item_fixed) * chunk_size`` elements stays under
     ``element_budget``, with a floor of one item per chunk. The cost uses each chunk's local max
@@ -274,6 +317,9 @@ def _chunk_ranges(
 def _batch_singular_input(
     embeddings: list | np.ndarray | Tensor, mask: Tensor | None
 ) -> tuple[list | np.ndarray | Tensor, Tensor | None]:
+    # [FUNCTION DOC]
+    # HELPER: A bare 2-D numpy array or tensor (one multi-vector embedding) gets a leading batch
+    # dimension, and a 1-D mask likewise. Other inputs (lists, 3-D) are returned unchanged with their mask.
     # Mirror the dense family's _convert_to_batch_tensor: a bare 2D (tokens, dim) input is one
     # multi-vector embedding (e.g. from a singular encode call), scored as a batch of one.
     if isinstance(embeddings, np.ndarray) and embeddings.ndim == 2:
@@ -292,6 +338,11 @@ def _canonicalize_side(
     mask: Tensor | np.ndarray | list | None,
     name: str,
 ) -> tuple[list | np.ndarray | Tensor, Tensor | None]:
+    # [FUNCTION DOC]
+    # HELPER: Normalizes one side of a MaxSim call. A list/tuple mask is converted per item and
+    # right-padded with zeros into one tensor; a numpy mask is converted; any other non-tensor mask
+    # raises TypeError mentioning name. Then applies the singular-input batching and returns
+    # (embeddings, mask).
     """Shared input front door for one side of a scoring call: masks become a single tensor (a list
     of per-item masks is padded to the batch), and a bare 2D input batches as a single item."""
     if isinstance(mask, (list, tuple)):
@@ -306,6 +357,9 @@ def _canonicalize_side(
 
 
 def _fit_mask_width(mask: Tensor, width: int, name: str, truncate: bool = False) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Returns the mask if its last dimension equals width; if truncate is set and it is wider,
+    # returns it cut to width; otherwise raises ValueError naming the mask and both widths.
     """Match a mask's token span to the padded embeddings. The chunk loops pass ``truncate=True``,
     since a batch-wide mask legitimately spans more than one chunk's local padding. Caller-facing
     inputs must match exactly: a mismatched mask is a construction bug, not a layout to guess at."""
@@ -317,6 +371,8 @@ def _fit_mask_width(mask: Tensor, width: int, name: str, truncate: bool = False)
 
 
 def _embeddings_device(embeddings: list | np.ndarray | Tensor) -> torch.device | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns the device of a tensor, or of the first tensor in a non-empty list; None otherwise.
     """The device multi-vector embeddings live on, or None for numpy and empty inputs."""
     if isinstance(embeddings, Tensor):
         return embeddings.device
@@ -326,6 +382,9 @@ def _embeddings_device(embeddings: list | np.ndarray | Tensor) -> torch.device |
 
 
 def _to_device(embeddings: Tensor, mask: Tensor | None, device: torch.device) -> tuple[Tensor, Tensor | None]:
+    # [FUNCTION DOC]
+    # HELPER: Moves embeddings and (separately) the optional mask to device if they are elsewhere;
+    # returns both.
     """Move one side's padded embeddings and mask onto the scoring device. The mask is checked
     separately, since a caller can hand in a cpu mask alongside gpu embeddings and the masked_fill
     kernel rejects that."""
@@ -344,6 +403,10 @@ def _pad_chunk(
     device: torch.device,
     name: str,
 ) -> tuple[Tensor, Tensor | None]:
+    # [FUNCTION DOC]
+    # HELPER: Takes items start..end of one side and the matching mask rows, pads them into a 3-D
+    # tensor with a mask, moves them to device, and trims the mask to the chunk's padded width.
+    # Returns (chunk embeddings, chunk mask).
     """Pad one chunk of a side onto the scoring device, with its mask narrowed to the chunk's local
     width. Padding the whole batch upfront instead would let one long outlier size the full
     ``(batch, max_len, dim)`` tensor: multi-GB of mostly padding on ragged input."""
@@ -357,6 +420,9 @@ def _pad_chunk(
 
 
 def _embedding_dim(embeddings: list | np.ndarray | Tensor) -> int:
+    # [FUNCTION DOC]
+    # HELPER: Returns the trailing embedding dimension: the last shape entry for arrays/tensors, or
+    # for lists the row length of the first non-empty item (1 if all items are empty).
     """The trailing embedding dimension, read without materializing a padded batch."""
     if not isinstance(embeddings, list):
         return embeddings.shape[-1]
@@ -364,6 +430,9 @@ def _embedding_dim(embeddings: list | np.ndarray | Tensor) -> int:
 
 
 def _query_token_counts(a: list | np.ndarray | Tensor, a_mask: Tensor | None) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Per-query real token count, at least 1: mask sum if a mask is given, item lengths for
+    # lists, or the number of non-all-zero token rows for padded tensors.
     """Per-item count of real query tokens for MeanMaxSim scoring: the mask sum when a mask is
     given, the item lengths for ragged lists, and the non-zero rows for padded tensors."""
     if a_mask is not None:
@@ -382,6 +451,22 @@ def maxsim(
     length_normalize: bool = False,
     device: str | torch.device | None = None,
 ) -> Tensor:
+    # [FUNCTION DOC]
+    # MaxSim score matrix between query collection a and document collection b.
+    # Inputs: a, b (3-D padded tensor, list of 2-D per-item token matrices, or a single 2-D item),
+    # optional masks (tensor, array or list of per-item masks; 0/False excludes a token), optional
+    # element budget, length_normalize flag, optional scoring device.
+    # Score for (query i, document j) is the sum over unmasked query tokens of the maximum dot product
+    # with any unmasked document token.
+    # Steps: canonicalize both sides; if either is empty return a float32 zero matrix of shape
+    # (len(a), len(b)) on the documents' (or queries') device. Optionally compute query token counts.
+    # Pad queries fully (mask must match padded width exactly, else ValueError). Compute per-document
+    # widths; the document mask must match the max width. Results live on the documents' device (or
+    # the queries' for numpy documents); scoring runs on the explicit device if given. Documents are
+    # chunked with per-item cost (num queries times query tokens plus embedding dim); each chunk is
+    # padded, scored with the chunk scorer, moved to the result device and concatenated along columns.
+    # If length_normalize, divides each row by its query token count.
+    # Returns a float32 (len(a), len(b)) tensor.
     """
     Computes the MaxSim (late-interaction) score between two collections of multi-vector embeddings.
 
@@ -466,6 +551,13 @@ def maxsim(
 
 
 def _maxsim_score_documents(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask: Tensor | None) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Scores one padded document chunk against all padded queries. If the documents have zero
+    # width, returns the empty-document sentinel for every cell. Otherwise computes all token-pair dot
+    # products (queries, documents, query tokens, document tokens), fills masked document tokens in
+    # place with the dtype minimum, takes the max over document tokens (cast to float32), multiplies by
+    # the query mask, sums over query tokens, and replaces scores of documents with no unmasked token
+    # by the sentinel. Returns a (num queries, num documents) float32 tensor.
     """Score one chunk of documents against every query, returned as ``(a_batch, b_batch)`` float32.
     Pulled out of :func:`maxsim` so the chunk loop stays readable. Reducing the chunk all the way down
     to final scores here is what makes the chunking pay off: concatenating the
@@ -503,6 +595,10 @@ def _maxsim_score_documents(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask:
 
 
 def _fill_empty_document_scores(scores: Tensor, empty: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Returns scores with entries flagged in the boolean "empty" tensor replaced by the -1e9
+    # sentinel (not in place). When not compiling and the flags are on CPU, logs a one-time warning if
+    # any document is empty (avoids device sync otherwise).
     """Overwrite the scores of documents flagged in ``empty`` (no unmasked token), whose every token
     sat at the masked-fill dtype minimum and whose sum therefore poisons downstream losses.
 
@@ -531,6 +627,14 @@ def maxsim_pairwise(
     length_normalize: bool = False,
     device: str | torch.device | None = None,
 ) -> Tensor:
+    # [FUNCTION DOC]
+    # Pairwise MaxSim: score of a[i] against b[i] for each i, same input forms and masking as maxsim.
+    # Raises ValueError if the two sides differ in item count; empty input returns an empty float32
+    # vector. Masks must match the max query/document widths. Result device is the documents' device,
+    # else the queries', else CPU; scoring device may be overridden. Pairs are chunked by document
+    # width with per-item cost (max query width plus dim) and fixed cost (max query width times dim);
+    # each chunk pads both sides, scores with the pair scorer, and results are concatenated. Optionally
+    # divides by the query token counts. Returns a float32 vector of length batch.
     """
     Computes the pairwise MaxSim (late-interaction) score between each query-document pair.
 
@@ -621,6 +725,8 @@ def mean_maxsim(
     length_normalize: bool = True,
     device: str | torch.device | None = None,
 ) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: MeanMaxSim: calls maxsim with the same arguments, length_normalize defaulting to True.
     """
     Computes the MeanMaxSim score between two collections of multi-vector embeddings: :func:`maxsim`
     divided by each query's real token count, with :func:`maxsim`'s arguments and return shape.
@@ -653,6 +759,8 @@ def mean_maxsim_pairwise(
     length_normalize: bool = True,
     device: str | torch.device | None = None,
 ) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Pairwise MeanMaxSim: calls maxsim_pairwise with length_normalize defaulting to True.
     """
     Computes the pairwise MeanMaxSim score for each query-document pair: :func:`maxsim_pairwise`
     divided by each query's real token count, with its arguments and return shape. See
@@ -671,6 +779,11 @@ def mean_maxsim_pairwise(
 
 
 def _maxsim_score_pairs(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask: Tensor | None) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Pairwise counterpart of the document-chunk scorer: per-pair token dot products,
+    # masked document tokens set to the dtype minimum, max over document tokens in float32, query mask
+    # applied, summed over query tokens, empty documents set to the sentinel. Zero-width documents
+    # yield the sentinel for all pairs. Returns a float32 vector.
     """Score one chunk of aligned query-document pairs, returned as ``(batch,)`` float32. Pulled out of
     :func:`maxsim_pairwise` so the chunk loop stays readable. The mirror of
     :func:`_maxsim_score_documents`, differing only in the einsum and the mask broadcast axes."""
@@ -695,6 +808,9 @@ def _maxsim_score_pairs(a: Tensor, b: Tensor, a_mask: Tensor | None, b_mask: Ten
 
 
 def _zero_row_mask(padded: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Returns a (B, T) mask in the input dtype: 1 where the token row has any non-zero value,
+    # 0 where the row is entirely zero (treated as padding).
     """Derive a ``(B, T)`` mask from a pre-padded ``(B, T, D)`` token-embedding tensor by treating
     all-zero rows as padding.
 
@@ -713,6 +829,11 @@ def _zero_row_mask(padded: Tensor) -> Tensor:
 
 
 def _pad_tensor_list(tensors: list[Tensor], lengths: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Stacks per-item (tokens, dim) tensors into a zero-padded (batch, max tokens, dim)
+    # tensor. On CPU uses the standard pad-sequence utility. On accelerators: plain stack if all
+    # lengths are equal; otherwise concatenates all rows and scatters them into a flat zero buffer at
+    # row index times max length plus within-item position, using a constant number of kernels.
     """Stack per-item ``(tokens_i, dim)`` embeddings into a padded ``(batch, max_tokens, dim)``.
 
     ``pad_sequence`` copies item by item, which on an accelerator is one kernel launch per item: for
@@ -741,6 +862,12 @@ def _pad_multi_vector_inputs(
     inputs: list | np.ndarray | Tensor,
     mask: Tensor | None,
 ) -> tuple[Tensor, Tensor | None]:
+    # [FUNCTION DOC]
+    # HELPER: Converts one side into a padded float tensor plus mask. Lists: each item converted to a
+    # tensor and non-float (e.g. quantized) items cast to float32, padded; if no mask is given, a mask
+    # in the embeddings' dtype is built from item lengths. Non-lists: converted to a tensor, cast to
+    # float32 if not floating; with no mask and a 3-D tensor, the mask comes from non-zero rows.
+    # Returns (padded tensor, mask or None).
     """Pad a list of variable-length multi-vector tensors into a single 3D tensor with a mask.
 
     Returns the padded tensor and either the user-provided mask or one derived from the input. For a
@@ -767,6 +894,13 @@ def _pad_multi_vector_inputs(
 
 
 def pairwise_angle_sim(x: Tensor, y: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Row-aligned AnglE angle similarity. Sparse inputs are densified with a one-time warning; inputs
+    # are converted to float tensors; an odd embedding width is zero-padded by one column. Each vector
+    # is split into real and imaginary halves; computes the complex division of x by y (scaled by the
+    # squared magnitude of y), then divides real and imaginary parts by the ratio of the magnitudes of
+    # x and y, sums all components per row and returns the absolute value (vector of length batch).
+    # KNOWN ISSUE: the sparse check accesses the is_sparse attribute before converting inputs, so list or numpy inputs (accepted by the other functions) raise AttributeError.
     """
     Computes the absolute normalized angle distance. See :class:`~sentence_transformers.sentence_transformer.losses.AnglELoss`
     or https://huggingface.co/papers/2309.12871 for more information.
@@ -812,6 +946,10 @@ def pairwise_angle_sim(x: Tensor, y: Tensor) -> Tensor:
 
 
 class SimilarityFunction(Enum):
+    # [CLASS DOC]
+    # Enum of supported similarity function names: COSINE "cosine", DOT_PRODUCT "dot" (with alias
+    # DOT), EUCLIDEAN "euclidean", MANHATTAN "manhattan", MAXSIM "maxsim", MEAN_MAXSIM "meanmaxsim".
+    # Provides static lookups from a name or member to the matrix or pairwise function.
     """
     Enum class for supported similarity functions. The following functions are supported:
 
@@ -837,6 +975,10 @@ class SimilarityFunction(Enum):
     def to_similarity_fn(
         similarity_function: str | SimilarityFunction,
     ) -> Callable[[list | np.ndarray | Tensor, list | np.ndarray | Tensor], Tensor]:
+        # [FUNCTION DOC]
+        # Converts a name or member to the enum (ValueError from the enum for unknown names) and returns the
+        # matrix function: cos_sim, dot_score, manhattan_sim, euclidean_sim, maxsim or mean_maxsim.
+        # A trailing ValueError listing possible values guards unmatched members.
         """
         Converts a similarity function name or enum value to the corresponding similarity function.
 
@@ -879,6 +1021,10 @@ class SimilarityFunction(Enum):
     def to_similarity_pairwise_fn(
         similarity_function: str | SimilarityFunction,
     ) -> Callable[[list | np.ndarray | Tensor, list | np.ndarray | Tensor], Tensor]:
+        # [FUNCTION DOC]
+        # Like to_similarity_fn but returns the row-aligned counterpart: pairwise_cos_sim,
+        # pairwise_dot_score, pairwise_manhattan_sim, pairwise_euclidean_sim, maxsim_pairwise or
+        # mean_maxsim_pairwise.
         """
         Converts a similarity function into a pairwise similarity function.
 
@@ -922,6 +1068,8 @@ class SimilarityFunction(Enum):
 
     @staticmethod
     def possible_values() -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the list of distinct enum values (aliases excluded), in definition order.
         """
         Returns a list of possible values for the SimilarityFunction enum.
 

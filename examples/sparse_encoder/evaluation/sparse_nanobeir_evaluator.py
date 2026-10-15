@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: run SparseNanoBEIREvaluator on the QuoraRetrieval and MSMARCO NanoBEIR subsets with a SPLADE model (batch 32),
+# reporting per-dataset and averaged IR metrics, then print the primary metric (mean dot NDCG@10) and its value.
+# Side effects: network, INFO logging, stdout.
 import logging
 
 from sentence_transformers import SparseEncoder

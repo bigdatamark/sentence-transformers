@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the translation evaluator: checks whether each source sentence's sparse
+# embedding is most similar to its own translation (accuracy in both directions), plus sparsity
+# statistics.
 from __future__ import annotations
 
 import logging
@@ -21,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 class SparseTranslationEvaluator(TranslationEvaluator):
+    # [CLASS DOC]
+    # Subclass of TranslationEvaluator for SparseEncoder models. Adds max_active_dims and sparsity_stats.
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.TranslationEvaluator` but is specifically designed for sparse encoder models.
 
@@ -91,6 +97,10 @@ class SparseTranslationEvaluator(TranslationEvaluator):
         write_csv: bool = True,
         max_active_dims: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores max_active_dims and empty statistics, delegates the parallel source/target sentences,
+        # progress bar, batch size, name, print_wrong_matches and CSV flag to the parent, then appends
+        # active_dims and sparsity_ratio to the CSV headers.
         self.max_active_dims = max_active_dims
         self.sparsity_stats = defaultdict(list)
         super().__init__(
@@ -107,6 +117,11 @@ class SparseTranslationEvaluator(TranslationEvaluator):
     def __call__(
         self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation: resets statistics, runs the parent evaluation (encoding through
+        # embed_inputs), averages each statistic over encode calls, adds them (prefixed with name) to the
+        # metrics, stores the metrics in the model card data, logs the sparsity, and appends both values to
+        # the last CSV row when output_path is given and write_csv is set. Returns the metrics.
         self.sparsity_stats = defaultdict(list)
         metrics = super().__call__(model=model, output_path=output_path, epoch=epoch, steps=steps)
         for key, value in self.sparsity_stats.items():
@@ -131,6 +146,9 @@ class SparseTranslationEvaluator(TranslationEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> list[Tensor]:
+        # [FUNCTION DOC]
+        # Encodes texts as a list of individual sparse CPU tensors with the batch size, progress bar,
+        # max_active_dims and extra kwargs, stacks them to record sparsity statistics, and returns the list.
         embeddings = model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -149,9 +167,13 @@ class SparseTranslationEvaluator(TranslationEvaluator):
     def store_metrics_in_model_card_data(
         self, model: SparseEncoder, metrics: dict[str, Any], epoch: int = 0, step: int = 0
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the metrics in the model's model card data for this evaluator at the given epoch and step.
         model.model_card_data.set_evaluation_metrics(self, metrics, epoch=epoch, step=step)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims

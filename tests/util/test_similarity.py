@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for sentence_transformers.util.similarity: full-matrix and pairwise cosine, dot, euclidean and manhattan
+# similarities against references (sklearn or hand-computed), sparse and mixed sparse/dense inputs, pairwise
+# angle similarity, float32 upcasting of low-precision inputs (HPS), and the late-interaction MaxSim functions
+# (maxsim and maxsim_pairwise): ragged lists, masks, chunking and element budgets, half precision accumulation,
+# sentinel scores for empty documents, devices, mask validation and length normalization (including
+# mean_maxsim). Several tests monkeypatch the private per-chunk scoring function to inspect chunk shapes.
 from __future__ import annotations
 
 import numpy as np
@@ -27,6 +34,9 @@ from tests.utils import skip_bfloat16_cpu_crash
 
 
 def test_pytorch_cos_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts cos similarity of two random 50x100 arrays matches sklearn's cosine similarity element-wise within
+    # 0.001.
     """Tests the correct computation of pytorch_cos_sim"""
     a = np.random.randn(50, 100)
     b = np.random.randn(50, 100)
@@ -39,6 +49,8 @@ def test_pytorch_cos_sim() -> None:
 
 
 def test_pairwise_cos_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts pairwise cosine similarity matches one minus sklearn's paired cosine distances.
     a = np.random.randn(50, 100)
     b = np.random.randn(50, 100)
 
@@ -50,6 +62,8 @@ def test_pairwise_cos_sim() -> None:
 
 
 def test_pairwise_euclidean_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts pairwise euclidean similarity is the negative distance (-1 and minus root 2) for hand-made inputs.
     a = np.array([[1, 0], [1, 1]], dtype=np.float32)
     b = np.array([[0, 0], [0, 0]], dtype=np.float32)
 
@@ -60,6 +74,8 @@ def test_pairwise_euclidean_sim() -> None:
 
 
 def test_pairwise_manhattan_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts pairwise manhattan similarity is the negative L1 distance (-1, -2).
     a = np.array([[1, 0], [1, 1]], dtype=np.float32)
     b = np.array([[0, 0], [0, 0]], dtype=np.float32)
 
@@ -70,6 +86,8 @@ def test_pairwise_manhattan_sim() -> None:
 
 
 def test_pairwise_dot_score_cos_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts pairwise cosine and dot scores for unit vectors are 1, 0 and -1.
     a = np.array([[1, 0], [1, 0], [1, 0]], dtype=np.float32)
     b = np.array([[1, 0], [0, 1], [-1, 0]], dtype=np.float32)
 
@@ -82,6 +100,8 @@ def test_pairwise_dot_score_cos_sim() -> None:
 
 
 def test_euclidean_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts the full euclidean similarity matrix equals the hand-computed negative distances.
     a = np.array([[1, 0], [0, 1]], dtype=np.float32)
     b = np.array([[0, 0], [0, 1]], dtype=np.float32)
 
@@ -92,6 +112,8 @@ def test_euclidean_sim() -> None:
 
 
 def test_manhattan_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts the full manhattan similarity matrix equals the hand-computed negative L1 distances.
     a = np.array([[1, 0], [0, 1]], dtype=np.float32)
     b = np.array([[0, 0], [0, 1]], dtype=np.float32)
 
@@ -101,6 +123,8 @@ def test_manhattan_sim() -> None:
 
 
 def test_dot_score_cos_sim() -> None:
+    # [FUNCTION DOC]
+    # Asserts full cosine and dot score matrices for unit vectors are 1, 0 and -1.
     a = np.array([[1, 0]], dtype=np.float32)
     b = np.array([[1, 0], [0, 1], [-1, 0]], dtype=np.float32)
 
@@ -113,6 +137,11 @@ def test_dot_score_cos_sim() -> None:
 
 
 def create_sparse_tensor(rows, cols, num_nonzero, seed=None):
+    # [FUNCTION DOC]
+    # HELPER: Builds a coalesced sparse COO tensor of shape rows by cols where each row gets num_nonzero entries at
+    # random column positions with standard normal values. Seeds the global torch RNG when a seed is given.
+    # KNOWN ISSUE: The docstring promises num_nonzero values per row, but random column indices may repeat within a
+    # row; coalescing sums duplicates, so a row can end up with fewer nonzero entries.
     """Create a sparse tensor of shape (rows, cols) with num_nonzero values per row."""
     if seed is not None:
         torch.manual_seed(seed)
@@ -136,6 +165,10 @@ def create_sparse_tensor(rows, cols, num_nonzero, seed=None):
 
 @pytest.fixture
 def sparse_tensors():
+    # [FUNCTION DOC]
+    # Fixture returning two seeded random sparse tensors of 50 rows and 1000 columns with 10 entries per row,
+    # moved to CUDA when available.
+    # KNOWN ISSUE: The docstring says the shape is (50, 100), but the code creates 1000 columns.
     """Create two large sparse tensors of shape (50, 100) each."""
     rows, cols = 50, 1000
     num_nonzero = 10  # per row
@@ -149,6 +182,8 @@ def sparse_tensors():
 
 
 def test_cos_sim_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse cosine similarity matches the dense result within 1e-5.
     """Test cosine similarity between sparse and dense representations."""
     tensor1, tensor2 = sparse_tensors
 
@@ -162,6 +197,8 @@ def test_cos_sim_sparse(sparse_tensors):
 
 
 def test_dot_score_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse dot scores match the dense result.
     """Test dot product with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -176,6 +213,8 @@ def test_dot_score_sparse(sparse_tensors):
 
 
 def test_manhattan_sim_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse manhattan similarity matches the dense result.
     """Test Manhattan similarity with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -189,6 +228,8 @@ def test_manhattan_sim_sparse(sparse_tensors):
 
 
 def test_euclidean_sim_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse euclidean similarity matches the dense result.
     """Test Euclidean similarity with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -202,6 +243,8 @@ def test_euclidean_sim_sparse(sparse_tensors):
 
 
 def test_pairwise_cos_sim_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse pairwise cosine similarity matches the dense result.
     """Test pairwise cosine similarity with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -215,6 +258,8 @@ def test_pairwise_cos_sim_sparse(sparse_tensors):
 
 
 def test_pairwise_dot_score_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse pairwise dot scores match the dense result.
     """Test pairwise dot product with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -228,6 +273,8 @@ def test_pairwise_dot_score_sparse(sparse_tensors):
 
 
 def test_pairwise_manhattan_sim_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse pairwise manhattan similarity matches the dense result.
     """Test pairwise Manhattan similarity with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -241,6 +288,8 @@ def test_pairwise_manhattan_sim_sparse(sparse_tensors):
 
 
 def test_pairwise_euclidean_sim_sparse(sparse_tensors):
+    # [FUNCTION DOC]
+    # Asserts sparse pairwise euclidean similarity matches the dense result.
     """Test pairwise Euclidean similarity with sparse tensors."""
     tensor1, tensor2 = sparse_tensors
 
@@ -254,6 +303,9 @@ def test_pairwise_euclidean_sim_sparse(sparse_tensors):
 
 
 def test_maxsim_ragged_matrix_hand_computed() -> None:
+    # [FUNCTION DOC]
+    # Asserts MaxSim over ragged query and document lists (for each pair, the sum over query tokens of the maximum
+    # dot product with any document token) gives the hand-computed 2x2 matrix.
     """MaxSim of ragged (variable-length) inputs, with a hand-computed (2, 2) score matrix."""
     queries = [
         torch.tensor([[1.0, 0.0], [0.0, 1.0]]),  # 2 tokens
@@ -272,6 +324,8 @@ def test_maxsim_ragged_matrix_hand_computed() -> None:
 
 
 def test_maxsim_list_matches_masked_padded_tensor() -> None:
+    # [FUNCTION DOC]
+    # Asserts the ragged-list path equals an explicitly zero-padded 3-D input with query and document masks.
     """The ragged-list path auto-derives a length mask. It must match an explicitly padded + masked 3D tensor."""
     queries = [torch.tensor([[1.0, 0.0], [0.0, 1.0]]), torch.tensor([[1.0, 1.0]])]
     documents = [torch.tensor([[1.0, 0.0]]), torch.tensor([[0.0, 1.0], [0.5, 0.5]])]
@@ -287,6 +341,9 @@ def test_maxsim_list_matches_masked_padded_tensor() -> None:
 
 
 def test_maxsim_document_mask_excludes_padding_tokens() -> None:
+    # [FUNCTION DOC]
+    # Asserts a masked-out document token is excluded from the max even if it has the highest similarity, and that
+    # without the mask the score is larger.
     """A masked-out document token must not participate in the max, even with the highest similarity."""
     query = torch.tensor([[[1.0, 0.0]]])  # (1 document-query, 1 token, dim 2)
     document_real_only = torch.tensor([[[0.8, 0.6]]])  # similarity 0.8
@@ -301,6 +358,8 @@ def test_maxsim_document_mask_excludes_padding_tokens() -> None:
 
 
 def test_maxsim_negative_similarities_survive_padding() -> None:
+    # [FUNCTION DOC]
+    # Asserts padding of a shorter document does not raise negative MaxSim scores to zero.
     """A padding token (from a shorter document) must not inflate a negative MaxSim score to 0."""
     query = [torch.tensor([[1.0, 0.0]])]  # 1 query, 1 token
     documents = [
@@ -314,6 +373,8 @@ def test_maxsim_negative_similarities_survive_padding() -> None:
 
 
 def test_maxsim_query_mask_excludes_query_tokens() -> None:
+    # [FUNCTION DOC]
+    # Asserts masking a query token removes its contribution from the sum.
     """MaxSim sums over query tokens. Masking a query token drops its contribution from the sum."""
     query = torch.tensor([[[1.0, 0.0], [0.0, 1.0]]])  # 2 query tokens
     document = torch.tensor([[[1.0, 0.0]]])  # token0 similarity 1, token1 similarity 0
@@ -323,6 +384,8 @@ def test_maxsim_query_mask_excludes_query_tokens() -> None:
 
 
 def test_maxsim_pairwise_matches_maxsim_diagonal() -> None:
+    # [FUNCTION DOC]
+    # Asserts maxsim_pairwise equals the diagonal of the full maxsim matrix for seeded random ragged inputs.
     """maxsim_pairwise(q, d) must equal the diagonal of the full maxsim(q, d) matrix, even with padding."""
     # randn gives mixed-sign similarities and the documents have different lengths, so the padded maxsim
     # path and the unpadded pairwise path only agree if masked padding tokens are excluded from the max.
@@ -346,6 +409,9 @@ def test_maxsim_pairwise_matches_maxsim_diagonal() -> None:
 )
 @pytest.mark.parametrize("sparse_first", [True, False])
 def test_similarity_mixed_sparse_dense(sparse_tensors, similarity_fn, pairwise_similarity_fn, sparse_first) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over full/pairwise function pairs and which operand is sparse; asserts mixed sparse/dense inputs
+    # give the same full and pairwise results as all-dense inputs.
     """Test that mixing a sparse and a dense operand matches the all-dense result."""
     tensor1, tensor2 = sparse_tensors
 
@@ -365,6 +431,9 @@ def test_similarity_mixed_sparse_dense(sparse_tensors, similarity_fn, pairwise_s
 
 @pytest.mark.parametrize("sparse_first", [True, False])
 def test_pairwise_angle_sim_mixed_sparse_dense(sparse_tensors, sparse_first) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over which operand is sparse; asserts pairwise angle similarity with mixed inputs equals the
+    # all-dense result.
     """Test that mixing a sparse and a dense operand matches the all-dense result."""
     tensor1, tensor2 = sparse_tensors
 
@@ -379,6 +448,10 @@ def test_pairwise_angle_sim_mixed_sparse_dense(sparse_tensors, sparse_first) -> 
 
 
 def test_pairwise_angle_sim_even_and_odd_sparse_embeddings(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Encodes four sentences with the tiny SPLADE model as dense tensors (even vocabulary dimension), computes
+    # pairwise angle similarity on sparse versions, then pads one zero column to make the dimension odd and asserts
+    # the result is unchanged.
     """Ensure pairwise_angle_sim works for even and artificially odd dims."""
 
     model = splade_bert_tiny_model
@@ -415,6 +488,8 @@ LOW_PRECISION_DTYPES = [torch.float16, torch.bfloat16]
 
 @pytest.fixture
 def low_precision_embeddings() -> tuple[torch.Tensor, torch.Tensor]:
+    # [FUNCTION DOC]
+    # Fixture returning seeded random float32 tensors of shape 4x32 and 50x32.
     generator = torch.Generator().manual_seed(0)
     a = torch.randn(4, 32, generator=generator)
     b = torch.randn(50, 32, generator=generator)
@@ -424,6 +499,8 @@ def low_precision_embeddings() -> tuple[torch.Tensor, torch.Tensor]:
 @pytest.mark.parametrize("fn", [cos_sim, dot_score])
 @pytest.mark.parametrize("dtype", LOW_PRECISION_DTYPES)
 def test_scores_are_float32_for_low_precision_inputs(fn, dtype, low_precision_embeddings) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over cos_sim/dot_score and float16/bfloat16; asserts scores are float32.
     """Low-precision embeddings must still yield float32 scores (HPS)."""
     a, b = low_precision_embeddings
     scores = fn(a.to(dtype), b.to(dtype))
@@ -433,6 +510,8 @@ def test_scores_are_float32_for_low_precision_inputs(fn, dtype, low_precision_em
 @pytest.mark.parametrize("fn", [pairwise_cos_sim, pairwise_dot_score])
 @pytest.mark.parametrize("dtype", LOW_PRECISION_DTYPES)
 def test_pairwise_scores_are_float32_for_low_precision_inputs(fn, dtype) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over pairwise cosine/dot and low-precision dtypes; asserts pairwise scores are float32.
     generator = torch.Generator().manual_seed(0)
     a = torch.randn(16, 32, generator=generator).to(dtype)
     b = torch.randn(16, 32, generator=generator).to(dtype)
@@ -445,6 +524,11 @@ def test_pairwise_scores_are_float32_for_low_precision_inputs(fn, dtype) -> None
     [torch.float16, pytest.param(torch.bfloat16, marks=skip_bfloat16_cpu_crash)],
 )
 def test_hps_collapses_spurious_ties(dtype, low_precision_embeddings) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over float16 and bfloat16 (skipped on crashing Windows setups); expected to fail on torch 2.5.0
+    # or older. Compares the number of unique scores of a float32 reference, low-precision inputs scored by cos_sim
+    # (upcast), and a naive low-precision normalized matmul; asserts the naive version has ties, the upcast one has
+    # at least as many unique values as naive and at most one fewer than the reference.
     """Upcasting the scoring step recovers the tie structure of float32.
 
     A naive low-precision matmul buckets scores coarsely and produces spurious
@@ -475,6 +559,8 @@ def test_hps_collapses_spurious_ties(dtype, low_precision_embeddings) -> None:
 
 @pytest.mark.parametrize("fn", [cos_sim, dot_score])
 def test_float32_inputs_are_unchanged(fn, low_precision_embeddings) -> None:
+    # [FUNCTION DOC]
+    # Asserts float32 inputs give float32 scores that are identical across repeated calls on cloned inputs.
     """HPS is a no-op for embeddings that are already float32."""
     a, b = low_precision_embeddings
     scores = fn(a, b)
@@ -484,6 +570,8 @@ def test_float32_inputs_are_unchanged(fn, low_precision_embeddings) -> None:
 
 @pytest.mark.parametrize("dtype", LOW_PRECISION_DTYPES)
 def test_low_precision_scores_match_float32_reference(dtype, low_precision_embeddings) -> None:
+    # [FUNCTION DOC]
+    # Asserts low-precision cosine scores are within 1e-2 of the float32 reference.
     """Scores from upcast low-precision embeddings stay close to the float32 reference."""
     a, b = low_precision_embeddings
     reference = cos_sim(a, b)
@@ -492,6 +580,9 @@ def test_low_precision_scores_match_float32_reference(dtype, low_precision_embed
 
 
 def test_maxsim_document_chunking_matches_unchunked() -> None:
+    # [FUNCTION DOC]
+    # With seeded normalized 3-D queries and documents and random masks (first token always kept), asserts chunked
+    # MaxSim at several element budgets equals the unchunked result within 1e-6.
     """The chunked path masks and sums per chunk (bounding peak memory), which must be numerically
     identical to the single-einsum path, including with query and document masks."""
     generator = torch.Generator().manual_seed(7)
@@ -510,6 +601,9 @@ def test_maxsim_document_chunking_matches_unchunked() -> None:
 
 
 def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
+    # [FUNCTION DOC]
+    # With ragged document lists including a long outlier, asserts chunking (padding per chunk) equals the
+    # unchunked result, also when a caller-provided global-width mask is truncated to each chunk's width.
     """Ragged document lists are padded per chunk, so one long outlier document no longer sizes the
     padding of every chunk (the multi-GB-allocation failure mode on large corpora). Must stay
     numerically identical to the unchunked globally-padded path."""
@@ -536,6 +630,8 @@ def test_maxsim_list_documents_chunking_pads_per_chunk() -> None:
 
 
 def test_maxsim_singular_inputs_score_as_batch_of_one() -> None:
+    # [FUNCTION DOC]
+    # Asserts a bare 2-D query or document is treated as a batch of one, on either side, also for numpy inputs.
     """Mirrors the dense family's similarity, where a singular (unbatched) embedding auto-batches:
     a bare 2D (tokens, dim) input, e.g. from a singular encode call, scores as a batch of one."""
     query = torch.randn(5, 8)
@@ -552,6 +648,8 @@ def test_maxsim_singular_inputs_score_as_batch_of_one() -> None:
 
 
 def test_maxsim_pairwise_singular_inputs_score_as_batch_of_one() -> None:
+    # [FUNCTION DOC]
+    # Asserts maxsim_pairwise also treats bare 2-D inputs (and numpy inputs, and 1-D masks) as a batch of one.
     """maxsim_pairwise must auto-batch singular inputs just like maxsim, so a user who reaches for
     similarity_pairwise on singular encode outputs does not hit the einsum crash instead."""
     query = torch.randn(5, 8)
@@ -572,6 +670,9 @@ def test_maxsim_pairwise_singular_inputs_score_as_batch_of_one() -> None:
 
 
 def test_maxsim_pairwise_derives_padding_mask_from_zero_rows() -> None:
+    # [FUNCTION DOC]
+    # With all-negative similarities, asserts pre-padded 3-D inputs without masks give the same pairwise scores as
+    # ragged lists, so zero rows are treated as padding on both the tensor and per-pair paths.
     """Pre-padded 3D input without a mask must have its zero rows excluded from the max, both in the
     per-pair loop (mixed list + 3D, whose 2D slices keep their padding rows) and in the tensor branch.
     Visible with all-negative similarities, where a padding zero would beat every real token."""
@@ -589,6 +690,8 @@ def test_maxsim_pairwise_derives_padding_mask_from_zero_rows() -> None:
 
 
 def test_maxsim_integer_embeddings_upcast() -> None:
+    # [FUNCTION DOC]
+    # Asserts int8 inputs are upcast to float32 and match float inputs, for ragged, padded and pairwise paths.
     """Quantized integer embeddings (encode(precision="int8")) are upcast to float so einsum and the
     finfo-based masking work, and the scores match float inputs with the same values."""
     queries = [torch.tensor([[3, -2], [0, 1]], dtype=torch.int8), torch.tensor([[1, 1]], dtype=torch.int8)]
@@ -615,6 +718,10 @@ def test_maxsim_integer_embeddings_upcast() -> None:
 
 
 def test_chunk_ranges_budget_packing() -> None:
+    # [FUNCTION DOC]
+    # Asserts the private chunk range packer greedily groups items so that the per-token cost times the chunk's
+    # max width times its count (plus an optional fixed per-item cost) stays within the budget, isolates outliers,
+    # gives a single chunk for a huge budget, and always gives an over-budget single item its own chunk.
     """Greedy packing keeps each chunk's per_item_token * width * count under the budget,
     isolates a long outlier in its own chunk, and never emits an empty chunk."""
     # Budget 256 at 16 elements per item token allows width * count <= 16.
@@ -637,6 +744,9 @@ def test_chunk_ranges_budget_packing() -> None:
 
 
 def test_maxsim_element_budget_matches_single_chunk() -> None:
+    # [FUNCTION DOC]
+    # Asserts a tiny element budget and a huge one give identical scores for ragged lists, with a caller mask and
+    # for pre-padded documents, and that the default budget matches too.
     """A tiny element budget (many chunks, outlier isolated) must score identically to a huge
     budget (one chunk), for ragged lists, with a caller mask, and for pre-padded tensors."""
     generator = torch.Generator().manual_seed(13)
@@ -667,6 +777,10 @@ def test_maxsim_element_budget_matches_single_chunk() -> None:
 
 @skip_bfloat16_cpu_crash
 def test_maxsim_half_precision_accumulates_in_float32() -> None:
+    # [FUNCTION DOC]
+    # Skipped on crashing Windows bfloat16 setups. Asserts bfloat16 inputs produce float32 scores close to the
+    # float32 computation on the same values, with far more distinct values than bfloat16 can represent, also when
+    # chunked.
     """Summing the query-token maxima in bf16 collapses documents onto the coarse bf16 grid: the
     accumulation runs in float32 and the scores stay float32."""
     generator = torch.Generator().manual_seed(17)
@@ -691,6 +805,8 @@ def test_maxsim_half_precision_accumulates_in_float32() -> None:
 
 @skip_bfloat16_cpu_crash
 def test_maxsim_pairwise_half_precision_accumulates_in_float32() -> None:
+    # [FUNCTION DOC]
+    # Asserts both maxsim_pairwise paths (tensor and list) accumulate bfloat16 inputs in float32.
     """Both maxsim_pairwise paths (tensor and per-pair list) accumulate in float32."""
     generator = torch.Generator().manual_seed(19)
     queries = torch.nn.functional.normalize(torch.randn(6, 32, 16, generator=generator), p=2, dim=-1).bfloat16()
@@ -707,6 +823,10 @@ def test_maxsim_pairwise_half_precision_accumulates_in_float32() -> None:
 
 
 def test_maxsim_fully_masked_document_scores_sentinel(caplog) -> None:
+    # [FUNCTION DOC]
+    # Asserts a fully masked document scores the finite sentinel -1e9 while others stay normal, that a warning
+    # mentioning keep_only_token_ids is logged, that a zero-width list document scores the same sentinel, and that
+    # chunking gives identical results.
     """A document without any unmasked token scores the -1e9 sentinel instead of overflowing to
     -inf, other documents stay unaffected, and a one-shot warning names the likely causes."""
     generator = torch.Generator().manual_seed(23)
@@ -734,6 +854,9 @@ def test_maxsim_fully_masked_document_scores_sentinel(caplog) -> None:
 
 
 def test_maxsim_pairwise_empty_document_scores_sentinel(caplog) -> None:
+    # [FUNCTION DOC]
+    # Asserts maxsim_pairwise gives the sentinel for zero-width, all-masked list entries and all-masked tensor mask
+    # rows while other pairs stay finite, and logs a warning mentioning skiplist_words.
     """Empty pair entries (zero-width, all-masked, tensor mask row) score the sentinel on both
     pairwise paths, other pairs stay finite, and it warns."""
     generator = torch.Generator().manual_seed(29)
@@ -767,6 +890,9 @@ def test_maxsim_pairwise_empty_document_scores_sentinel(caplog) -> None:
 
 
 def test_empty_document_score_survives_the_losses_that_consume_it() -> None:
+    # [FUNCTION DOC]
+    # Asserts cross entropy over sentinel-containing scores is finite for several scales and targets, and that a
+    # margin MSE loss with an all-masked negative yields finite loss and gradients.
     """The sentinel must rank last AND stay finite through loss arithmetic (scaling, softmax,
     squared margins), which the float32 minimum did not."""
     generator = torch.Generator().manual_seed(31)
@@ -801,6 +927,9 @@ def test_empty_document_score_survives_the_losses_that_consume_it() -> None:
     reason="torch<2.3 dynamo cannot replay the AttributeError inside transformers' is_torchdynamo_compiling shim",
 )
 def test_maxsim_takes_no_data_dependent_branch() -> None:
+    # [FUNCTION DOC]
+    # Skipped on old torch. Compiles maxsim with full-graph capture on the eager backend and asserts it matches
+    # eager results and still emits the sentinel (no data-dependent branching).
     """The unconditional sentinel fill keeps maxsim fullgraph-capturable (and free of per-call
     device syncs), which compiling the scoring hot path relies on."""
     queries = torch.nn.functional.normalize(torch.randn(2, 4, 8), dim=-1)
@@ -822,6 +951,9 @@ def test_maxsim_takes_no_data_dependent_branch() -> None:
     ids=["list", "numpy", "torch"],
 )
 def test_maxsim_ragged_list_entry_types(convert) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over plain nested lists, numpy arrays and tensors as ragged document entries; asserts the
+    # hand-computed scores.
     """Ragged list entries may be plain nested lists, not only arrays or tensors. Measuring their
     widths for the element budget must not assume a .shape attribute."""
     queries = [[[1.0, 0.0], [0.0, 1.0]]]
@@ -831,6 +963,9 @@ def test_maxsim_ragged_list_entry_types(convert) -> None:
 
 
 def test_maxsim_empty_document_set_returns_empty_scores() -> None:
+    # [FUNCTION DOC]
+    # Asserts empty document or query sets (empty list or zero-batch tensors) give empty float32 score matrices of
+    # the right shape.
     """An empty document or query set, as an empty list or a 0-batch tensor, scores as an empty
     (num_queries, num_documents) matrix instead of crashing in pad_sequence or the reduction."""
     queries = [torch.randn(3, 8), torch.randn(2, 8)]
@@ -844,6 +979,8 @@ def test_maxsim_empty_document_set_returns_empty_scores() -> None:
 
 
 def test_maxsim_pairwise_empty_inputs_return_empty_scores() -> None:
+    # [FUNCTION DOC]
+    # Asserts zero pairs give an empty float32 score vector for lists and zero-batch tensors.
     """Zero pairs, as empty lists or 0-batch tensors on both sides, score as shape (0,) instead of
     crashing in torch.stack."""
     for queries, documents in (([], []), (torch.zeros(0, 3, 8), torch.zeros(0, 4, 8)), ([], torch.zeros(0, 4, 8))):
@@ -853,6 +990,9 @@ def test_maxsim_pairwise_empty_inputs_return_empty_scores() -> None:
 
 
 def test_maxsim_mismatched_mask_width_raises() -> None:
+    # [FUNCTION DOC]
+    # Asserts masks wider than the padded width raise ValueError naming the mask, for both chunk settings and both
+    # functions.
     """A caller mask not matching the padded width is a construction bug and raises up front, in
     both chunk settings and both functions (the chunk loops still truncate batch-wide masks to each
     chunk's local padding internally)."""
@@ -871,6 +1011,9 @@ def test_maxsim_mismatched_mask_width_raises() -> None:
 
 
 def test_maxsim_per_item_mask_lists_match_padded_masks() -> None:
+    # [FUNCTION DOC]
+    # Asserts per-item 1-D mask lists match an equivalent padded 2-D mask in both functions, and a non-mask value
+    # raises TypeError naming a_mask.
     """Per-item 1D mask lists are padded to the batch and score identically to the equivalent
     padded 2D mask, in both scoring functions."""
     queries = [torch.randn(2, 4), torch.randn(2, 4)]
@@ -888,6 +1031,8 @@ def test_maxsim_per_item_mask_lists_match_padded_masks() -> None:
 
 
 def test_maxsim_narrow_mask_raises_value_error() -> None:
+    # [FUNCTION DOC]
+    # Asserts masks narrower than the padded width raise ValueError stating how many tokens they cover.
     """A mask narrower than the padded width raises ValueError up front in both paths."""
     queries = torch.randn(2, 3, 8)
     documents = torch.randn(3, 5, 8)
@@ -901,6 +1046,8 @@ def test_maxsim_narrow_mask_raises_value_error() -> None:
 
 
 def test_maxsim_numpy_queries_score_against_tensor_documents_on_cpu() -> None:
+    # [FUNCTION DOC]
+    # Asserts numpy queries scored against tensor documents on CPU match all-tensor scoring.
     """The cpu mix of numpy queries and tensor documents keeps working and matches all-tensor scoring."""
     queries = torch.randn(2, 3, 8)
     documents = torch.randn(3, 5, 8)
@@ -912,6 +1059,9 @@ def test_maxsim_numpy_queries_score_against_tensor_documents_on_cpu() -> None:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test mixed devices")
 def test_maxsim_moves_queries_to_the_documents_device() -> None:
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Asserts CPU or numpy queries against CUDA documents are moved to the documents' device
+    # on all maxsim paths and both pairwise paths, with matching scores.
     """Mixed-device inputs reconcile onto the documents' device instead of raising, on every maxsim
     path (unchunked, chunked, list documents) and both maxsim_pairwise paths."""
     queries = torch.randn(2, 3, 8)
@@ -937,6 +1087,8 @@ def test_maxsim_moves_queries_to_the_documents_device() -> None:
 
 
 def test_maxsim_pairwise_scores_are_independent_of_chunk_elements() -> None:
+    # [FUNCTION DOC]
+    # Asserts maxsim_pairwise scores with a ragged batch and caller masks are identical for every chunk budget.
     """Chunking the pair batch is a memory strategy only: every budget scores identically, including
     the one-pair-per-chunk floor and a ragged batch with a long outlier."""
     generator = torch.Generator().manual_seed(11)
@@ -952,12 +1104,18 @@ def test_maxsim_pairwise_scores_are_independent_of_chunk_elements() -> None:
 
 
 def test_maxsim_pairwise_never_pads_the_batch_to_the_global_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches the private pair scoring function to record chunk shapes, scores 40 pairs with one 900-token
+    # outlier at budget 2000, and asserts multiple chunks were used and only the outlier's single-pair chunk
+    # exceeds the budget.
     """A long outlier pair sizes only its own chunk, so peak memory stays near the budget instead of
     padding every pair to the outlier's width (a ~800x regression at reranking scale)."""
     chunk_shapes = []
     original = similarity._maxsim_score_pairs
 
     def record(a, b, a_mask, b_mask):
+        # [FUNCTION DOC]
+        # HELPER: Records the pair count, query width and document width of the chunk and delegates to the original.
         chunk_shapes.append((a.shape[0], a.shape[1], b.shape[1]))
         return original(a, b, a_mask, b_mask)
 
@@ -979,6 +1137,8 @@ def test_maxsim_pairwise_never_pads_the_batch_to_the_global_width(monkeypatch: p
 
 
 def test_maxsim_pairwise_length_mismatch_raises() -> None:
+    # [FUNCTION DOC]
+    # Asserts unequal query and document counts raise ValueError, for lists and for tensors with counts reported.
     """Unequal query and document counts raise instead of scoring min(len(a), len(b)) pairs: the
     chunk ranges come from the document side, so a longer query side would silently lose its tail."""
     queries = [torch.randn(3, 8) for _ in range(5)]
@@ -991,6 +1151,10 @@ def test_maxsim_pairwise_length_mismatch_raises() -> None:
 
 
 def test_maxsim_budget_bounds_the_live_chunk_elements(monkeypatch: pytest.MonkeyPatch) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches the private document scoring function to record each chunk's live element count (score
+    # intermediate plus padded documents); with a 400-token outlier and budget 20000 asserts multiple chunks and
+    # only a single-document chunk exceeds the budget.
     """The document budget bounds what the chunk loop actually allocates: the 4D score intermediate
     plus the chunk's padded documents. The padded queries are allocated once outside the loop, so they
     are chunk-independent and deliberately excluded.
@@ -1002,6 +1166,8 @@ def test_maxsim_budget_bounds_the_live_chunk_elements(monkeypatch: pytest.Monkey
     original = similarity._maxsim_score_documents
 
     def record(a, b, a_mask, b_mask):
+        # [FUNCTION DOC]
+        # HELPER: Records the chunk's document count and live element count and delegates to the original.
         live = a.shape[0] * a.shape[1] * b.shape[0] * b.shape[1] + b.numel()
         chunks.append((b.shape[0], live))
         return original(a, b, a_mask, b_mask)
@@ -1024,12 +1190,17 @@ def test_maxsim_budget_bounds_the_live_chunk_elements(monkeypatch: pytest.Monkey
 
 
 def test_maxsim_pairwise_budget_counts_the_padded_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches the private pair scoring function to record live elements (padded queries, documents and
+    # scores) and asserts with long queries against short documents that no chunk exceeds the 100000 budget.
     """Long queries against short documents: the padded query tensor grows with the chunk size, so
     leaving it out of the budget overshoots several-fold (~4.9x for these shapes)."""
     live_elements = []
     original = similarity._maxsim_score_pairs
 
     def record(a, b, a_mask, b_mask):
+        # [FUNCTION DOC]
+        # HELPER: Records the chunk's live element count and delegates to the original.
         live_elements.append(a.numel() + b.numel() + a.shape[0] * a.shape[1] * b.shape[1])
         return original(a, b, a_mask, b_mask)
 
@@ -1048,6 +1219,8 @@ def test_maxsim_pairwise_budget_counts_the_padded_queries(monkeypatch: pytest.Mo
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test mixed devices")
 def test_maxsim_numpy_documents_follow_the_queries_device() -> None:
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Asserts numpy documents are scored on the CUDA queries' device on all paths.
     """numpy documents carry no device, so scoring stays on the queries' device rather than silently
     dragging a gpu workload onto the cpu."""
     queries = torch.randn(2, 3, 8)
@@ -1070,6 +1243,9 @@ def test_maxsim_numpy_documents_follow_the_queries_device() -> None:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test mixed devices")
 def test_maxsim_moves_masks_onto_the_scoring_device() -> None:
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Asserts CPU masks with CUDA embeddings are moved to the scoring device with matching
+    # scores, chunked or not, and for pairwise scoring.
     """A caller mask left on the cpu alongside cuda embeddings is moved onto the scoring device
     instead of crashing inside the masked_fill and einsum kernels."""
     queries = torch.randn(2, 3, 8)
@@ -1092,6 +1268,9 @@ def test_maxsim_moves_masks_onto_the_scoring_device() -> None:
 
 
 def test_maxsim_length_normalize_divides_by_real_query_tokens() -> None:
+    # [FUNCTION DOC]
+    # Asserts length normalization divides scores by the number of real query tokens, from item lengths for lists
+    # and mask sums for padded inputs, in both functions.
     """length_normalize (MeanMaxSim) divides each score by the count of real query tokens: item
     lengths on the list path, mask sums on the padded path, identical in maxsim and maxsim_pairwise."""
     generator = torch.Generator().manual_seed(3)
@@ -1112,6 +1291,9 @@ def test_maxsim_length_normalize_divides_by_real_query_tokens() -> None:
 
 
 def test_mean_maxsim_matches_length_normalized_maxsim() -> None:
+    # [FUNCTION DOC]
+    # Asserts mean_maxsim and mean_maxsim_pairwise equal the length-normalized forms (and the plain forms when
+    # normalization is disabled), and that the "meanmaxsim" similarity function name resolves to them.
     """The named MeanMaxSim functions are the length_normalize=True form of their MaxSim
     counterparts (with length_normalize=False recovering the plain form, so the family accepts one
     keyword set), and SimilarityFunction resolves "meanmaxsim" to them."""
@@ -1135,6 +1317,10 @@ def test_mean_maxsim_matches_length_normalized_maxsim() -> None:
 
 
 def test_mean_maxsim_denominator_follows_the_scoring_mask() -> None:
+    # [FUNCTION DOC]
+    # With a query containing an all-zero row, asserts plain MaxSim is the same for list and 3-D input, but
+    # normalization divides by 5 for the list and by 4 for the 3-D input (zero row read as padding), and that an
+    # explicit all-true mask makes the 3-D input match the list.
     """MeanMaxSim divides by whatever the scoring counted as real. A genuinely zero query row (token
     pooling can emit one) is padding to the mask a bare 3-D input derives, but a real token to a list
     input, so an explicit mask is what makes the two agree. Rankings are unaffected either way."""
@@ -1157,6 +1343,9 @@ def test_mean_maxsim_denominator_follows_the_scoring_mask() -> None:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA for the device override")
 def test_maxsim_device_is_a_pure_compute_knob() -> None:
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Asserts a device override computes on CUDA but returns CPU scores identical to plain
+    # CPU scoring, for maxsim, mean_maxsim and mean_maxsim_pairwise.
     """maxsim's device override moves the arithmetic only: scores still return on the documents'
     device, identically for the plain and length-normalized forms."""
     from sentence_transformers.util import mean_maxsim, mean_maxsim_pairwise
@@ -1180,6 +1369,10 @@ def test_maxsim_device_is_a_pure_compute_knob() -> None:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA to measure VRAM residency")
 def test_maxsim_device_bounds_residency_by_element_budget() -> None:
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Warms up cuBLAS, measures peak CUDA memory above a baseline while scoring 4000 CPU
+    # documents with a CUDA device override and a 1e6 element budget, and asserts the scores are on CPU with the
+    # right shape and peak memory stays under 30 MiB (only one chunk resident at a time).
     """With a device override, only one element-budget chunk of documents occupies the device at a
     time, so a corpus far larger than the budget never has to fit on it."""
     generator = torch.Generator().manual_seed(16)

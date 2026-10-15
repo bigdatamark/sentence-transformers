@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Losses for Contrastive Sparse Representation (CSR) models, which put a sparse autoencoder on top
+# of a dense embedding model. Provides a normalized MSE helper, the reconstruction loss (top-k,
+# top-4k and auxiliary reconstruction terms) and CSRLoss, which adds a weighted contrastive loss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -13,6 +17,10 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 def normalized_mean_squared_error(reconstruction: torch.Tensor, original_input: torch.Tensor) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Returns the normalized MSE: the mean squared error between reconstruction and
+    # original_input divided by the mean squared error between original_input and its per-dimension
+    # batch mean (broadcast to the input shape). Both inputs are (batch, dim); returns a scalar tensor.
     """
     :param reconstruction: output of Autoencoder.decode (shape: [batch, n_inputs])
     :param original_input: input of Autoencoder.encode (shape: [batch, n_inputs])
@@ -26,7 +34,12 @@ def normalized_mean_squared_error(reconstruction: torch.Tensor, original_input: 
 
 
 class CSRReconstructionLoss(nn.Module):
+    # [CLASS DOC]
+    # Reconstruction loss component for CSR, holding the model and beta (weight of the auxiliary term).
+    # Only usable through compute_loss_from_embeddings, called by CSRLoss.
     def __init__(self, model: SparseEncoder, beta: float = 1.0) -> None:
+        # [FUNCTION DOC]
+        # Stores the model and beta.
         """
         CSRReconstructionLoss implements the reconstruction loss component for Contrastive Sparse Representation (CSR) models.
 
@@ -61,11 +74,22 @@ class CSRReconstructionLoss(nn.Module):
         self.beta = beta
 
     def forward(self, sentence_features: Iterable[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Always raises NotImplementedError: this loss is not meant to be used standalone.
         raise NotImplementedError(
             "CSRReconstructionLoss is not intended to be used standalone. Use it within CSRLoss instead."
         )
 
     def compute_loss_from_embeddings(self, outputs: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Computes the reconstruction losses from model outputs, one feature dict per input column, each
+        # containing sentence_embedding_backbone (the dense input x), decoded_embedding_k,
+        # decoded_embedding_4k, decoded_embedding_aux and decoded_embedding_k_pre_bias. Per column: L_k is
+        # the MSE between x and the top-k reconstruction, L_4k the MSE between x and the top-4k
+        # reconstruction, and L_aux the normalized MSE between the auxiliary reconstruction and the
+        # residual x minus the (detached) pre-bias top-k reconstruction. Averages each over columns and
+        # returns a dict with reconstruction_loss_k, reconstruction_loss_4k divided by 8, and beta times
+        # reconstruction_loss_aux.
         """
         Compute the CSRReconstruction loss from embeddings.
 
@@ -117,6 +141,8 @@ class CSRReconstructionLoss(nn.Module):
         }
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Returns the config dict with beta.
         """
         Get the configuration dictionary.
 
@@ -127,7 +153,13 @@ class CSRReconstructionLoss(nn.Module):
 
 
 class CSRLoss(nn.Module):
+    # [CLASS DOC]
+    # Combined CSR loss: the reconstruction losses plus gamma times a main loss (by default
+    # SparseMultipleNegativesRankingLoss) on the sparse sentence embeddings.
     def __init__(self, model: SparseEncoder, loss: nn.Module | None = None, beta: float = 0.1, gamma: float = 1.0):
+        # [FUNCTION DOC]
+        # Stores model, beta and gamma, creates the reconstruction loss with beta, and uses the given main
+        # loss or a new SparseMultipleNegativesRankingLoss.
         """
         CSRLoss implements a combined loss function for Contrastive Sparse Representation (CSR) models.
 
@@ -189,6 +221,11 @@ class CSRLoss(nn.Module):
     def forward(
         self, sentence_features: Iterable[dict[str, torch.Tensor]], labels: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Runs the model on each input column's features, computes the reconstruction loss dict from the
+        # outputs and the main loss from the "sentence_embedding" tensors and labels via the main loss's
+        # compute_loss_from_embeddings. Adds the main loss times gamma to the dict (each key of a dict
+        # result, or "base_loss"). Returns the dict of loss components, which the trainer sums.
         # Compute embeddings using the model
         outputs = [self.model(sentence_feature) for sentence_feature in sentence_features]
         sentence_embedding = [output["sentence_embedding"] for output in outputs]
@@ -205,6 +242,8 @@ class CSRLoss(nn.Module):
         return losses
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Returns the config dict with beta, gamma and the main loss class name.
         """
         Get the configuration dictionary.
 
@@ -215,6 +254,8 @@ class CSRLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Property returning the BibTeX citation of the CSR paper.
         return """
 @misc{wen2025matryoshkarevisitingsparsecoding,
       title={Beyond Matryoshka: Revisiting Sparse Coding for Adaptive Representation},

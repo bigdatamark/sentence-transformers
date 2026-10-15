@@ -1,3 +1,6 @@
+# [MODULE DOC] Deprecated legacy dataset for multilingual knowledge distillation: reads parallel (translated) sentences
+# and pairs every sentence with the teacher model's embedding of the source (first-column) sentence, so a
+# student can be trained with an MSE loss to map translations to the same vector.
 """
 This file contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.
@@ -26,6 +29,12 @@ if TYPE_CHECKING:
 
 
 class ParallelSentencesDataset(Dataset):
+    # [CLASS DOC] Torch map-style dataset that lazily generates InputExamples (texts = one sentence, label = teacher
+    # embedding of its source sentence). Attributes: student_model and teacher_model (teacher must have an encode
+    # method), batch_size for teacher encoding, use_embedding_cache flag, embedding_cache (source text to
+    # embedding), datasets (list of lists of (source, set of sentences) items), datasets_iterator (per-dataset
+    # cursor), dataset_indices (dataset ids repeated by weight, defines one generation round), cache (pending
+    # examples), num_sentences (reported length). datasets_tokenized and copy_dataset_indices are unused.
     """
     This dataset reader can be used to read-in parallel sentences, i.e., it reads in a file with tab-separated sentences with the same
     sentence in different languages. For example, the file can look like this (EN\tDE\tES):
@@ -49,6 +58,8 @@ class ParallelSentencesDataset(Dataset):
         batch_size: int = 8,
         use_embedding_cache: bool = True,
     ):
+        # [FUNCTION DOC] Store the models, batch size and cache flag; initialize all bookkeeping lists/dicts empty and the
+        # sentence counter to 0.
         """
         Parallel sentences dataset reader to train student model given a teacher model
 
@@ -74,6 +85,11 @@ class ParallelSentencesDataset(Dataset):
     def load_data(
         self, filepath: str, weight: int = 100, max_sentences: int | None = None, max_sentence_length: int = 128
     ) -> None:
+        # [FUNCTION DOC] Read a tab-separated text file (gzip-decompressed if the path ends with ".gz", UTF-8) where each line holds
+        # a source sentence followed by its translations. Lines with any column longer than max_sentence_length
+        # characters (when positive) are skipped; reading stops after max_sentences accepted lines (when positive).
+        # Logs the file being loaded, then passes the rows to add_dataset with the same weight and limits.
+        # Returns None. Raises on file I/O errors.
         """
         Reads in a tab-separated .txt/.csv/.tsv or .gz file. The different columns contain the different translations of the sentence in the first column
 
@@ -120,6 +136,12 @@ class ParallelSentencesDataset(Dataset):
         max_sentences: int | None = None,
         max_sentence_length: int = 128,
     ):
+        # [FUNCTION DOC] Register a list of parallel sentence rows as a new dataset. Rows exceeding the length limit are skipped.
+        # Rows are grouped by their first sentence into a map from source to the set of all sentences in the row
+        # (including the source itself); stops once the map has max_sentences entries (when positive). If nothing
+        # remains, returns without changes. Otherwise adds the total number of sentences in all sets to
+        # num_sentences, appends the map items as a new dataset with cursor 0, and appends the new dataset id
+        # weight times to dataset_indices. Returns None.
         sentences_map = {}
         for sentences in parallel_sentences:
             if (
@@ -150,6 +172,9 @@ class ParallelSentencesDataset(Dataset):
         self.dataset_indices.extend([dataset_id] * weight)
 
     def generate_data(self):
+        # [FUNCTION DOC] Fill the example cache: for every entry in dataset_indices, take the next (source, sentences) entry of that
+        # dataset, encode all sources with the teacher (via get_embeddings), then append one InputExample per target
+        # sentence labeled with its source's embedding, and shuffle the cache. Mutates cache and dataset cursors.
         source_sentences_list = []
         target_sentences_list = []
         for data_idx in self.dataset_indices:
@@ -167,6 +192,8 @@ class ParallelSentencesDataset(Dataset):
         random.shuffle(self.cache)
 
     def next_entry(self, data_idx):
+        # [FUNCTION DOC] Return the dataset entry at the current cursor of the given dataset and advance the cursor; when it
+        # passes the end, reset it to 0 and shuffle that dataset's entries in place.
         source, target_sentences = self.datasets[data_idx][self.datasets_iterator[data_idx]]
 
         self.datasets_iterator[data_idx] += 1
@@ -177,6 +204,9 @@ class ParallelSentencesDataset(Dataset):
         return source, target_sentences
 
     def get_embeddings(self, sentences):
+        # [FUNCTION DOC] Return teacher embeddings (numpy) for a list of sentences. Without caching, encode them all directly with
+        # the configured batch size and no progress bar. With caching, encode only sentences not yet cached, store
+        # their embeddings, and return the cached embeddings in input order (as a list).
         if not self.use_embedding_cache:
             return self.teacher_model.encode(
                 sentences, batch_size=self.batch_size, show_progress_bar=False, convert_to_numpy=True
@@ -198,9 +228,12 @@ class ParallelSentencesDataset(Dataset):
         return [self.embedding_cache[sent] for sent in sentences]
 
     def __len__(self):
+        # [FUNCTION DOC] Return num_sentences (total sentences across all registered datasets).
         return self.num_sentences
 
     def __getitem__(self, idx):
+        # [FUNCTION DOC] Return one example, regenerating the cache first if it is empty. The index is ignored; examples are
+        # popped from the end of the shuffled cache, so access is effectively random and consuming.
         if len(self.cache) == 0:
             self.generate_data()
 

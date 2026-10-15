@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Modules used to build SparseEncoder pipelines. Re-exports the shared base modules (Dense,
+# InputModule, Module, Asym, Router, Transformer) and the sparse-specific modules MLMTransformer,
+# SparseAutoEncoder, SparseStaticEmbedding and SpladePooling so all import from one path.
 from __future__ import annotations
 
 # Base modules are re-exported here so all modules used to build a SparseEncoder

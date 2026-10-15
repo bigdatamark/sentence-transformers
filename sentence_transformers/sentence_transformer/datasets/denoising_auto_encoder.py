@@ -1,3 +1,5 @@
+# [MODULE DOC] Deprecated dataset for TSDAE-style denoising auto-encoder training in the legacy fit loop. Produces
+# InputExample pairs of (noised sentence, original sentence). Requires NLTK.
 """
 This file contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.
@@ -19,6 +21,8 @@ from sentence_transformers.sentence_transformer.readers.input_example import Inp
 
 
 class DenoisingAutoEncoderDataset(Dataset):
+    # [CLASS DOC] Torch dataset over a list of sentences. Attributes: sentences (list of str) and noise_fn (callable from
+    # string to noised string; defaults to the class's word-deletion function).
     """
     The DenoisingAutoEncoderDataset returns InputExamples in the format: texts=[noise_fn(sentence), sentence]
     It is used in combination with the DenoisingAutoEncoderLoss: Here, a decoder tries to re-construct the
@@ -31,6 +35,7 @@ class DenoisingAutoEncoderDataset(Dataset):
     """
 
     def __init__(self, sentences: list[str], noise_fn=lambda s: DenoisingAutoEncoderDataset.delete(s)):
+        # [FUNCTION DOC] Store sentences and noise function. Raises ImportError (with a formatted NLTK message) if NLTK is not installed.
         if not is_nltk_available():
             raise ImportError(NLTK_IMPORT_ERROR.format(self.__class__.__name__))
 
@@ -38,15 +43,21 @@ class DenoisingAutoEncoderDataset(Dataset):
         self.noise_fn = noise_fn
 
     def __getitem__(self, item):
+        # [FUNCTION DOC] Return an InputExample whose texts are the noised sentence followed by the original sentence at the given index.
         sent = self.sentences[item]
         return InputExample(texts=[self.noise_fn(sent), sent])
 
     def __len__(self):
+        # [FUNCTION DOC] Return the number of sentences.
         return len(self.sentences)
 
     # Deletion noise.
     @staticmethod
     def delete(text, del_ratio=0.6):
+        # [FUNCTION DOC] Deletion noise: tokenize the text into words with NLTK, return the text unchanged if there are no words.
+        # Otherwise keep each word independently with probability 1 minus del_ratio (default 0.6) using numpy's
+        # global random state; if none survive, keep one random word. Return the kept words detokenized with the
+        # Treebank detokenizer.
         from nltk import word_tokenize
         from nltk.tokenize.treebank import TreebankWordDetokenizer
 

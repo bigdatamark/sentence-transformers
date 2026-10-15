@@ -1,3 +1,6 @@
+# [MODULE DOC] TSDAE denoising auto-encoder loss: the sentence embedding of a damaged input is fed as the only cross-attention
+# memory to a Hugging Face causal-LM decoder, which must reconstruct the original input token by token. Includes a
+# helper that ties encoder parameters to the decoder's.
 from __future__ import annotations
 
 import logging
@@ -14,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 def _tie_encoder_decoder_weights(encoder: nn.Module, decoder: nn.Module) -> None:
+    # [FUNCTION DOC] HELPER: Tie weights by name: for each decoder parameter, if the encoder has a submodule with the same dotted
+    # module path and an attribute of the same name, replace that encoder attribute with the decoder parameter
+    # object (shared storage; the decoder's values win). Decoder-only parameters are skipped. Logs a warning if
+    # nothing was tied. Mutates the encoder.
     """Tie the encoder's parameters to the decoder's: each encoder parameter is replaced by the
     identically-named decoder parameter, so the two share storage and the decoder's values become
     the shared initialization.
@@ -35,9 +42,22 @@ def _tie_encoder_decoder_weights(encoder: nn.Module, decoder: nn.Module) -> None
 
 
 class DenoisingAutoEncoderLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: encoder (the SentenceTransformer, used at inference), tokenizer_encoder,
+    # tokenizer_decoder, need_retokenization (true when the encoder tokenizer is not an instance of the decoder
+    # tokenizer's class), decoder (causal LM configured as a decoder with cross-attention).
+    # KNOWN ISSUE: The docstring example's noise function keeps each word with probability del_ratio instead of deleting it with that probability, so it deletes about 40% rather than 60% of the words.
     def __init__(
         self, model: SentenceTransformer, decoder_name_or_path: str | None = None, tie_encoder_decoder: bool = True
     ) -> None:
+        # [FUNCTION DOC] Raises ValueError for models whose first module is a static embedding. Determines the encoder's checkpoint
+        # name. Asserts a decoder path is given when not tying. When tying, any given decoder path is ignored with a
+        # warning and the encoder checkpoint is used. Loads the decoder tokenizer and config (network/disk), marks the
+        # config as decoder with cross-attention and loads the causal LM (logs an error and re-raises ValueError if the
+        # architecture cannot be a decoder). Asserts equal hidden sizes. If the decoder tokenizer has no pad token, uses
+        # its end-of-sequence token for padding (also in the decoder config). Warns if the encoder vocabulary size differs
+        # from a freshly loaded tokenizer's. When tying: asserts no retokenization is needed, adopts the encoder tokenizer
+        # and resizes decoder embeddings if vocab sizes differ (with a warning), then ties the encoder transformer's
+        # weights to the decoder's base model.
         r"""
         This loss expects as input pairs of damaged inputs and the corresponding original ones.
         During training, the decoder reconstructs the original inputs from the encoded embeddings.
@@ -173,6 +193,8 @@ class DenoisingAutoEncoderLoss(nn.Module):
             _tie_encoder_decoder_weights(model.transformers_model, decoder_base)
 
     def retokenize(self, sentence_features: dict[str, Tensor]) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Decode the encoder token ids back to text (skipping special tokens) and re-tokenize with the decoder tokenizer
+        # (padding, longest-first truncation, tensors), moved to the original device. Returns the new feature dict.
         input_ids = sentence_features["input_ids"]
         device = input_ids.device
         sentences_decoded = self.tokenizer_encoder.batch_decode(
@@ -184,6 +206,11 @@ class DenoisingAutoEncoderLoss(nn.Module):
         return retokenized
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Unpack exactly two feature dicts (damaged source, original target). Retokenize the target if needed. Embed the
+        # source to sentence embeddings. Decoder inputs are the target ids without the last token; labels are the target
+        # ids shifted by one. Run the decoder with the embedding as a single-position encoder hidden state (attention mask
+        # from the source's first mask column) and without caching. Returns token-level cross-entropy, ignoring the decoder
+        # pad token id. Labels passed in are ignored.
         source_features, target_features = tuple(sentence_features)
         if self.need_retokenization:
             # since the sentence_features here are all tokenized by encoder's tokenizer,
@@ -215,6 +242,7 @@ class DenoisingAutoEncoderLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the decoder's checkpoint name and the retokenization flag.
         return {
             "decoder_name_or_path": self.decoder.config._name_or_path,
             "need_retokenization": self.need_retokenization,
@@ -222,6 +250,7 @@ class DenoisingAutoEncoderLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the TSDAE paper.
         return """
 @inproceedings{wang-2021-TSDAE,
     title = "TSDAE: Using Transformer-based Sequential Denoising Auto-Encoderfor Unsupervised Sentence Embedding Learning",

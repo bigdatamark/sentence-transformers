@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilroberta-base, or first CLI arg) with MultipleNegativesRankingLoss
+# on 10k AllNLI triplets (entailment as positive, contradiction as hard negative), batch 128, 1 epoch, fp16,
+# NO_DUPLICATES. Evaluates on STSb validation before and during training, STSb test afterwards; saves to
+# output/training_nli_v2_<model>-<timestamp>/final and tries a Hub push of "<model>-nli-v2".
+# The max_seq_length and num_epochs variables are defined but never applied. Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: the docstring says evaluation happens every 10% of training steps, but eval_steps and save_steps are 10 (absolute steps).
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with MultipleNegativesRankingLoss. Entailments are positive pairs and the contradiction on AllNLI dataset is added as a hard negative.

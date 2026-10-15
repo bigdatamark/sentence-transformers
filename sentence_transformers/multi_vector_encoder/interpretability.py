@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Interpretability helpers for ColPali-style multi-vector models over image documents: locating the real
+# query tokens, inferring the image patch grid, computing per-query-token similarity maps over patches, and
+# rendering them as colored heatmap overlays. Builds a 256-entry color lookup table approximating seaborn's
+# "mako" colormap at import time (global constant). PIL and transformers image utilities are imported lazily.
 """Per-query-token MaxSim heatmap utilities for ColPali-style image documents."""
 
 from __future__ import annotations
@@ -35,6 +40,9 @@ _CMAP_KEYS = np.array(
 
 
 def _build_mako_lut(n: int = 256) -> np.ndarray:
+    # [FUNCTION DOC]
+    # HELPER: Build an n-entry RGB lookup table by linear interpolation between the nine mako key colors evenly
+    # spaced over the table. Returns an n by 3 uint8 array.
     positions = np.linspace(0, len(_CMAP_KEYS) - 1, n)
     indices = positions.astype(int).clip(0, len(_CMAP_KEYS) - 2)
     fractions = (positions - indices)[:, None]
@@ -46,6 +54,13 @@ _MAKO_LUT = _build_mako_lut()
 
 
 def real_query_token_slice(model: MultiVectorEncoder, query: str) -> slice:
+    # [FUNCTION DOC]
+    # Return the slice of the query's encoded token sequence holding the real content tokens (excluding prompt
+    # prefixes, chat-template special tokens, markers, suffixes and expansion tokens). Finds the model's first
+    # Transformer module (ValueError if none). Tokenizes an empty query and the actual query with the model's
+    # "query" prompt and query task; the slice start is the length of their common prefix of ids. Length is the
+    # query's own token count without special tokens when query expansion is configured (since both renders are
+    # padded to the same length), otherwise the difference in token counts between the two renders.
     """Return the slice into ``encode_query``'s output that selects the real content tokens.
 
     Chat-template prefixes (e.g. ``<bos>``), ColBERT query markers (e.g. "[Q] "), suffixes (e.g.
@@ -89,6 +104,13 @@ def real_query_token_slice(model: MultiVectorEncoder, query: str) -> slice:
 
 
 def get_n_patches(model: MultiVectorEncoder, image_size: tuple[int, int]) -> tuple[int, int]:
+    # [FUNCTION DOC]
+    # Infer the (columns, rows) patch grid the model's processor produces for an image of the given (width,
+    # height). Raises NotImplementedError for split-image processors (those with image-splitting or max image
+    # size settings). If the image processor has a merge size, processes a blank RGB image of that size and
+    # returns grid width and height (from the image grid shape) each divided by the merge size. Else, if the
+    # processor's image sequence length is a positive perfect square, returns its square root for both. Otherwise
+    # raises ValueError.
     """Infer the ``(n_patches_x, n_patches_y)`` = ``(n_cols, n_rows)`` image-patch grid that
     ``model``'s processor produces for an image of ``image_size`` (``(width, height)``, i.e. PIL's
     ``image.size``). Plugs directly into the ``n_patches`` parameter of
@@ -140,6 +162,12 @@ def maxsim_similarity_map(
     image_mask: Tensor | None = None,
     normalize: bool = False,
 ) -> Tensor:
+    # [FUNCTION DOC]
+    # Compute per-query-token similarity over the image patch grid. Inputs: query token embeddings (Qt by D),
+    # image token embeddings (Dt by D), the (columns, rows) grid, optional boolean mask selecting patch tokens,
+    # and a normalize flag. Applies the mask, raises ValueError if the remaining token count is not columns
+    # times rows, reshapes row-major into rows by columns by D, and returns dot products as float32 shaped Qt by
+    # rows by columns. With normalize, min-max scales each query token's map to the unit range.
     """Per-query-token similarity over a 2D image-patch grid.
 
     Args:
@@ -181,6 +209,12 @@ def render_similarity_map_on_image(
     alpha: float = 0.5,
     normalization_range: tuple[float, float] | None = None,
 ) -> PILImage:
+    # [FUNCTION DOC]
+    # Overlay a 2D similarity map on an image. Inputs: a PIL image or URL/path (loaded via transformers, may do
+    # network or file I/O), a rows by columns map, a constant opacity, and an optional (min, max) range (default
+    # the map's own range). Raises ValueError if the map is not 2D. Min-max scales into the unit range with
+    # clipping, converts to 8-bit, bicubically upsamples to the image size, maps through the mako lookup table to
+    # RGB, adds a constant alpha channel, and returns a new RGBA image alpha-composited over the original.
     """Overlay a 2D similarity map onto an image with the mako colormap.
 
     Args:
@@ -226,6 +260,11 @@ def maxsim_heatmap(
     aggregate: Literal["sum", "amax", "none"] = "sum",
     alpha: float = 0.5,
 ) -> PILImage | list[PILImage]:
+    # [FUNCTION DOC]
+    # One-shot heatmap for a query and image document. Loads the image once, computes the unnormalized
+    # similarity map, and then: for "none", renders one overlay per query token sharing a global color range
+    # and returns the list; for "sum" or "amax", collapses over query tokens by sum or maximum and returns a
+    # single overlay. Raises ValueError for any other aggregate value.
     """One-shot MaxSim heatmap for a (query, image-document) pair.
 
     Args:

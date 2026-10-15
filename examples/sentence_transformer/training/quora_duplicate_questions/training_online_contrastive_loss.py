@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: train stsb-distilbert-base for duplicate-question classification with OnlineContrastiveLoss (cosine
+# distance, margin 0.5) on Quora pair-class data: an unseeded split holds out 1000 rows for evaluation and 100k rows
+# are used for training. Batch 64, 1 epoch, fp16, NO_DUPLICATES, eval/save every 250 steps. A SequentialEvaluator runs
+# BinaryClassificationEvaluator (held-out rows), ParaphraseMiningEvaluator (quora-duplicates-mining dev) and
+# InformationRetrievalEvaluator (BeIR/quora validation, shrunk corpus), with the IR score as main score; it runs before
+# and during training. Saves to output/training_ocl-<timestamp>/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
 """
 This scripts demonstrates how to train a sentence embedding model for question pair classification
 with cosine-similarity and a simple threshold.

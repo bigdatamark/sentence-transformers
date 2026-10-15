@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Graph optimization export for ONNX-backed models (SentenceTransformer, SparseEncoder, CrossEncoder, MultiVectorEncoder)
+# using Optimum's ORTOptimizer. Optimum types are imported only for type checking or lazily inside the function.
 from __future__ import annotations
 
 import logging
@@ -24,6 +27,15 @@ def export_optimized_onnx_model(
     create_pr: bool = False,
     file_suffix: str | None = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # Optimize the ONNX model inside a model loaded with backend "onnx" and save or upload it as onnx/model_<suffix>.onnx.
+    # Inputs: model (its transformers_model must be an Optimum ORTModel), optimization_config (an OptimizationConfig or one of
+    # the level names O1..O4, resolved through AutoOptimizationConfig), model_name_or_path (local directory or Hub repo id),
+    # push_to_hub, create_pr, file_suffix (defaults to the level name for string configs, else "optimized").
+    # Behavior: builds an ORTOptimizer from the model, then delegates to save_or_push_to_hub_model with an export function that
+    # runs the optimizer into a temporary directory. Returns None.
+    # Raises ImportError when optimum/onnxruntime are missing, ValueError when the model is not ONNX-backed or the level name is
+    # unknown. Side effects: temporary files, writes into the target directory or uploads to the Hub.
     """
     Export an optimized ONNX model from a SentenceTransformer, SparseEncoder, CrossEncoder,
     or MultiVectorEncoder model.

@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Shared GradCache implementation for memory-efficient "cached" losses. The approach: (1) embed every mini-batch of
+# every input column without gradients, snapshotting the random number generator state of each mini-batch; (2) compute
+# the full-batch loss on those detached embeddings and back-propagate it only to the embeddings, caching their
+# gradients; (3) during the outer backward pass, a hook re-embeds each mini-batch with gradients under the replayed RNG
+# state and back-propagates the dot product of the new embeddings with the cached gradients, so only one mini-batch of
+# activations is alive at a time. Contains: RandContext (RNG snapshot/replay), helpers to count, split and slice
+# tokenized feature dicts (padded, flattened via cumulative sequence lengths, and VLM inputs with flattened pixel
+# tensors), predicates uses_gradient_cache and has_static_embedding_input, the backward hook, and CachedLossMixin,
+# which wires the three steps together for a loss subclass.
 """Shared GradCache machinery (https://huggingface.co/papers/2101.06983).
 
 A "cached" loss trades compute for memory in three steps:
@@ -29,10 +39,20 @@ from torch.utils.checkpoint import get_device_states, set_device_states
 
 
 class RandContext:
+    # [CLASS DOC]
+    # Context manager that captures random number generator state at construction and restores it on entry, so a second
+    # forward pass reproduces the first one's randomness (e.g. dropout masks). Captures the CPU RNG, the MPS RNG (only if
+    # any given tensor is on MPS) and the CUDA RNG of the devices of the given non-MPS tensors. On entry it forks the RNG
+    # (so the outer RNG state is restored on exit) and installs the captured states; on exit it restores the outer state.
     """Snapshot the CPU/CUDA/MPS RNG at init and restore it on enter, so the cached second forward
     replays the first's randomness (e.g. dropout). Ref: https://github.com/luyug/GradCache."""
 
     def __init__(self, *tensors) -> None:
+        # [FUNCTION DOC]
+        # Inputs: any number of objects (typically the values of a feature dict; non-tensors are ignored by the device-state
+        # helper). Stores the CPU RNG state, the MPS RNG state if any input tensor lives on MPS (else None), and the list of
+        # CUDA devices plus their RNG states for the non-MPS tensors. MPS tensors are filtered out because the device-state
+        # helper cannot handle them.
         self.fwd_cpu_state = torch.get_rng_state()
         # get_device_states() calls the nonexistent torch.mps.device() on MPS tensors, so snapshot the
         # MPS RNG separately and filter MPS tensors out before calling it (restored in __enter__).
@@ -45,6 +65,10 @@ class RandContext:
         self.fwd_gpu_devices, self.fwd_gpu_states = get_device_states(*non_mps_tensors)
 
     def __enter__(self) -> None:
+        # [FUNCTION DOC]
+        # Enters a forked RNG scope for the captured CUDA devices, then sets the CPU RNG to the captured state, saves the
+        # current MPS RNG state and replaces it with the captured one (if MPS was captured), and sets the CUDA RNG states.
+        # Side effects: mutates global RNG state; stores the fork context and the outer MPS state on the instance.
         self._fork = torch.random.fork_rng(devices=self.fwd_gpu_devices, enabled=True)
         self._fork.__enter__()
         torch.set_rng_state(self.fwd_cpu_state)
@@ -56,6 +80,9 @@ class RandContext:
         set_device_states(self.fwd_gpu_devices, self.fwd_gpu_states)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        # [FUNCTION DOC]
+        # Restores the outer MPS RNG state (if captured), exits the forked RNG scope (restoring CPU/CUDA states) and clears the
+        # stored fork context. Does not suppress exceptions.
         if self.fwd_mps_state is not None:
             torch.mps.set_rng_state(self._mps_state_outside)
         self._fork.__exit__(exc_type, exc_val, exc_tb)
@@ -63,6 +90,11 @@ class RandContext:
 
 
 def _get_batch_size(sentence_feature: dict[str, Any]) -> int:
+    # [FUNCTION DOC]
+    # HELPER: returns the number of samples in a tokenized feature dict. For flattened inputs (key "cu_seq_lens_q"
+    # present) it is that tensor's length minus one. Otherwise it is the first dimension of "input_ids" or
+    # "attention_mask" (checked in that order, if they are tensors), falling back to the first dimension of the first
+    # tensor value with at least one dimension. Raises StopIteration if no such tensor exists.
     """Get the number of samples in sentence features, handling both padded and flattened inputs.
 
     With padded inputs, the batch size is the first dimension of any tensor.
@@ -82,6 +114,25 @@ def _get_batch_size(sentence_feature: dict[str, Any]) -> int:
 
 
 def _create_minibatch(sentence_feature: dict[str, Any], begin: int, end: int) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: slices a feature dict to the samples in the half-open range begin to end and returns a new dict.
+    # Padded inputs (no "cu_seq_lens_q"): end is clamped to the batch size. For VLM image and video inputs (grid key
+    # "image_grid_thw"/"video_grid_thw" with pixel key "pixel_values"/"pixel_values_videos"), the grid rows belonging to
+    # the samples are found from the cumulative per-sample counts ("num_images_per_sample"/"num_videos_per_sample") if
+    # present, or assumed to be one row per sample if the grid has exactly batch-size rows, otherwise the pair is skipped
+    # (sliced like any other tensor). The token range in the flattened pixel tensor is derived from the cumulative product
+    # of each grid row (tokens per item); empty grid ranges give an empty token range. Then, if a 2-D attention mask exists,
+    # the last column that is active for any selected sample (attention mask set, or ColBERT "query_expansion_positions"
+    # set) is found and trailing all-inactive columns are trimmed; leading padding is kept. Each value is then: non-tensors
+    # copied as-is; tensors with a custom range sliced by that range; tensors of at least 2 dims whose second dimension
+    # equals the sequence width sliced by samples and trimmed in width; all other tensors sliced along the first dimension.
+    # Flattened inputs: end is clamped to the number of sequences, the token span is read from the cumulative lengths, the
+    # cumulative lengths ("cu_seq_lens_q"/"cu_seq_lens_k") are re-based to start at zero, "max_length_q"/"max_length_k"
+    # become the longest sequence of the slice, "seq_idx" is sliced on its last axis and shifted by begin, any tensor
+    # whose last dimension equals the total token count is sliced on its last axis, and everything else is copied as-is.
+    # KNOWN ISSUE: the width-trimming and flattened token-slicing rely on shape heuristics; an unrelated tensor whose second
+    # dimension happens to equal the sequence width (or whose last dimension equals the total token count) is trimmed or
+    # sliced as if it were token-level.
     """Create a mini-batch from sentence features, handling padded, flattened, and VLM inputs.
 
     With padded inputs, this slices along the batch dimension and drops trailing padding columns shared
@@ -192,6 +243,10 @@ def _create_minibatch(sentence_feature: dict[str, Any], begin: int, end: int) ->
 
 
 def uses_gradient_cache(loss: Any) -> bool:
+    # [FUNCTION DOC]
+    # Returns whether the given loss defers its embedding backward pass to a hook on its returned loss tensor, read from
+    # the loss's "uses_gradient_cache" attribute (False if absent). Used by wrapper losses that temporarily patch the
+    # model's forward and therefore need special handling for such losses.
     """Whether ``loss`` defers its backward pass to a hook on the loss tensor it returns.
 
     Such a loss re-embeds each mini-batch during the *backward* pass, by which time a decorator that
@@ -212,6 +267,12 @@ def _minibatch_ranges(
     mini_batch_size: int,
     mini_batch_num_tokens: int | None = None,
 ) -> list[tuple[int, int]]:
+    # [FUNCTION DOC]
+    # HELPER: computes the list of (begin, end) sample ranges that split a feature dict into mini-batches. Without a token
+    # budget, ranges are consecutive chunks of mini_batch_size samples (the last possibly shorter). With a token budget,
+    # cumulative non-padding token counts are taken from "cu_seq_lens_q" (flattened) or from the row sums of the attention
+    # mask (padded); each range greedily extends, via binary search over the cumulative counts, as far as the budget allows,
+    # always taking at least one sample. Raises ValueError if a token budget is given but neither key is present.
     """Compute the ``(begin, end)`` sequence ranges that split a batch into mini-batches.
 
     If ``mini_batch_num_tokens`` is None, every range spans ``mini_batch_size`` sequences.
@@ -249,11 +310,17 @@ def _minibatch_ranges(
 
 
 def _validate_mini_batch_num_tokens(mini_batch_num_tokens: int | None) -> None:
+    # [FUNCTION DOC]
+    # HELPER: raises ValueError if mini_batch_num_tokens is not None and not positive; otherwise does nothing.
     if mini_batch_num_tokens is not None and mini_batch_num_tokens <= 0:
         raise ValueError("mini_batch_num_tokens must be a positive integer or None.")
 
 
 def has_static_embedding_input(model: Any) -> bool:
+    # [FUNCTION DOC]
+    # Returns whether the model's first module is a StaticEmbedding, or is a Router whose any route's first module is a
+    # StaticEmbedding. Such inputs lack a batch dimension and cannot be split into mini-batches. Imports the module classes
+    # lazily to avoid circular imports. Assumes the model supports indexing of its modules.
     """Whether the model embeds its inputs with a StaticEmbedding, directly or behind a Router.
 
     StaticEmbedding features are an EmbeddingBag (``input_ids``, ``offsets``) with no batch dimension,
@@ -276,6 +343,15 @@ def _backward_hook(
     random_states: list[list[RandContext]],
     ranges: list[list[tuple[int, int]] | None],
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: backward hook registered on the detached loss tensor (step 3 of GradCache). Inputs: the incoming gradient of
+    # the loss (a scalar scale factor, carrying e.g. the fp16 loss scale and gradient accumulation division), the list of
+    # feature dicts, the loss object (must provide an embedding iterator yielding tuples whose first element is the
+    # embeddings), and the per-column cached gradients, RNG states and mini-batch ranges captured in the forward pass that
+    # registered the hook. With gradients enabled, re-embeds each column's mini-batches under the replayed RNG states and
+    # ranges, skips mini-batches whose embeddings do not require gradients (e.g. frozen routes), and for the rest computes
+    # the fp32 dot product of the flattened embeddings and cached gradients times the incoming gradient, then calls backward
+    # on it. Side effects: accumulates parameter gradients in the model. Returns nothing.
     """A backward hook to backpropagate the cached gradients mini-batch by mini-batch.
 
     ``loss_obj`` only needs an ``embed_minibatch_iter(sentence_feature, with_grad, copy_random_state,
@@ -319,6 +395,12 @@ def _backward_hook(
 
 
 class CachedLossMixin:
+    # [CLASS DOC]
+    # Mixin implementing the GradCache forward pass. Subclasses must be torch modules exposing "model", must set
+    # mini_batch_size, and must implement calculate_loss; they call forward_cached from their forward. Class attributes:
+    # mini_batch_num_tokens (optional token budget per mini-batch, default None), show_progress_bar (default False),
+    # requires_media_counts (True; asks the Transformer preprocessing to count images/videos per sample so VLM inputs can be
+    # sliced) and uses_gradient_cache (True).
     """The GradCache forward pass, shared by the losses that cache the gradients wrt. their embeddings.
 
     Subclasses must be an ``nn.Module`` holding a ``model``, must set ``mini_batch_size``, and must
@@ -340,6 +422,10 @@ class CachedLossMixin:
     def calculate_loss(
         self, reps: list[list[Tensor]], labels: Tensor | None = None, *, with_backward: bool = False
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Abstract. Must compute the whole-batch loss from per-column lists of per-mini-batch embedding tensors and optional
+        # labels. When with_backward is true it must back-propagate the loss itself and return the detached value. The base
+        # implementation raises NotImplementedError.
         """Compute the loss over the whole batch, from the per-mini-batch embeddings.
 
         When ``with_backward`` is set, back-propagate the loss (chunk by chunk, if the implementation
@@ -357,6 +443,11 @@ class CachedLossMixin:
         copy_random_state: bool,
         random_state: RandContext | None = None,
     ) -> tuple[Tensor, RandContext | None]:
+        # [FUNCTION DOC]
+        # Embeds one mini-batch: slices the features to the range begin to end, then, inside the given RNG replay context (if
+        # any) and with gradients enabled or disabled per with_grad, optionally captures a new RandContext from the mini-batch
+        # values (when copy_random_state is true) and runs the model, taking the "sentence_embedding" output. Returns the
+        # embeddings tensor and the captured RandContext (or None).
         """Embed a mini-batch of inputs."""
         grad_context = nullcontext if with_grad else torch.no_grad
         random_state_context = nullcontext() if random_state is None else random_state
@@ -375,6 +466,10 @@ class CachedLossMixin:
         random_states: list[RandContext] | None = None,
         ranges: list[tuple[int, int]] | None = None,
     ) -> Iterator[tuple[Tensor, RandContext | None]]:
+        # [FUNCTION DOC]
+        # Generator over the mini-batches of one feature dict. Uses the given ranges or computes them from mini_batch_size and
+        # mini_batch_num_tokens, shows a tqdm progress bar if show_progress_bar is set, and yields the result of embedding each
+        # range, passing the matching RNG state from random_states when provided.
         """Do a forward pass on every mini-batch of the input features and yield the embeddings."""
         if ranges is None:
             ranges = _minibatch_ranges(sentence_feature, self.mini_batch_size, self.mini_batch_num_tokens)
@@ -395,6 +490,15 @@ class CachedLossMixin:
             )
 
     def forward_cached(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor | None = None) -> Tensor:
+        # [FUNCTION DOC]
+        # Runs the full GradCache forward. Materialises the features into a list, records whether gradients are enabled and
+        # precomputes the mini-batch ranges for each column (before any forward, since modules may mutate features in place).
+        # Step 1: embeds all mini-batches without gradients, capturing RNG states only if gradients are enabled, and stores
+        # detached embeddings that require gradients. If gradients are disabled, returns calculate_loss on those embeddings
+        # directly. Step 2: calls calculate_loss with backward enabled, detaches the result into a fresh leaf requiring
+        # gradients and collects each embedding's gradient as the cache; raises ValueError naming any column whose embeddings
+        # received no gradient. Step 3: registers the backward hook on the loss with this pass's features, cache, RNG states
+        # and ranges. Returns the loss tensor.
         """Run the three-step GradCache forward pass. See the module docstring."""
         sentence_features = list(sentence_features)
         grad_enabled = torch.is_grad_enabled()

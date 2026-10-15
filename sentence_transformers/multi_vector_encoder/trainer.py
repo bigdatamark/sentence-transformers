@@ -1,3 +1,6 @@
+# [MODULE DOC] Trainer for MultiVectorEncoder (ColBERT-style) models. A thin subclass of the shared BaseTrainer that
+# only plugs in multi-vector-specific default classes (model, model card data/callback, data collator,
+# training arguments) and the default loss factory.
 from __future__ import annotations
 
 import logging
@@ -34,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 
 class MultiVectorEncoderTrainer(BaseTrainer):
+    # [CLASS DOC] Trainer specialization for MultiVectorEncoder. Class attributes name the model class, model card data
+    # class, model card callback class, data collator class and training arguments class that BaseTrainer
+    # uses when constructing defaults. All training behavior lives in BaseTrainer.
     """Trainer for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` (multi-vector / ColBERT-style) models.
 
     Inherits all functionality from :class:`~sentence_transformers.base.trainer.BaseTrainer`: dataset-name-based
@@ -89,6 +95,11 @@ class MultiVectorEncoderTrainer(BaseTrainer):
         optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None = None,
         preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
+        # [FUNCTION DOC] Construct the trainer by forwarding every argument unchanged to BaseTrainer (model, args, datasets, loss,
+        # evaluator, data collator, processing class, model_init, compute_metrics, callbacks, optimizers, optimizer
+        # class/kwargs, logits preprocessing). The deprecated keyword "tokenizer" is remapped to
+        # "processing_class" by a decorator. Afterwards only annotates the narrower types of model, args and
+        # data_collator. Side effects: those of BaseTrainer construction.
         super().__init__(
             model=model,
             args=args,
@@ -110,6 +121,9 @@ class MultiVectorEncoderTrainer(BaseTrainer):
         self.data_collator: MultiVectorEncoderDataCollator
 
     def get_default_loss(self, model: MultiVectorEncoder) -> torch.nn.Module:
+        # [FUNCTION DOC] Return the default loss used when none is passed: logs an info message saying the multi-vector
+        # multiple-negatives ranking loss is being used, then lazily imports and returns a new instance of that
+        # loss bound to the given model.
         from sentence_transformers.multi_vector_encoder.losses import (
             MultiVectorMultipleNegativesRankingLoss,
         )

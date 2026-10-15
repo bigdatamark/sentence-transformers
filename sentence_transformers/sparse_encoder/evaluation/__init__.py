@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Evaluators for sparse encoders. Re-exports sparse variants of the embedding similarity,
+# information retrieval, binary classification, MSE, NanoBEIR, triplet, translation and reranking
+# evaluators, plus the ReciprocalRankFusionEvaluator for hybrid ranking. The sparse variants add
+# sparsity statistics (active dimensions, sparsity ratio) to the dense evaluator metrics.
 from __future__ import annotations
 
 from sentence_transformers.sparse_encoder.evaluation.reciprocal_rank_fusion import ReciprocalRankFusionEvaluator

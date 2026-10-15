@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: Contrastive Tension training of distilbert-base-uncased (max length 75, mean pooling) on the
+# wiki1m-for-simcse sentences (shorter than 10 characters removed). Pairs: text2 equals text1 with probability 1/8, else a
+# random sentence. Trains 1 epoch with ContrastiveTensionLoss (batch 16, lr 1e-5, RMSprop, no warmup/weight decay,
+# eval/save every 1000 steps), evaluating STSb validation and test EmbeddingSimilarityEvaluators before and after training.
+# Saves to output/train_stsb_ct-<model>-<timestamp>/final and tries a Hub push. Side effects: network, disk, GPU, logging.
 import logging
 import random
 import traceback
@@ -34,6 +40,9 @@ logging.info(train_dataset)
 
 # Generate sentence pairs for ContrastiveTensionLoss
 def to_ct_pairs(sample, pos_neg_ratio=8):
+    # [FUNCTION DOC]
+    # HELPER: map function. Returns text1 equal to the row's text and text2 equal to it with probability 1/pos_neg_ratio
+    # (default 8), otherwise the text of a random row of the global train_dataset.
     pos_neg_ratio = 1 / pos_neg_ratio
     return {
         "text1": sample["text"],

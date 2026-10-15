@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Script, step 3 of the query-generation pipeline: interactive semantic search. Loads the model from
+# output/programming-model, (re)downloads the Wikipedia programming corpus if missing, keeps (title, paragraph) pairs for
+# paragraphs longer than 100 characters, encodes all paragraphs, prints the article titles, then loops forever reading a
+# query from stdin and printing the top 3 hits (score, title, paragraph) via semantic_search.
+# Side effects: network, disk, stdin/stdout; never terminates on its own.
 """
 In this example we train a semantic search model to search through Wikipedia
 articles about programming articles & technologies.

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# In-batch negatives (InfoNCE-style) ranking loss for CrossEncoder, where every candidate must be scored
+# jointly with the anchor, so negatives are sampled rather than exhaustively compared.
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -10,6 +13,12 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class MultipleNegativesRankingLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, the number of random
+    # in-batch negatives per anchor (None means all), a scale factor applied to the (activated) logits, an
+    # activation (sigmoid default), and a cross entropy loss. Inputs: columns (anchor, positive, optional hard
+    # negatives...). Each anchor must pick its positive among positive, sampled in-batch negatives, and its
+    # hard negatives.
     def __init__(
         self,
         model: CrossEncoder,
@@ -17,6 +26,9 @@ class MultipleNegativesRankingLoss(nn.Module):
         scale: int = 10.0,
         activation_fn: nn.Module | None = nn.Sigmoid(),
     ) -> None:
+        # [FUNCTION DOC]
+        # Store settings and create the cross entropy loss. Raises ValueError if the model is not a CrossEncoder or
+        # does not have exactly one output label.
         """
         Given a list of (anchor, positive) pairs or (anchor, positive, negative) triplets, this loss optimizes the following:
 
@@ -114,12 +126,18 @@ class MultipleNegativesRankingLoss(nn.Module):
     def call_model_with_columns(
         self, anchors: list[str], candidates: list[str], prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Zip anchors with an equally long candidate column into pairs and score them; returns one logit per
+        # pair.
         pairs = list(zip(anchors, candidates))
         return self.call_model_with_pairs(pairs, prompt=prompt, task=task)
 
     def call_model_with_pairs(
         self, pairs: list[list[str]], prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Tokenize pairs with the prompt/task, move to the model device, run the model, and return "scores"
+        # with the singleton label dimension removed (one value per pair).
         inputs = self.model.preprocess(pairs, prompt=prompt, task=task)
         inputs = batch_to_device(inputs, self.model.device)
         logits = self.model(inputs)["scores"]
@@ -128,6 +146,12 @@ class MultipleNegativesRankingLoss(nn.Module):
     def get_in_batch_negatives(
         self, anchors: list[str], candidates: list[list[str]]
     ) -> Generator[list[str], None, None]:
+        # [FUNCTION DOC]
+        # HELPER: Generator of in-batch negative columns. Inputs: anchors and the candidate columns (positive plus
+        # hard negatives). Flattens candidates column-major and builds a boolean mask excluding, for each anchor,
+        # its own row in every column. If a negative count is set and is below the number of valid negatives,
+        # samples that many distinct valid indices per anchor uniformly at random (uses global torch RNG);
+        # otherwise takes all valid indices. Yields one list per negative slot, giving one candidate per anchor.
         batch_size = len(anchors)
         num_columns = len(candidates)
 
@@ -155,6 +179,10 @@ class MultipleNegativesRankingLoss(nn.Module):
             yield [candidates_flattened[negative_idx] for negative_idx in negative_indices_row]
 
     def calculate_loss(self, logits: Tensor, batch_size: int) -> Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Turn a list of per-column logit vectors (each of batch size) into a batch by columns matrix,
+        # apply the activation if set, multiply by the scale if non-zero, and return the cross entropy with target
+        # class 0 (the positive) for every row.
         # (bsz, 1 + num_rand_negatives + num_hard_negatives)
         logits = torch.cat(logits, dim=0).reshape(-1, batch_size).T
 
@@ -173,6 +201,9 @@ class MultipleNegativesRankingLoss(nn.Module):
     def forward(
         self, inputs: list[list[str]], labels: Tensor, prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss: score anchors with positives, then with each sampled in-batch negative column, then with
+        # each hard negative column, and return the combined cross entropy. Labels are ignored.
         anchors = inputs[0]
         positives = inputs[1]
         batch_size = len(anchors)
@@ -190,6 +221,8 @@ class MultipleNegativesRankingLoss(nn.Module):
         return self.calculate_loss(scores, batch_size)
 
     def get_config_dict(self) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Return the loss config: scale, negative count, and activation qualified name.
         return {
             "scale": self.scale,
             "num_negatives": self.num_negatives,

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: continue training an existing SentenceTransformer (default all-mpnet-base-v2, or first CLI arg) on STSb
+# with CosineSimilarityLoss. Batch 16, 4 epochs, fp16, eval/save every 100 steps on STSb validation; afterwards evaluates
+# on STSb test, saves to output/training_stsbenchmark_<model>-<timestamp>/final and tries a Hub push of "<model>-sts".
+# Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: the docstring says the script loads 'nli-distilroberta-base-v2', but the default model is sentence-transformers/all-mpnet-base-v2.
 """
 This example loads the pre-trained SentenceTransformer model 'nli-distilroberta-base-v2' from Hugging Face.
 It then fine-tunes this model for some epochs on the STS benchmark dataset.

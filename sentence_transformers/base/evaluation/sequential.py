@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines SequentialEvaluator, an evaluator that runs a sequence of sub-evaluators one after another on the same model
+# and combines all their metrics into one dictionary plus an aggregated "sequential_score".
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -10,6 +13,10 @@ if TYPE_CHECKING:
 
 
 class SequentialEvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # Composite evaluator. Attributes: evaluators (the iterable of sub-evaluators, stored as given) and main_score_function
+    # (callable taking the list of per-evaluator main scores and returning one aggregate score; defaults to taking the last
+    # score). Its primary metric is always "sequential_score".
     """
     This evaluator allows that multiple sub-evaluators are passed. When the model is evaluated,
     the data is passed sequentially to all sub-evaluators.
@@ -31,6 +38,11 @@ class SequentialEvaluator(BaseEvaluator):
     """
 
     def __init__(self, evaluators: Iterable[BaseEvaluator], main_score_function=lambda scores: scores[-1]):
+        # [FUNCTION DOC]
+        # Calls the base initialiser (greater_is_better True, primary_metric None) and stores the evaluators and the main score
+        # function unchanged.
+        # KNOWN ISSUE: evaluators is typed as any Iterable and stored as is; if a one-shot iterator or generator is passed, it
+        # is exhausted after the first evaluation and later calls evaluate nothing.
         super().__init__()
         self.evaluators = evaluators
         self.main_score_function = main_score_function
@@ -38,6 +50,13 @@ class SequentialEvaluator(BaseEvaluator):
     def __call__(
         self, model: BaseModel, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs every sub-evaluator with the same model, output_path, epoch and steps. For each result: if it is a plain score,
+        # the score is collected and the result is wrapped into a dict under the key "evaluator_<index>"; if it is a dict, the
+        # value under the sub-evaluator's primary_metric (or, if that is unset, the first key's value) is collected as its
+        # score. Sets self.primary_metric to "sequential_score". The aggregate is 0.0 when no scores were collected, otherwise
+        # main_score_function applied to the score list. Returns one flat dict merging all sub-results (later keys overwrite
+        # earlier equal keys) plus "sequential_score" holding the aggregate.
         evaluations = []
         scores = []
         for evaluator_idx, evaluator in enumerate(self.evaluators):

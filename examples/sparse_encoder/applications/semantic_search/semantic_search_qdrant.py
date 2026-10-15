@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Script: sparse semantic search with a local Qdrant. Encodes the first 10,000 Natural Questions answers with SPLADE as
+# sparse tensors, then loops forever: encodes the current queries (initially the first two dataset queries) as sparse
+# tensors, calls semantic_search_qdrant (top 5; the corpus is uploaded on the first call and the returned index reused),
+# prints timings and hits (score, answer, corpus id), and reads the next query from stdin.
+# Side effects: network, Qdrant collection creation, stdin/stdout.
 """
 This script contains an example how to perform semantic search with Qdrant.
 

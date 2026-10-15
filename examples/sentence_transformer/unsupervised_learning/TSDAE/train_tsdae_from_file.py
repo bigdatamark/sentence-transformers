@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: TSDAE training of bert-base-uncased (CLS pooling, max length 75) on sentences from a text file (first CLI
+# arg; gzip if .gz; lines shorter than 10 characters skipped; prints usage and exits without an argument). A set_transform
+# adds a random-word-deletion "noisy" column; 10,000 rows are split off as an eval dataset. DenoisingAutoEncoderLoss with
+# a tied decoder; batch 8, 1 epoch, lr 3e-5, fp16, eval/save every 1000 steps with an STSb validation evaluator (also run
+# before training) and STSb test afterwards. Saves to output/training_tsdae-<model>-8-<timestamp>/final and tries a Hub push.
+# Side effects: file reading, network, disk, GPU, stdout/logging.
+# KNOWN ISSUE: the fixed 10,000-row test split raises an error when the input file has 10,000 or fewer usable sentences.
 import gzip
 import logging
 import random
@@ -57,6 +65,14 @@ dataset = Dataset.from_dict({"text": train_sentences})
 
 
 def noise_transform(batch, del_ratio=0.6):
+    # [FUNCTION DOC]
+    # HELPER: batched set_transform function producing TSDAE inputs. Input: a batch dict with a "text" list and del_ratio
+    # (default 0.6; asserts it lies in [0, 1) and that the batch is a dict with "text"). Tokenizes each text with NLTK, keeps
+    # each word independently when a uniform random draw is below del_ratio, and detokenizes the kept words with the
+    # Treebank detokenizer; empty token lists return the original text and if nothing is kept a single random word is used.
+    # Returns a dict with "noisy" (the corrupted texts) and "text" (the originals). Uses the unseeded random module, so the
+    # noise differs on every access. NLTK is imported lazily and its punkt data must be available.
+    # KNOWN ISSUE: the docstring calls del_ratio the ratio of words to delete, but words are kept with probability del_ratio, so on average only 40% of words are deleted with the default.
     """
     Applies noise by randomly deleting words.
 

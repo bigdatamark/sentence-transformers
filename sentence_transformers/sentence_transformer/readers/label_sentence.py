@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Deprecated reader for files with a label column and a sentence column, mapping labels to ints.
 """
 This file contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.
@@ -16,12 +18,18 @@ from . import InputExample
 
 
 class LabelSentenceReader:
+    # [CLASS DOC]
+    # Reads separator-delimited lines from files in folder, taking the label and sentence from the
+    # configured column indices. Keeps label_map, a label-string-to-int map that grows across calls
+    # in first-seen order.
     """Reads in a file that has at least two columns: a label and a sentence.
     This reader can for example be used with the BatchHardTripletLoss.
     Maps labels automatically to integers
     """
 
     def __init__(self, folder, label_col_idx=0, sentence_col_idx=1, separator="\t"):
+        # [FUNCTION DOC]
+        # Stores the folder, column indices and separator, and starts an empty label map.
         self.folder = folder
         self.label_map = {}
         self.label_col_idx = label_col_idx
@@ -29,6 +37,12 @@ class LabelSentenceReader:
         self.separator = separator
 
     def get_examples(self, filename, max_examples=0):
+        # [FUNCTION DOC]
+        # Reads folder/filename line by line (UTF-8), splitting each stripped line by the separator, maps
+        # the label to an integer id (adding new labels to label_map, a mutation), and creates an
+        # InputExample with guid "filename-index", the single sentence and the label id. Stops after
+        # max_examples if it is positive. Returns the list. Raises IndexError for lines with too few columns.
+        # KNOWN ISSUE: The file is opened without being closed.
         examples = []
 
         id = 0

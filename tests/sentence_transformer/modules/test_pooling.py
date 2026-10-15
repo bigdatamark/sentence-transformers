@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for the Pooling module, which reduces token embeddings to a sentence embedding using modes such as cls, mean, max, mean_sqrt_len_tokens,
+# weightedmean and lasttoken, for padded inputs (batch by sequence with an attention mask) and flattened inputs (one concatenated token row
+# with cumulative sequence lengths, requiring transformers 5). Covers prompt exclusion, every mode's math under masks and padding sides,
+# gradient flow, configuration (legacy keyword conversion, validation, save/load), and helper functions defined in this file.
 from __future__ import annotations
 
 import warnings
@@ -24,6 +29,12 @@ requires_transformers_v5 = pytest.mark.skipif(
 def test_pooling_respects_include_prompt(
     stsb_bert_tiny_model: SentenceTransformer, padding_side: str, prompt: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over right/left padding and three prompts (including none). Sets the tokenizer padding side, asserts mean pooling, and encodes two
+    # sentences with raw outputs once with prompt inclusion and once without. Asserts both runs report the same attention mask; with no prompt,
+    # no prompt_length is reported and embeddings match; otherwise computes the expected mean over real tokens after the prompt (skipping left
+    # padding found as the first 1 in the mask plus the prompt length) and asserts the excluded-prompt embedding equals it and differs from the
+    # included-prompt one. Mutates the per-test model's tokenizer and pooling settings.
     """``include_prompt=False`` drops the prompt tokens from the pooling average and nothing else:
     the encoder still attends over them and the reported mask still describes them. So the contract
     is on the pooled vector, which must be the mean over the real tokens that follow the prompt."""
@@ -72,6 +83,9 @@ def test_pooling_respects_include_prompt(
 
 @pytest.mark.parametrize("padding_side", ["right", "left"])
 def test_pooling_prompt_exclusion_is_idempotent(stsb_bert_tiny_model: SentenceTransformer, padding_side: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over padding side. With prompt exclusion, embeds the same prompted feature dict twice without gradients and asserts the attention
+    # mask in the dict is unchanged after the first pass and both embeddings match.
     """The wrapper losses re-embed the dicts they were given, e.g. once per layer in
     AdaptiveLayerLoss. Narrowing ``attention_mask`` in place would hide the prompt from the encoder
     on the second pass and put the prompt boundary a prompt further in, so embedding a dict Pooling
@@ -97,6 +111,9 @@ def test_pooling_prompt_exclusion_is_idempotent(stsb_bert_tiny_model: SentenceTr
 
 @pytest.mark.parametrize("pooling_mode", Pooling.POOLING_MODES)
 def test_pooling_forward_all_strategies(pooling_mode: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over every pooling mode. Pools random 3x5x8 token embeddings with a mixed left/right padded mask and asserts the output shape
+    # is batch by the module's reported embedding dimension.
     # Basic sanity check that all pooling strategies run and produce the
     # expected sentence embedding shape.
     embedding_dimension = 8
@@ -136,6 +153,10 @@ def test_pooling_forward_all_strategies(pooling_mode: str) -> None:
     ids=["padded", "flattened"],
 )
 def test_pooling_gradient_flow(pooling_mode: str, flattened: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over every mode and over padded/flattened inputs (flattened needs transformers 5). Builds features (for flattened, converts via
+    # the local helper and replaces the token embeddings with a fresh leaf tensor), sums the pooled output, backpropagates, and asserts the leaf
+    # tensor received a non-zero gradient.
     """Verify that gradients flow through every pooling mode in both padded and flattened paths."""
     embedding_dimension = 8
     pooling = Pooling(embedding_dimension=embedding_dimension, pooling_mode=pooling_mode)
@@ -161,6 +182,8 @@ def test_pooling_gradient_flow(pooling_mode: str, flattened: bool) -> None:
 
 
 def test_pooling_cls_uses_cls_token_embeddings() -> None:
+    # [FUNCTION DOC]
+    # Asserts cls pooling returns the provided cls_token_embeddings instead of the first token embedding (padded input).
     dim = 4
     pooling = Pooling(embedding_dimension=dim, pooling_mode="cls")
 
@@ -183,6 +206,8 @@ def test_pooling_cls_uses_cls_token_embeddings() -> None:
 
 @requires_transformers_v5
 def test_pooling_flattened_cls_uses_cls_token_embeddings() -> None:
+    # [FUNCTION DOC]
+    # Requires transformers 5. Asserts cls pooling on flattened inputs also returns the provided cls_token_embeddings.
     dim = 4
     pooling = Pooling(embedding_dimension=dim, pooling_mode="cls")
 
@@ -210,6 +235,8 @@ def test_pooling_flattened_cls_uses_cls_token_embeddings() -> None:
 
 
 def test_pooling_cls_right_padded_uses_position_zero() -> None:
+    # [FUNCTION DOC]
+    # Asserts cls pooling on right-padded inputs takes position 0 of each row.
     """For right-padded inputs, the first real token is at position 0."""
     dim = 1
     pooling = Pooling(embedding_dimension=dim, pooling_mode="cls")
@@ -222,6 +249,8 @@ def test_pooling_cls_right_padded_uses_position_zero() -> None:
 
 
 def test_pooling_cls_left_padded_finds_first_real_token() -> None:
+    # [FUNCTION DOC]
+    # Asserts cls pooling on left-padded inputs takes the first attended position of each row.
     """For left-padded inputs (decoder-style models), the first real token is the first 1 in the
     attention mask, not position 0. Reproduces #3208.
     """
@@ -238,6 +267,8 @@ def test_pooling_cls_left_padded_finds_first_real_token() -> None:
 
 
 def test_pooling_max_respects_attention_mask() -> None:
+    # [FUNCTION DOC]
+    # Asserts max pooling ignores a masked position holding the largest value.
     dim = 1
     pooling = Pooling(embedding_dimension=dim, pooling_mode="max")
 
@@ -258,6 +289,9 @@ def test_pooling_max_respects_attention_mask() -> None:
 
 
 def test_pooling_mean_and_mean_sqrt_len_tokens() -> None:
+    # [FUNCTION DOC]
+    # With mean and mean_sqrt_len_tokens enabled together, asserts the output has twice the dimension and contains the masked mean followed by the
+    # masked sum divided by the square root of the attended-token count.
     dim = 1
     # Enable both mean and mean_sqrt_len at once to test that the
     # output dimension doubles and that both values are correct.
@@ -291,6 +325,8 @@ def test_pooling_mean_and_mean_sqrt_len_tokens() -> None:
 
 
 def test_pooling_weightedmean_respects_attention_mask() -> None:
+    # [FUNCTION DOC]
+    # Asserts weightedmean pooling weights positions 1, 2, 3 and normalizes over attended positions only (expected 7/3).
     dim = 1
     pooling = Pooling(embedding_dimension=dim, pooling_mode="weightedmean")
 
@@ -313,6 +349,8 @@ def test_pooling_weightedmean_respects_attention_mask() -> None:
 
 
 def test_pooling_lasttoken_finds_last_attended_token() -> None:
+    # [FUNCTION DOC]
+    # Asserts lasttoken pooling selects each row's last attended position for right padding.
     dim = 1
     pooling = Pooling(embedding_dimension=dim, pooling_mode="lasttoken")
 
@@ -340,6 +378,8 @@ def test_pooling_lasttoken_finds_last_attended_token() -> None:
 
 
 def test_pooling_lasttoken_all_padding_returns_zero_vector() -> None:
+    # [FUNCTION DOC]
+    # Asserts lasttoken pooling over a fully masked row returns an all-zero vector of the right shape.
     dim = 2
     pooling = Pooling(embedding_dimension=dim, pooling_mode="lasttoken")
 
@@ -363,6 +403,10 @@ def test_pooling_lasttoken_all_padding_returns_zero_vector() -> None:
     ],
 )
 def test_pooling_excludes_prompt_tokens_directly(padding_side: str, prompt_length_value) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over padding side and prompt length given as an int, a 1-element tensor or a per-row tensor. Pools random embeddings with mean
+    # pooling and prompt exclusion; asserts the caller's attention mask tensor is unchanged and still the same object in the dict, and that the
+    # output equals the mean over positions after left padding plus the prompt length.
     dim = 1
     pooling = Pooling(embedding_dimension=dim, pooling_mode="mean", include_prompt=False)
 
@@ -458,6 +502,10 @@ _EXPECTED_BY_MODE_WITH_PROMPT_EXCLUDED: dict[str, torch.Tensor] = {
 
 
 def _build_flattened_features(token_embeddings: torch.Tensor, attention_mask: torch.Tensor) -> dict[str, torch.Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Converts padded token embeddings and mask to the flattened format: uses transformers' DataCollatorWithFlattening (with sequence
+    # indices, flash-attention kwargs and position ids) on dummy input ids of each row's real length, then sets token_embeddings to the real
+    # tokens of all rows concatenated into a single row, and removes input_ids and labels. Returns the collated dict.
     """Convert padded inputs to flattened format using DataCollatorWithFlattening."""
     from transformers import DataCollatorWithFlattening
 
@@ -480,6 +528,9 @@ def _build_flattened_features(token_embeddings: torch.Tensor, attention_mask: to
     ids=["padded", "flattened"],
 )
 def test_pooling_exact_values(pooling_mode: str, flattened: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over every mode and padded/flattened. Pools the shared two-sequence fixture (one padded row) and asserts exact expected values
+    # from the module-level expected table.
     """Verify each pooling mode produces the expected exact values."""
     pooling = Pooling(embedding_dimension=_DIM, pooling_mode=pooling_mode)
     if flattened:
@@ -506,6 +557,9 @@ def test_pooling_exact_values(pooling_mode: str, flattened: bool) -> None:
     ids=["padded", "flattened"],
 )
 def test_pooling_multi_mode(modes: tuple[str, ...], flattened: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mode combinations and padded/flattened. Asserts the output is the concatenation of each mode's expected output in the
+    # given order.
     """Verify multiple pooling modes are concatenated in the correct order."""
     pooling = Pooling(embedding_dimension=_DIM, pooling_mode=modes)
     if flattened:
@@ -528,6 +582,9 @@ def test_pooling_multi_mode(modes: tuple[str, ...], flattened: bool) -> None:
     ids=["padded", "flattened"],
 )
 def test_pooling_excludes_prompt_tokens_for_padded_and_flattened_inputs(pooling_mode: str, flattened: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over non-cls modes and padded/flattened. With prompt exclusion and prompt length 1, asserts outputs match the expected table
+    # computed without each sequence's first token.
     pooling = Pooling(embedding_dimension=_DIM, pooling_mode=pooling_mode, include_prompt=False)
 
     features: dict[str, Any]
@@ -548,6 +605,8 @@ def test_pooling_excludes_prompt_tokens_for_padded_and_flattened_inputs(pooling_
 
 
 def test_pooling_legacy_bool_kwargs_with_deprecation_warning() -> None:
+    # [FUNCTION DOC]
+    # Asserts the legacy boolean keyword for cls pooling emits a FutureWarning and maps to mode "cls" with output dimension 8.
     """Legacy ``pooling_mode_*`` bool kwargs should still work but emit a FutureWarning."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -559,6 +618,8 @@ def test_pooling_legacy_bool_kwargs_with_deprecation_warning() -> None:
 
 
 def test_pooling_legacy_multiple_bool_kwargs() -> None:
+    # [FUNCTION DOC]
+    # Asserts two legacy boolean keywords map to the tuple ("cls", "mean") with doubled output dimension.
     """Multiple legacy bool kwargs should produce a tuple of modes in forward order."""
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
@@ -572,6 +633,8 @@ def test_pooling_legacy_multiple_bool_kwargs() -> None:
 
 
 def test_pooling_legacy_config_conversion() -> None:
+    # [FUNCTION DOC]
+    # Asserts the legacy-config converter replaces the boolean pooling_mode_* keys in place with a single pooling_mode "mean", keeping other keys.
     """Verify that old-style saved configs are silently converted when loading."""
     old_config = {
         "embedding_dimension": 384,
@@ -588,6 +651,8 @@ def test_pooling_legacy_config_conversion() -> None:
 
 
 def test_pooling_legacy_config_conversion_multi_mode() -> None:
+    # [FUNCTION DOC]
+    # Asserts the converter produces a tuple of modes when several legacy booleans are true.
     """Verify legacy config with multiple active modes converts to a tuple."""
     old_config = {
         "embedding_dimension": 384,
@@ -604,6 +669,9 @@ def test_pooling_legacy_config_conversion_multi_mode() -> None:
 
 
 def test_pooling_config_round_trip(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # For a single and a tuple mode, saves the module to tmp_path, reloads it, and asserts mode, embedding dimension and include_prompt survive.
+    # Writes files (overwriting on the second iteration).
     """Verify config survives a save/load round-trip through JSON."""
     for mode in ["cls", ("cls", "mean")]:
         pooling = Pooling(embedding_dimension=8, pooling_mode=mode)
@@ -615,6 +683,8 @@ def test_pooling_config_round_trip(tmp_path: Path) -> None:
 
 
 def test_pooling_invalid_mode_raises() -> None:
+    # [FUNCTION DOC]
+    # Asserts an unknown pooling mode raises ValueError.
     with pytest.raises(ValueError, match="Invalid pooling mode"):
         Pooling(embedding_dimension=8, pooling_mode="nonexistent")
 
@@ -623,6 +693,10 @@ def test_pooling_invalid_mode_raises() -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.parametrize("pooling_mode", Pooling.POOLING_MODES)
 def test_pooling_flattened_live_flash_attention(pooling_mode: str) -> None:
+    # [FUNCTION DOC]
+    # Requires transformers 5, CUDA and the kernels library (skipped otherwise). Parametrized over every mode. Loads the tiny model in float16 with
+    # default attention and with flash_attention_2, sets the pooling module's mode (and output dimension) on each, encodes two sentences, and asserts
+    # the embeddings match within 1e-2. Downloads the model.
     """End-to-end test comparing flattened (flash attention) vs padded pooling on a real model.
 
     Loads a real SentenceTransformer with flash_attention_2, runs inference, and compares

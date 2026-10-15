@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Script: continue masked-language-model pretraining of a Hugging Face model with the plain transformers Trainer.
+# CLI: model_name, train file, optional dev file (prints usage and exits with fewer than two args). Files may be gzip
+# (.gz); lines are stripped and those shorter than 10 characters skipped. Uses whole-word masking (default) or token
+# masking with probability 0.15, max length 100, batch 64, 3 epochs, saving/logging (and evaluating when a dev file is
+# given) every 1000 steps, keeping 1 checkpoint. Saves the tokenizer before and the model after training to
+# output/<model_name with slashes replaced>-<timestamp>. Side effects: file reading, network, disk, GPU, stdout.
+# KNOWN ISSUE: the docstring says the model is stored in output/model_name, but the folder name also contains a timestamp.
+# KNOWN ISSUE: it passes evaluation_strategy to TrainingArguments, which recent transformers versions renamed to eval_strategy and no longer accept.
 """
 This file runs Masked Language Model. You provide a training file. Each line is interpreted as a sentence / paragraph.
 Optionally, you can also provide a dev file.
@@ -78,13 +87,21 @@ print("Dev sentences:", len(dev_sentences))
 
 # A dataset wrapper, that tokenizes our data on-the-fly
 class TokenizedSentencesDataset:
+    # [CLASS DOC]
+    # HELPER: map-style dataset that tokenizes sentences lazily for the Trainer. Attributes: tokenizer, sentences (list,
+    # mutated in place when caching), max_length, cache_tokenization.
     def __init__(self, sentences, tokenizer, max_length, cache_tokenization=False):
+        # [FUNCTION DOC]
+        # Store the sentence list, tokenizer, max_length and whether to cache tokenization (default False).
         self.tokenizer = tokenizer
         self.sentences = sentences
         self.max_length = max_length
         self.cache_tokenization = cache_tokenization
 
     def __getitem__(self, item):
+        # [FUNCTION DOC]
+        # Return the tokenizer encoding of sentence item (special tokens added, truncated to max_length, with a special tokens
+        # mask). With caching enabled, the first access replaces the string in the list by its encoding and later accesses return it.
         if not self.cache_tokenization:
             return self.tokenizer(
                 self.sentences[item],
@@ -105,6 +122,8 @@ class TokenizedSentencesDataset:
         return self.sentences[item]
 
     def __len__(self):
+        # [FUNCTION DOC]
+        # Return the number of sentences.
         return len(self.sentences)
 
 

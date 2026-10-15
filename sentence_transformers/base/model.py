@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Defines BaseModel, the abstract base class shared by SentenceTransformer, SparseEncoder and CrossEncoder. A model is
+# a torch Sequential of modules (typically an input module such as Transformer followed by pooling/dense/etc.). This
+# module implements construction and loading (from a local directory, from the Hugging Face Hub, from legacy
+# checkpoints or from a given module list), saving (modules.json, config_sentence_transformers.json, per-module
+# subfolders, model card, custom code files), pushing to the Hub, device and dtype management, prompt handling,
+# modality support checks, input preprocessing, multi-process pools for encoding on several devices, and access to the
+# tokenizer/processor and transformer configuration. Uses the transformers logger.
 from __future__ import annotations
 
 import importlib
@@ -55,6 +63,15 @@ logger = transformers_logging.get_logger(__name__)
 
 
 class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
+    # [CLASS DOC]
+    # Abstract base model. Class attributes: model_card_data_class (card data class instantiated when none is given),
+    # default_huggingface_organization (prefix added to bare short model names when loading, or None), _default_prompts
+    # (prompt name to prompt text; None means "fill from saved config"), _model_card_model_id_placeholder (placeholder model
+    # id replaced in card templates), model_type (archetype identifier written to and checked in the saved config; set by
+    # subclasses) and _module_classes (per-instance override mapping from saved module type strings to already imported
+    # classes). Instance attributes set in the initialiser: prompts, default_prompt_name, trust_remote_code,
+    # model_card_data, module_kwargs (per-module extra keyword argument names for forward), backend, is_hpu_graph_enabled
+    # and private model card variables/text. Mixes in PEFT adapter helpers.
     """
     Base class for SentenceTransformer, SparseEncoder, and CrossEncoder models.
 
@@ -106,6 +123,21 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         model_card_data: CardData | None = None,
         backend: Literal["torch", "onnx", "openvino"] = "torch",
     ) -> None:
+        # [FUNCTION DOC]
+        # Builds the model. Merges the class default prompts with the given prompts (given ones win), stores the default
+        # prompt name, trust_remote_code flag, model card data (given or newly created with local_files_only), backend, and
+        # resets module kwargs and card state. The cache folder defaults to the SENTENCE_TRANSFORMERS_HOME environment variable.
+        # A "device_map" in model_kwargs (only for the torch backend with a model name) takes over device placement: if no
+        # device and no device map are given, a device is auto-selected (info log); if both are given, a warning says device is
+        # ignored. For the "hpu" device, optimum's Gaudi adaptation is applied if installed. For a non-directory model name:
+        # raises NotADirectoryError if it is an existing file; raises FileNotFoundError if it contains a backslash on Windows or
+        # more than one slash; prepends the default organization to bare names not in the list of original transformer model
+        # names. If both a name and modules are given, warns and ignores modules. With a name, loads modules and module kwargs
+        # via _load_modules. A plain module list is converted to an ordered dict keyed by index strings; an empty module
+        # collection raises ValueError. Initialises the Sequential with the modules, casts all modules after the first to the
+        # first module's parameter dtype (if it has parameters), then moves the remaining modules onto the backbone device when
+        # a device map is used or moves the whole model to the device otherwise. Finally validates prompts, registers the
+        # model with its card data and runs _post_init.
         """
         Initialize a BaseModel instance.
 
@@ -287,6 +319,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
     def _load_with_module_classes(
         cls, model_name_or_path: str, module_classes: Mapping[str, type[nn.Module]], **kwargs: Any
     ) -> Self:
+        # [FUNCTION DOC]
+        # HELPER: class method that creates an instance without running the initialiser, sets its module class override
+        # mapping, then runs the initialiser with the model name and keyword arguments, and returns the instance. Lets callers
+        # resolve saved module types to given classes instead of importing them.
         """
         Load a saved model, resolving the ``modules.json`` types listed in ``module_classes`` to those
         classes rather than importing them. Types left out resolve as usual, ``trust_remote_code`` gate
@@ -311,6 +347,9 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return model
 
     def _post_init(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: final construction step; calls on_model_ready with this model on every child that is a library Module.
+        # Subclasses extend it.
         """Final construction step, called at the end of ``__init__``: fires every module's
         :meth:`~sentence_transformers.base.modules.Module.on_model_ready` hook. Families override
         it to run extra construction work first (e.g. legacy checkpoint fixups that add or replace
@@ -320,6 +359,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
                 module.on_model_ready(self)
 
     def _validate_prompts(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: replaces any None prompt value with an empty string (mutating self.prompts), raises ValueError if the default
+        # prompt name is set but not among the prompt keys, logs at info level the keys of non-empty prompts, and logs a
+        # one-time warning when a default prompt name is set.
         """Validate prompt configuration and log prompt information."""
         # Replace any remaining None prompts (not filled by saved config) with empty strings
         for key, value in self.prompts.items():
@@ -342,6 +385,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
             )
 
     def _resolve_prompt(self, prompt: str | None, prompt_name: str | None) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: returns the prompt to use. An explicit prompt wins (with a warning if a prompt name was also given). Otherwise
+        # a given prompt name is looked up in self.prompts (ValueError if missing), else the default prompt name's prompt is
+        # used if set, else None.
         """Resolve a prompt from a prompt name or the default prompt name.
 
         Args:
@@ -369,6 +416,8 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return prompt
 
     def get_backend(self) -> Literal["torch", "onnx", "openvino"]:
+        # [FUNCTION DOC]
+        # Returns the backend string ("torch", "onnx" or "openvino").
         """Return the backend used for inference, which can be one of "torch", "onnx", or "openvino".
 
         Returns:
@@ -378,10 +427,15 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
 
     @property
     def modalities(self) -> list[Modality]:
+        # [FUNCTION DOC]
+        # Property: the modalities list of the first module, defaulting to only text if the module has no such attribute.
         """Return the list of modalities supported by this model, e.g. ``["text"]`` or ``["text", "image", "message"]``."""
         return getattr(self[0], "modalities", ["text"])
 
     def supports(self, modality: Modality) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if the modality is listed in modalities, or if it is a tuple whose parts are all listed and the model
+        # also supports "message" (used to combine modalities); False otherwise.
         """Check if the model supports the given modality.
 
         A modality is supported if:
@@ -416,6 +470,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return False
 
     def get_model_kwargs(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Returns the list (order unspecified, duplicates removed) of extra keyword argument names the model's forward accepts.
+        # Walks all direct children, descending into each Router's route children, and collects the names configured for each
+        # module name in self.module_kwargs plus any names in a module's "forward_kwargs" attribute.
         """
         Get the keyword arguments specific to this model for inference methods like `encode` or `predict`.
 
@@ -446,6 +504,8 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return list(forward_kwargs)
 
     def get_max_seq_length(self) -> int | None:
+        # [FUNCTION DOC]
+        # Deprecated alias returning the max_seq_length property.
         """
         .. deprecated::
             Use the :attr:`max_seq_length` property instead.
@@ -459,14 +519,22 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return self.max_seq_length
 
     def _first_module(self) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # HELPER: returns the first child module.
         """Returns the first module of this sequential embedder"""
         return self._modules[next(iter(self._modules))]
 
     def _last_module(self) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # HELPER: returns the last child module.
         """Returns the last module of this sequential embedder"""
         return self._modules[next(reversed(self._modules))]
 
     def _can_flatten_inputs(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns whether text-only inputs can be flattened (padding-free packing). For a Transformer first module,
+        # returns its can_flatten_inputs flag; for a Router, True only if it has routes and every route's first child is a
+        # Transformer that can flatten; otherwise False.
         """Check if the first module (Transformer or Router containing Transformers) supports flattened text-only inputs.
 
         For Router models, this returns True only if ALL routes support flattening, since we cannot
@@ -486,6 +554,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
 
     @staticmethod
     def _interleave_sorted_indices(sorted_idx: np.ndarray) -> np.ndarray:
+        # [FUNCTION DOC]
+        # HELPER: static. Given indices sorted from longest to shortest input, returns a same-length array alternating
+        # largest, smallest, second largest, second smallest and so on (first half in order at even positions, the second half
+        # reversed at odd positions), so consecutive batches mix long and short inputs.
         """Interleave a largest-to-smallest sorted index array so that each consecutive batch
         contains a mix of long and short inputs.
 
@@ -503,6 +575,12 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
 
     @staticmethod
     def _input_length(sample) -> int:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns a rough size estimate of one input for length-based sorting: character count for strings;
+        # sum over elements for non-empty lists/tuples not starting with a message dict; for dicts, the size of "array" if
+        # present, else for messages the length of string content or the total length of "text" fields of dict items in list
+        # content (1 for other content), else the sum over the values (multimodal dicts); sum over messages for a list of
+        # message dicts; element count for arrays/tensors; pixel count for PIL images (if PIL is importable); 1 otherwise.
         """Estimate the "size" of an input sample for length-based batch sorting.
 
         The exact value doesn't matter, it's only used to group similarly sized
@@ -552,6 +630,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return 1
 
     def forward(self, input: dict[str, Tensor], **kwargs) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Runs the feature dict through every child in order and returns the final dict. Routers receive all keyword
+        # arguments; other modules receive only those whose names are configured for that module in module_kwargs or listed
+        # in the module's forward_kwargs attribute.
         """Forward pass through all modules in the model."""
         for module_name, module in self.named_children():
             module_kwargs = {}
@@ -570,6 +652,8 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return input
 
     def compile(self, *args, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Compiles the forward pass by delegating all arguments to the parent's compile (torch.compile in place). Returns None.
         """
         Compile the model's forward pass with :func:`torch.compile` to speed up inference.
 
@@ -590,6 +674,17 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         prompt: str | None = None,
         **kwargs,
     ) -> dict[str, Tensor | Any]:
+        # [FUNCTION DOC]
+        # Converts a batch of raw inputs into model features via the first module. Empty input returns an empty dict. Infers
+        # the batch modality (ignoring ValueError/TypeError) and, if inferred and unsupported, raises ValueError through the
+        # shared unsupported-modality error helper. Calls the first module's preprocess with the prompt and extra kwargs. For
+        # backward compatibility: if that raises TypeError, the prompt is prepended to text inputs manually (to the first
+        # element of tuple pairs) and preprocess is retried without it; if the module has no preprocess (AttributeError), the
+        # same prompt handling is applied and its tokenize is called with kwargs, or without kwargs on TypeError. Returns the
+        # feature dict.
+        # KNOWN ISSUE: the fallback catches any TypeError raised inside preprocess, not only an unexpected "prompt" argument,
+        # so genuine errors are retried silently; also text pairs given as lists (rather than tuples) are string-concatenated
+        # with the prompt and raise TypeError in that fallback.
         """
         Preprocesses the inputs for the model.
 
@@ -643,6 +738,8 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return preprocessed
 
     def tokenize(self, texts: list[str] | list[dict] | list[tuple[str, str]], **kwargs) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Deprecated: logs a one-time warning and delegates to preprocess with the given texts and kwargs.
         """
         .. deprecated::
             `tokenize` is deprecated. Use `preprocess` instead.
@@ -652,6 +749,10 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         return self.preprocess(inputs=texts, **kwargs)
 
     def is_singular_input(self, inputs: Any) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if the input is a single example. A non-empty list starting with a message dict is one conversation
+        # (single). Lists, tuples and (if the datasets library is available) dataset Column objects are batches. Numpy arrays
+        # of at least one dimension with unicode or object dtype are batches. Everything else is a single example.
         """
         Check if the input represents a single example or a batch of examples.
 
@@ -689,6 +790,15 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         train_datasets: list[str] | None = None,
         safe_serialization: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Saves the model to a directory so it can be reloaded. Does nothing if path is None. Creates the directory, writes
+        # config_sentence_transformers.json (model type, library versions, prompts, default prompt name; sorted keys). For each
+        # module, chooses the directory (the root for a first module flagged save_in_root, else a subfolder named index
+        # underscore class name), creates it and calls the module's save with safe_serialization (or without it on TypeError).
+        # For classes loaded from remote code (module path in the dynamic transformers_modules namespace), copies the class's
+        # source file and its relative imports into the module folder and records the type as file stem plus class name;
+        # otherwise the type is the full module path plus class name. Writes modules.json with index, name, relative path,
+        # type and any non-empty per-module kwargs. Optionally writes the model card. Logs at info level.
         """
         Saves a model and its configuration files to a directory, so that it can be loaded again.
 
@@ -762,6 +872,9 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
             self._create_model_card(path, model_name, train_datasets)
 
     def _get_model_config(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns the model-level config dict: model_type, versions of sentence-transformers, transformers and torch,
+        # prompts and default prompt name.
         return {
             "model_type": self.model_type,
             "__version__": {
@@ -781,6 +894,8 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         train_datasets: list[str] | None = None,
         safe_serialization: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Alias of save with the same arguments.
         """
         Saves a model and its configuration files to a directory, so that it can be loaded again.
 
@@ -801,6 +916,9 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         )
 
     def _update_default_model_id(self, model_card: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: if the card data has a model id, replaces the placeholder id in the usage snippet line (class name followed
+        # by the placeholder string) of the given card text with the real id. Returns the text.
         """Update the default model ID in the model card."""
         if self.model_card_data.model_id:
             model_card = model_card.replace(
@@ -812,6 +930,12 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
     def _create_model_card(
         self, path: str, model_name: str | None = None, train_datasets: list[str] | None = "deprecated"
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: writes README.md into path. If a model name is given that is not an existing path and the card data has no
+        # model id, it becomes the model id. Sets the card data's save directory (for assets). Reuses the card text loaded
+        # from the Hub (with updated model id) if one exists and the model was not trained (no "generated_from_trainer" tag);
+        # otherwise generates a new card, and on any exception logs the traceback as an error and skips writing. The
+        # train_datasets argument is ignored.
         """
         Create an automatic model card and store it in the specified path.
 
@@ -864,6 +988,11 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         replace_model_card: bool = False,
         train_datasets: list[str] | None = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Deprecated upload method (wrapped by a decorator that handles legacy argument names). Logs a deprecation warning. If
+        # an organization is given: prepends it to a repo id without a slash (with a warning), raises ValueError if the repo
+        # id's owner differs from it, or warns if it matches. Then delegates to push_to_hub with the remaining arguments and
+        # returns its result (commit or pull request URL).
         """
         DEPRECATED, use `push_to_hub` instead.
 
@@ -929,6 +1058,15 @@ class BaseModel(nn.Sequential, PeftAdapterMixin, ABC):
         revision: str | None = None,
         create_pr: bool = False,
     ) -> str:
+        # [FUNCTION DOC]
+        # Uploads the model to a Hugging Face Hub repository and returns the commit URL (or the pull request URL when
+        # create_pr is set). Network side effects: creates the repo (existing repos allowed when exist_ok or create_pr), sets
+        # the card data's model id to the resolved repo id, creates the target branch if a revision is given. The default
+        # commit message names the class and, for non-torch backends, the backend. For pull requests, a description is built
+        # containing the model architecture and a usage tip. If local_model_path is given, that folder is uploaded as is.
+        # Otherwise the model is saved into a temporary directory and uploaded; the model card is created when
+        # replace_model_card is set, or else only if the repo has no README.md (if checking that fails, a warning is logged and
+        # no card is created). Logs the pull request URL at info level.
         """
         Uploads all elements of this model to a HuggingFace Hub repository, creating it if it doesn't exist.
 
@@ -1045,6 +1183,11 @@ This pull request has been automatically generated to add {self.__class__.__name
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: decides how to load modules for a model name or path and returns the modules and per-module kwargs. If no
+        # modules.json can be found, initialises default modules (e.g. a plain transformers checkpoint, info log). Otherwise
+        # reads the saved model type: if it equals this class's model_type, loads modules from the config; otherwise logs a
+        # warning and converts the saved model of another type via _load_converted_modules.
         load_kwargs = {
             "token": token,
             "cache_folder": cache_folder,
@@ -1096,6 +1239,9 @@ This pull request has been automatically generated to add {self.__class__.__name
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Abstract: subclasses build default modules (e.g. Transformer plus pooling) for a checkpoint without modules.json and
+        # return them with their per-module kwargs. The base body does nothing.
         """
 
         Args:
@@ -1125,6 +1271,19 @@ This pull request has been automatically generated to add {self.__class__.__name
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: loads a saved model described by modules.json. If config_sentence_transformers.json exists, reads it, checks
+        # the declared environment requirements (raising before loading anything if unmet), warns if the model was saved by a
+        # newer library version, and parses it via _parse_model_config. Tries to fetch README.md (warning on errors) and stores
+        # its text for reuse in the model card (read errors ignored). Reads modules.json and for each entry resolves the class
+        # from its type string, then loads the module: for legacy modules whose load method takes a single parameter, modules
+        # whose initialiser accepts transformer-style kwargs (new names, or old names such as model_args) are built directly
+        # from the loaded Transformer init kwargs (renaming new kwarg names to old ones for old-style modules and dropping the
+        # newer optional "modality_config"/"module_output_name" params they do not accept); other legacy modules get their
+        # subfolder downloaded and loaded from the local path. Modern modules are loaded with the model name, subfolder,
+        # loading options, kwargs and backend, plus saved init defaults and the module class overrides when applicable. Stores
+        # each module and its kwargs list by name. When no revision was given, tries to derive the revision from the cached
+        # snapshot path and records it in the card data. Returns the ordered modules and kwargs.
         """
         Loads a full model using the modules.json file.
 
@@ -1326,6 +1485,10 @@ This pull request has been automatically generated to add {self.__class__.__name
         return modules, module_kwargs
 
     def _parse_model_config(self, model_config: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: merges a saved model config into the instance. Saved prompts fill only names that are missing from
+        # self.prompts or currently None (an empty string counts as set). The saved default prompt name is used only if none
+        # was given. Mutates self.prompts and self.default_prompt_name.
         """Parse model configuration and merge saved prompts/defaults with user-provided values.
 
         User-provided prompts and default_prompt_name take precedence over saved config values.
@@ -1353,6 +1516,10 @@ This pull request has been automatically generated to add {self.__class__.__name
         config_kwargs: dict[str, Any] | None = None,
         model_type: str | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: loads a save of a different model type by building this class's default modules on it (delegating to
+        # _load_default_modules with the same loading options; model_type is unused). The source's saved config is
+        # intentionally not parsed, so its prompts and similarity settings are not carried over.
         """Load a save of a different model type by building this class's default modules on top of it.
 
         The source's ``config_sentence_transformers.json`` is deliberately not parsed: this path
@@ -1382,6 +1549,9 @@ This pull request has been automatically generated to add {self.__class__.__name
         revision: str | None = None,
         local_files_only: bool = False,
     ) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns the "model_type" stored in config_sentence_transformers.json of the given model, or
+        # "SentenceTransformer" if the file or the key is missing (older saves). Side effects: file lookup / download.
         """
         Retrieves the model_type from the config_sentence_transformers.json file.
 
@@ -1421,6 +1591,9 @@ This pull request has been automatically generated to add {self.__class__.__name
             return config.get("model_type", "SentenceTransformer")
 
     def _get_module_init_defaults(self, class_ref: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: hook returning extra default init kwargs for the module with the given class reference at load time (saved
+        # config takes precedence). The base implementation returns an empty dict.
         """Hook for subclasses to inject extra defaults into a module's ``__init__`` at load time.
 
         Returned kwargs are forwarded to ``module_class.load(..., init_defaults=...)`` and applied
@@ -1443,6 +1616,12 @@ This pull request has been automatically generated to add {self.__class__.__name
         cache_folder: str | None = None,
         local_files_only: bool = False,
     ) -> type:
+        # [FUNCTION DOC]
+        # HELPER: resolves a module class from its saved type string. Returns the override from _module_classes if present.
+        # Otherwise takes "code_revision" out of model_kwargs (if any) and imports the class via the shared import utility,
+        # which may fetch remote code (gated by trust_remote_code) using the revision, token, cache folder and offline flag.
+        # KNOWN ISSUE: "code_revision" is popped from the caller's model_kwargs dict, mutating it, and since this runs once per
+        # module only the first resolved module receives the code revision; later modules get None.
         """
         Load a module class from a class reference string, preferring a class supplied via ``module_classes``.
 
@@ -1475,6 +1654,8 @@ This pull request has been automatically generated to add {self.__class__.__name
         )
 
     def evaluate(self, evaluator: BaseEvaluator, output_path: str | None = None) -> dict[str, float] | float:
+        # [FUNCTION DOC]
+        # Runs the evaluator on this model, creating output_path first if given, and returns the evaluator's result.
         """
         Evaluate the model based on an evaluator
 
@@ -1490,6 +1671,10 @@ This pull request has been automatically generated to add {self.__class__.__name
         return evaluator(self, output_path)
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs: dict[str, Any] | None = None) -> None:
+        # [FUNCTION DOC]
+        # Enables gradient checkpointing on every submodule (excluding the model itself) that has a gradient-checkpointing
+        # enable method, passing the kwargs (or no arguments if that raises TypeError). Submodules declaring
+        # supports_gradient_checkpointing as False are skipped with a one-time warning.
         """Enable gradient checkpointing for the model."""
         # Propagate the gradient checkpointing to the transformer model
         for module in self.modules():
@@ -1508,6 +1693,10 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def device(self) -> torch.device:
+        # [FUNCTION DOC]
+        # Property: the device of the model. Uses the underlying transformers model's device if available, then the first
+        # module's auto_model device, then the first parameter's device; if there are no parameters, the device of the first
+        # tensor attribute found on any submodule; finally CPU.
         """
         Get torch.device from module, assuming that the whole module has one device.
         In case there are no PyTorch parameters, fall back to CPU.
@@ -1524,6 +1713,8 @@ This pull request has been automatically generated to add {self.__class__.__name
             # Fallback for nn.DataParallel compatibility when parameters() is empty
 
             def find_tensor_attributes(module: nn.Module) -> list[tuple[str, Tensor]]:
+                # [FUNCTION DOC]
+                # HELPER: returns name/value pairs of the module's instance attributes that are tensors.
                 tuples = [(k, v) for k, v in module.__dict__.items() if torch.is_tensor(v)]
                 return tuples
 
@@ -1537,6 +1728,11 @@ This pull request has been automatically generated to add {self.__class__.__name
     def start_multi_process_pool(
         self, target_devices: list[str] | None = None
     ) -> dict[Literal["input", "output", "processes"], Any]:
+        # [FUNCTION DOC]
+        # Starts worker processes for multi-device inference and returns a dict with "input" and "output" queues and the
+        # list of "processes". Default devices: all CUDA devices, else all NPU devices, else four CPU workers. Side effects:
+        # moves the model to CPU (it stays there), puts its memory in shared mode, and spawns one daemon process per device
+        # (spawn context) running the class's worker function with the device, the model and both queues. Logs at info level.
         """
         Starts a multi-process pool to infer with several independent processes.
 
@@ -1586,6 +1782,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @staticmethod
     def stop_multi_process_pool(pool: dict[Literal["input", "output", "processes"], Any]) -> None:
+        # [FUNCTION DOC]
+        # Static: terminates, joins and closes every pool process, then closes the input and output queues.
         """
         Stops all processes started with start_multi_process_pool.
 
@@ -1606,6 +1804,8 @@ This pull request has been automatically generated to add {self.__class__.__name
         pool["output"].close()
 
     def _multi_process(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # Abstract placeholder for multi-process inference; always raises NotImplementedError.
         raise NotImplementedError("This method should be implemented in subclasses.")
 
     @staticmethod
@@ -1615,6 +1815,9 @@ This pull request has been automatically generated to add {self.__class__.__name
         input_queue: Queue,
         results_queue: Queue,
     ) -> None:
+        # [FUNCTION DOC]
+        # Static abstract worker entry point for pool processes (should read from the input queue, run inference on the target
+        # device and write to the results queue). The base version raises NotImplementedError.
         """Worker function for multi-process inference. Must be overridden by subclasses.
 
         This is called as the target function in each spawned process by
@@ -1626,6 +1829,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def tokenizer(self) -> Any:
+        # [FUNCTION DOC]
+        # Property: the first module's tokenizer.
         """
         Property to get the tokenizer that is used by this model
         """
@@ -1633,6 +1838,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @tokenizer.setter
     def tokenizer(self, value) -> None:
+        # [FUNCTION DOC]
+        # Setter: assigns the tokenizer on the first module; raises AttributeError with a clearer message if that fails.
         """
         Property to set the tokenizer that should be used by this model
         """
@@ -1645,6 +1852,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def processor(self) -> Any:
+        # [FUNCTION DOC]
+        # Property: the first module's processor.
         """
         Property to get the processor that is used by this model
         """
@@ -1652,6 +1861,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def max_seq_length(self) -> int | None:
+        # [FUNCTION DOC]
+        # Property: the first module's max_seq_length, or None if it has none.
         """
         Returns the maximal input sequence length for the model. Longer inputs will be truncated.
 
@@ -1662,6 +1873,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @max_seq_length.setter
     def max_seq_length(self, value) -> None:
+        # [FUNCTION DOC]
+        # Setter: sets max_seq_length on the first module.
         """
         Property to set the maximal input sequence length for the model. Longer inputs will be truncated.
         """
@@ -1669,6 +1882,9 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def transformers_model(self) -> PreTrainedModel | None:
+        # [FUNCTION DOC]
+        # Property: walks all submodules in order and returns the wrapped model of the first Transformer module, or the first
+        # transformers PreTrainedModel found; None if neither exists.
         """
         Property to get the underlying transformers PreTrainedModel instance, if it exists.
         Note that it's possible for a model to have multiple underlying transformers models, but this property
@@ -1693,6 +1909,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def config(self) -> PretrainedConfig | None:
+        # [FUNCTION DOC]
+        # Property: the config of the underlying transformers model, or None if there is none (or it lacks a config).
         """The transformers ``PretrainedConfig`` of the underlying model.
 
         Several integrations (most notably Deepspeed and ``transformers.Trainer``) read
@@ -1708,6 +1926,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @config.setter
     def config(self, value: PretrainedConfig) -> None:
+        # [FUNCTION DOC]
+        # Setter: assigns the config on the underlying transformers model if it exists; otherwise does nothing.
         """Sets the config on the underlying transformer model.
         Has no effect if the model has no underlying transformer model.
         """
@@ -1717,6 +1937,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def _target_device(self) -> torch.device:
+        # [FUNCTION DOC]
+        # Deprecated property: logs a warning and returns device.
         logger.warning(
             f"`{self.__class__.__name__}._target_device` has been deprecated. Please use `{self.__class__.__name__}.device` instead.",
         )
@@ -1724,6 +1946,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @_target_device.setter
     def _target_device(self, device: int | str | torch.device | None = None) -> None:
+        # [FUNCTION DOC]
+        # Deprecated setter: logs a warning and moves the model to the given device.
         logger.warning(
             f"`{self.__class__.__name__}._target_device` has been deprecated. Please use `to(device)` instead.",
         )
@@ -1731,6 +1955,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def dtype(self) -> torch.dtype | None:
+        # [FUNCTION DOC]
+        # Property: dtype of the first parameter, or None if the model has no parameters.
         """
         `torch.dtype`: The dtype of the module (assuming that all the module parameters have the same dtype).
         """
@@ -1741,6 +1967,8 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def _no_split_modules(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: module class names that must not be split under model parallelism; always an empty list.
         """
         Return the list of modules that should not be split when using model parallelism.
         """
@@ -1748,12 +1976,17 @@ This pull request has been automatically generated to add {self.__class__.__name
 
     @property
     def _keys_to_ignore_on_save(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: state dict keys to ignore when saving; always an empty list.
         """
         Return the list of keys to ignore when saving the model.
         """
         return []
 
     def _push_to_hub_usage_tip(self, repo_id: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns a Markdown snippet for pull request descriptions showing how to load the model from the pull request
+        # revision, with the class name, repo id and backend filled in. Subclasses may override it.
         """Return a usage tip snippet for the push_to_hub PR description.
 
         Subclasses can override this to provide model-type-specific example code.

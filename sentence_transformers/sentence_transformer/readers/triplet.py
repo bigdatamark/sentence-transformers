@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Deprecated reader for triplet datasets (anchor, positive, negative) in delimited files.
 """
 This file contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.
@@ -17,6 +19,9 @@ from . import InputExample
 
 
 class TripletReader:
+    # [CLASS DOC]
+    # Reader for CSV-like files with anchor, positive and negative columns at configurable indices,
+    # with an optional header row.
     """Reads in the a Triplet Dataset: Each line contains (at least) 3 columns, one anchor column (s1),
     one positive example (s2) and one negative example (s3)
     """
@@ -31,6 +36,8 @@ class TripletReader:
         delimiter="\t",
         quoting=csv.QUOTE_NONE,
     ):
+        # [FUNCTION DOC]
+        # Stores the folder, column indices, header flag, delimiter and quoting mode.
         self.dataset_folder = dataset_folder
         self.s1_col_idx = s1_col_idx
         self.s2_col_idx = s2_col_idx
@@ -40,6 +47,11 @@ class TripletReader:
         self.quoting = quoting
 
     def get_examples(self, filename, max_examples=0):
+        # [FUNCTION DOC]
+        # Parses dataset_folder/filename as CSV, skips the header if has_header, and creates an
+        # InputExample (no guid, label 0) with the three texts per row. Stops after max_examples if
+        # positive. Returns the list.
+        # KNOWN ISSUE: The opened file is never closed.
         data = csv.reader(
             open(os.path.join(self.dataset_folder, filename), encoding="utf-8"),
             delimiter=self.delimiter,

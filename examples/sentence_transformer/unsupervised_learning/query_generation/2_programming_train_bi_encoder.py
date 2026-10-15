@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script, step 2 of the query-generation pipeline: read generated_queries.tsv (query and paragraph split on the first tab)
+# into (sentence1, sentence2) pairs and train a new distilbert-base-uncased mean-pooling bi-encoder with
+# MultipleNegativesRankingLoss (batch 64, 3 epochs, lr 2e-5, 10% warmup, NO_DUPLICATES, no checkpoints). Saves to
+# output/programming-model. Side effects: file reading, network (model download), disk writes, GPU.
 """
 In this example we train a semantic search model to search through Wikipedia
 articles about programming articles & technologies.

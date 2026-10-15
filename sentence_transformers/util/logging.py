@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# HELPER: Logging helpers: a handler that writes through tqdm so progress bars are not broken,
+# and a function to install colored console logging with an extra NOTICE level.
 from __future__ import annotations
 
 import logging
@@ -6,10 +9,18 @@ import tqdm
 
 
 class LoggingHandler(logging.Handler):
+    # [CLASS DOC]
+    # HELPER: logging.Handler subclass that formats each record and writes it using tqdm's write
+    # function (so active progress bars are preserved).
     def __init__(self, level=logging.NOTSET) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Initializes the handler with the given level (default NOTSET).
         super().__init__(level)
 
     def emit(self, record) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Formats the record, writes it via tqdm write, and flushes. KeyboardInterrupt and
+        # SystemExit propagate; any other exception is passed to the standard handleError.
         try:
             msg = self.format(record)
             tqdm.tqdm.write(msg)
@@ -21,10 +32,18 @@ class LoggingHandler(logging.Handler):
 
 
 def install_logger(given_logger, level=logging.WARNING, fmt="%(levelname)s:%(name)s:%(message)s") -> None:
+    # [FUNCTION DOC]
+    # HELPER: Configures given_logger with coloredlogs using the given level and format string.
+    # First registers a NOTICE level (25, between INFO and WARNING) and adds a "notice" method to all
+    # Logger instances (global side effect). Uses default coloredlogs styles but with no asctime style,
+    # faint white debug and bold cyan notice. Requires the optional coloredlogs package (ImportError
+    # otherwise). Returns None.
     """Configures the given logger: format, logging level, style, etc"""
     import coloredlogs
 
     def add_notice_log_level():
+        # [FUNCTION DOC]
+        # HELPER: Registers level name "NOTICE" for number 25 and monkeypatches a notice method onto logging.Logger.
         """Creates a new 'notice' logging level"""
         # inspired by:
         # https://stackoverflow.com/questions/2183233/how-to-add-a-custom-loglevel-to-pythons-logging-facility
@@ -32,6 +51,8 @@ def install_logger(given_logger, level=logging.WARNING, fmt="%(levelname)s:%(nam
         logging.addLevelName(NOTICE_LEVEL_NUM, "NOTICE")
 
         def notice(self, message, *args, **kws):
+            # [FUNCTION DOC]
+            # HELPER: Logs message at NOTICE level if the logger is enabled for it, forwarding args and keyword options.
             if self.isEnabledFor(NOTICE_LEVEL_NUM):
                 self._log(NOTICE_LEVEL_NUM, message, args, **kws)
 

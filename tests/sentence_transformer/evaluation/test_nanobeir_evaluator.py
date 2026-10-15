@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for NanoBEIREvaluator, which evaluates retrieval on small BEIR-style datasets downloaded from the Hugging Face Hub.
+# The whole module is skipped when the datasets library is missing or when running in CI (to avoid HTTP 429 rate limiting).
 from __future__ import annotations
 
 import re
@@ -23,6 +26,9 @@ if is_ci():
 
 
 def test_nanobeir_evaluator(static_retrieval_mrl_en_v1_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Evaluates the static retrieval model on the QuoraRetrieval and MSMARCO subsets, each with its own instruction-style query prompt.
+    # Asserts that a non-empty metrics dict is returned and that every metric value is a float. Downloads datasets (network).
     """Tests that the NanoBEIREvaluator can be loaded and produces expected metrics"""
     datasets = ["QuoraRetrieval", "MSMARCO"]
     query_prompts = {
@@ -37,6 +43,9 @@ def test_nanobeir_evaluator(static_retrieval_mrl_en_v1_model: SentenceTransforme
 
 
 def test_nanobeir_evaluator_custom_dataset_id(static_retrieval_mrl_en_v1_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Evaluates on MSMARCO and NQ loaded from a custom dataset_id (a German NanoBEIR copy) instead of the default repository.
+    # Asserts a non-empty metrics dict whose values are all floats. Downloads datasets (network).
     """Tests that the NanoBEIREvaluator can load and evaluate on a custom dataset_id"""
     datasets = ["MSMARCO", "NQ"]
     model = static_retrieval_mrl_en_v1_model
@@ -50,6 +59,9 @@ def test_nanobeir_evaluator_custom_dataset_id(static_retrieval_mrl_en_v1_model: 
 
 
 def test_nanobeir_evaluator_with_invalid_dataset():
+    # [FUNCTION DOC]
+    # Asserts that constructing the evaluator with an unknown dataset name raises ValueError whose message lists the invalid
+    # names and the full list of valid lowercase NanoBEIR dataset names.
     """Test that NanoBEIREvaluator raises an error for invalid dataset names."""
     invalid_datasets = ["invalidDataset"]
 
@@ -64,6 +76,8 @@ def test_nanobeir_evaluator_with_invalid_dataset():
 
 
 def test_nanobeir_evaluator_empty_inputs():
+    # [FUNCTION DOC]
+    # Asserts that passing an empty list of dataset names raises ValueError telling the user to pass None to evaluate all datasets.
     """Test that NanoBEIREvaluator behaves correctly with empty datasets."""
     with pytest.raises(ValueError, match="dataset_names cannot be empty. Use None to evaluate on all datasets."):
         NanoBEIREvaluator(dataset_names=[])

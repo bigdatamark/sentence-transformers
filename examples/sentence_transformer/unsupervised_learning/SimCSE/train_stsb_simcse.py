@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: unsupervised SimCSE with distilbert-base-uncased (max length 32, mean pooling) on wiki1m-for-simcse
+# sentences (at least 10 characters after stripping), each duplicated into an identical (sentence1, sentence2) pair for
+# MultipleNegativesRankingLoss. Batch 128, 1 epoch, lr 5e-5, 10% warmup, fp16, eval every 10% on STSb validation, no
+# checkpoints; evaluates STSb validation and test before and after training. Saves to output/training_stsb_simcse-...-latest
+# and tries a Hub push. Side effects: network, disk, GPU, logging.
 import logging
 from datetime import datetime
 
@@ -38,6 +44,8 @@ train_dataset = load_dataset("sentence-transformers/wiki1m-for-simcse", split="t
 # we can simply duplicate the sentences to create a weak dataset of positive pairs. The loss
 # will take negative samples from the other samples in the batch.
 def simcse_map(example):
+    # [FUNCTION DOC]
+    # HELPER: map function turning a row's stripped "text" into identical sentence1 and sentence2 columns.
     text = example["text"].strip()
     return {
         "sentence1": text,

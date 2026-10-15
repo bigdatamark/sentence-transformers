@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Correlation evaluator for CrossEncoder: compares predicted pair scores to gold continuous scores using
+# Pearson and Spearman correlation, logging results and optionally appending them to a CSV.
 from __future__ import annotations
 
 import csv
@@ -17,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class CrossEncoderCorrelationEvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # Evaluator holding sentence pairs, gold scores, a name, an optional prompt name, batch size, progress-bar
+    # flag and CSV flag. CSV file name is the class name plus optional underscore name plus "_results.csv",
+    # with headers epoch, steps, Pearson and Spearman. Primary metric is Spearman.
     """
     This evaluator can be used with the CrossEncoder class. Given sentence pairs and continuous scores,
     it compute the pearson & spearman correlation between the predicted score for the sentence pair
@@ -73,6 +80,11 @@ class CrossEncoderCorrelationEvaluator(BaseEvaluator):
         show_progress_bar: bool | None = None,
         write_csv: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Store all settings. If the progress-bar flag is None it becomes true when the module logger's effective
+        # level is INFO or DEBUG. Sets CSV file name, headers, and primary metric.
+        # KNOWN ISSUE: The docstring names the gold argument "labels" typed as integers, but the parameter is
+        # "scores" and holds continuous floats.
         self.sentence_pairs = sentence_pairs
         self.scores = scores
         self.name = name
@@ -89,6 +101,9 @@ class CrossEncoderCorrelationEvaluator(BaseEvaluator):
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC]
+        # Build an evaluator from InputExample objects using each example's texts as the pair and its label as the
+        # gold score; extra kwargs forwarded. Returns the instance.
         sentence_pairs = []
         scores = []
 
@@ -100,6 +115,14 @@ class CrossEncoderCorrelationEvaluator(BaseEvaluator):
     def __call__(
         self, model: CrossEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Evaluate the model. Logs a header (mentioning epoch/steps when given), predicts scores for all pairs with
+        # the configured prompt name and batch size as a numpy array, computes Pearson and Spearman correlation
+        # with the gold scores, and logs them. If an output path is given and CSV writing is on, creates the
+        # directory and appends a row (writing headers when the file is new). Returns the metrics "pearson" and
+        # "spearman" prefixed with the evaluator name, after storing them in the model card data.
+        # KNOWN ISSUE: The stored show_progress_bar setting is ignored; predict is always called with the progress
+        # bar disabled.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"

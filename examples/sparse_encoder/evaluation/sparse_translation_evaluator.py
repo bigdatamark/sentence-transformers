@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: run SparseTranslationEvaluator on the first 1000 English-Dutch news-commentary parallel sentences with an
+# (English-only) SPLADE model, measuring how often each sentence's translation is its most similar counterpart in both
+# directions, then print the primary metric (mean accuracy) and value. Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

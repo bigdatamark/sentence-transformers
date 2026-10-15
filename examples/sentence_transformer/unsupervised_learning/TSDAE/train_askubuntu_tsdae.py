@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: TSDAE (denoising auto-encoder) training on AskUbuntu questions. Model: bert-base-uncased with CLS
+# pooling (max length 75). Training questions exclude any text in the dev/test reranking sets. A set_transform adds a
+# "noisy" column (random word deletion) on every access; DenoisingAutoEncoderLoss with a tied decoder built from the same
+# checkpoint reconstructs the original text from the noisy sentence embedding. Batch 8, 1 epoch, lr 3e-5, fp16, eval
+# every 100 steps and save every 500 on the dev RerankingEvaluator (also run before training); test RerankingEvaluator
+# after training. Prints dataset samples, saves to output/training_stsb_tsdae-<model>-8-<timestamp>/final and tries a Hub push.
+# Side effects: network, disk, GPU, stdout/logging.
 import logging
 import random
 import traceback
@@ -51,6 +59,14 @@ logging.info(train_dataset)
 
 
 def noise_transform(batch, del_ratio=0.6):
+    # [FUNCTION DOC]
+    # HELPER: batched set_transform function producing TSDAE inputs. Input: a batch dict with a "text" list and del_ratio
+    # (default 0.6; asserts it lies in [0, 1) and that the batch is a dict with "text"). Tokenizes each text with NLTK, keeps
+    # each word independently when a uniform random draw is below del_ratio, and detokenizes the kept words with the
+    # Treebank detokenizer; empty token lists return the original text and if nothing is kept a single random word is used.
+    # Returns a dict with "noisy" (the corrupted texts) and "text" (the originals). Uses the unseeded random module, so the
+    # noise differs on every access. NLTK is imported lazily and its punkt data must be available.
+    # KNOWN ISSUE: the docstring calls del_ratio the ratio of words to delete, but words are kept with probability del_ratio, so on average only 40% of words are deleted with the default.
     """
     Applies noise by randomly deleting words.
 

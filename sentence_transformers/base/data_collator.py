@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Base data collator used by the trainers: turns a list of dataset rows into a model-ready batch dictionary by extracting a
+# label column and preprocessing every remaining text (or other input) column with the model's preprocess function,
+# resolving per-column/per-dataset prompts, router tasks and max-length overrides. DEFAULT_LABEL_COLUMNS lists the column
+# names treated as labels, in priority order. Uses the transformers logger (supports warning_once).
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -16,6 +21,13 @@ DEFAULT_LABEL_COLUMNS: tuple[str, ...] = ("label", "labels", "score", "scores")
 
 @dataclass
 class BaseDataCollator:
+    # [CLASS DOC]
+    # Dataclass collator. Attributes: preprocess_fn (callable taking a list of inputs plus prompt, task and optionally
+    # max_length keywords, returning a dict of tensors), valid_label_columns (default the DEFAULT_LABEL_COLUMNS list),
+    # router_mapping (column -> task, or dataset name -> (column -> task); default empty), prompts (a single string, column ->
+    # prompt, or dataset name -> (column -> prompt); default empty), max_length (int for all columns, dict keyed by task, or
+    # None), and the private _warned_columns set of column-name tuples already checked for ordering. Calling the instance
+    # collates a batch; output keys are "<column>_<preprocessed key>", optional "label", "dataset_name" and "<column>_task".
     """Base data collator for Sentence Transformers models.
 
     Preprocesses text columns via ``preprocess_fn`` (typically ``model.preprocess``),
@@ -37,6 +49,10 @@ class BaseDataCollator:
     _warned_columns: set[tuple[str, ...]] = field(default_factory=set, init=False, repr=False)
 
     def _resolve_router_mapping(self, batch: dict[str, Any]) -> dict[str, str]:
+        # [FUNCTION DOC]
+        # HELPER: return the column -> task mapping for this batch. If router_mapping is non-empty and its first value is a dict
+        # (per-dataset form), return the entry for the batch's dataset_name, or an empty dict if absent; otherwise return
+        # router_mapping, or an empty dict if it is falsy.
         """Resolve the router mapping for this batch, handling nested (per-dataset) mappings."""
         router_mapping = self.router_mapping
         if (
@@ -50,6 +66,11 @@ class BaseDataCollator:
         return router_mapping or {}
 
     def _resolve_prompts(self, batch: dict[str, Any]) -> str | dict[str, str] | None:
+        # [FUNCTION DOC]
+        # HELPER: return the prompts applicable to this batch. Non-dict or empty prompts are returned unchanged. If the batch has a
+        # dataset_name that is a key of prompts, return that entry. If prompts is nested (first value is a dict): raise ValueError
+        # when the batch has no dataset_name, else return an empty dict (dataset without prompts). Otherwise return prompts as a
+        # column -> prompt mapping.
         """Resolve the prompts for this batch, handling nested (per-dataset) mappings."""
         prompts = self.prompts
         if not isinstance(prompts, dict) or not prompts:
@@ -72,6 +93,9 @@ class BaseDataCollator:
         return prompts
 
     def _get_prompt_for_column(self, prompts: str | dict[str, str], column_name: str) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: return the prompt for a column: the string itself when prompts is a string, the column's entry when prompts is a
+        # dict containing it, else None.
         """Get the prompt string for a specific column."""
         if isinstance(prompts, str):
             return prompts
@@ -82,10 +106,16 @@ class BaseDataCollator:
     def _get_task_for_column(
         self, column_name: str, column_position: int, router_mapping: dict[str, str]
     ) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: return the task for a column from the router mapping (None if unmapped). Subclasses override this to add
+        # position-based defaults (column_position is unused here).
         """Resolve the task a column is preprocessed with. Subclasses may add positional defaults."""
         return router_mapping.get(column_name)
 
     def _get_max_length_for_task(self, task: str | None) -> int | None:
+        # [FUNCTION DOC]
+        # HELPER: return the max-length override for a column: max_length itself when it is an int, the task's entry when it is a
+        # dict and task is not None (None if missing), else None.
         """Resolve the training max-length override for a column: an int applies to every column,
         a dict is keyed by task."""
         if isinstance(self.max_length, int):
@@ -95,6 +125,15 @@ class BaseDataCollator:
         return None
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Collate a list of row dicts into a batch. Returns an empty dict for no rows. Column names come from the first row;
+        # "dataset_name" is removed from them and copied from the first row into the batch. Column order is checked once per
+        # distinct column tuple. The first valid label column present becomes batch "label" as a tensor of all rows' values and is
+        # removed. Resolves router mapping and prompts, logs a one-time warning when columns look like IDs ("id" or ending in
+        # _id/_ids/_idx). Then, for each remaining column in order, determines task, prompt and max-length override, calls
+        # preprocess_fn on the column values (passing max_length only when set), stores each output under "<column>_<key>", and
+        # records "<column>_task" when a task is set. Returns the batch dict. Raises ValueError via prompt resolution for nested
+        # prompts without a dataset name.
         if not features:
             return {}
 
@@ -148,6 +187,11 @@ class BaseDataCollator:
         return batch
 
     def maybe_warn_about_column_order(self, column_names: list[str]) -> None:
+        # [FUNCTION DOC]
+        # Warn when well-known column names (anchor/positive/negative, question/answer, query/response,
+        # hypothesis/entailment/contradiction) are not at their usual positions, suggesting a select_columns call with the
+        # conventional order; warns at most once per call, then records the column tuple in _warned_columns so it is not checked
+        # again. Returns None. Side effects: logging and mutation of _warned_columns.
         """Warn the user if the columns are likely not in the expected order."""
         # A mapping from common column names to the expected index in the dataset
         column_name_to_expected_idx = {

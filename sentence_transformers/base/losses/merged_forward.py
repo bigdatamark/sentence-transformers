@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Utilities that let losses embed several input columns (e.g. anchor, positive, negatives) in one merged forward pass
+# instead of one forward per column, for speed. Provides: a context manager that disables merging (via a context
+# variable), merge_feature_batches (pads and concatenates homogeneous per-column feature dicts row-wise, column-major,
+# or refuses by returning None), chunked forward helpers for multi-vector (token-level) models that split a batch into
+# row chunks and re-pad the outputs, and embed_columns / embed_columns_padded which try merging and fall back to
+# per-column forwards. Results are identical either way, up to dropout sampling. Logs a one-time warning when merging
+# is refused for a reason the user could fix.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
@@ -19,6 +27,9 @@ _MERGING_DISABLED: ContextVar[bool] = ContextVar("merging_disabled", default=Fal
 
 
 def _separate_forwards(reason: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: logs a one-time warning that columns are embedded in separate forward passes because of the given reason,
+    # then returns None so callers can return its result directly as the "refused" value.
     """Note why the columns are embedded separately, then return None so the caller falls back.
 
     Speed only: the per-column path produces the same loss and gradients. Worth surfacing because
@@ -35,6 +46,10 @@ def _separate_forwards(reason: str) -> None:
 
 @contextmanager
 def column_merging_disabled() -> Iterator[None]:
+    # [FUNCTION DOC]
+    # Context manager (generator based) that sets the module-level "merging disabled" context variable to True for the
+    # duration of the block and resets it afterwards (also on exceptions). While active, merge_feature_batches always
+    # returns None silently. Intended for wrapper losses that pass state between calls through the same feature dicts.
     """Force :func:`merge_feature_batches` to refuse for the duration of the block.
 
     For wrapper losses that call an inner loss several times with the *same* feature dicts and pass
@@ -51,6 +66,17 @@ def column_merging_disabled() -> Iterator[None]:
 
 
 def merge_feature_batches(features_list: list[dict[str, Any]]) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # Merges a list of per-column feature dicts into one dict whose tensors hold all columns' rows concatenated in column
+    # order, or returns None if merging is not possible. Returns None silently when merging is disabled, when the batch is
+    # flattened ("cu_seq_lens_q" present), or when neither "input_ids" nor "attention_mask" is a tensor of at least 2 dims.
+    # Returns None with a warning when columns have different key sets, or for any key where: a tensor value is missing or
+    # has a different number of dims in some column; some value is 0-dimensional or its first dimension differs from the
+    # batch size; dims beyond the second differ; or the second (token) dimension differs and the tensor is floating point or
+    # complex (only integer/bool tensors are right-padded with zeros to the maximum width). Non-tensor values and the
+    # "prompt_length" key are metadata: they must compare equal across columns (tensors by exact equality) and the first
+    # column's value is kept; incomparable values (comparison raising RuntimeError or ValueError) or unequal values cause a
+    # warned refusal. Input: non-empty list of dicts. Output: merged dict or None.
     """Pad and concatenate homogeneous per-column feature batches into one flat batch.
 
     Running ``N`` columns through the model one by one means ``N`` forwards of ``batch_size`` rows
@@ -129,6 +155,11 @@ def _chunked_outputs(
     mini_batch_size: int | None,
     task: str | None,
 ) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: runs the model on the features, optionally in row chunks. If mini_batch_size is given, splits the features
+    # into consecutive sample ranges of that size (using the GradCache range and slicing helpers, so each chunk is trimmed
+    # to its own width); if there is no size or only one range, runs a single forward. Passes task as a keyword argument
+    # only when not None. Returns the list of model output dicts, one per chunk. All chunks keep gradients.
     """Run ``model`` over row chunks of ``features`` and return one output dict per chunk.
 
     A single-element result means the batch ran in one forward, i.e. ``mini_batch_size`` is None or
@@ -153,6 +184,10 @@ def chunked_padded_forward(
     task: str | None,
     mini_batch_size: int | None,
 ) -> tuple[Tensor, Tensor]:
+    # [FUNCTION DOC]
+    # Runs the chunked forward for a multi-vector model and returns the token embeddings and attention mask. With a single
+    # chunk they are returned as produced; with several, the per-chunk token embeddings and masks are padded to the widest
+    # chunk and concatenated along the batch dimension by a shared utility.
     """Chunked forward for multi-vector models, returning ``(token_embeddings, attention_mask)``.
 
     The per-chunk outputs are re-padded to the widest chunk before concatenating, since a chunk
@@ -171,6 +206,13 @@ def chunked_padded_forward(
 def embed_columns(
     model: nn.Module, features_list: Iterable[dict[str, Any]], separate_first: bool = True
 ) -> list[Tensor]:
+    # [FUNCTION DOC]
+    # Embeds each column and returns one "sentence_embedding" tensor per column, in input order. If separate_first is true
+    # (default) and there is at least one column, the first column is embedded on its own and the remaining columns are
+    # embedded recursively with separate_first false. Otherwise, with more than one column, tries merge_feature_batches; if
+    # it succeeds, runs one forward on the merged batch and splits the embeddings back into equal per-column blocks (by
+    # reshaping to column count by rows); if it refuses (or there is at most one column), runs one forward per column, which
+    # also lets the model mutate each original feature dict as in the classic per-column pattern.
     """Embed each input column, sharing one merged forward pass across columns when possible.
 
     Returns one ``sentence_embedding`` tensor per column. When :func:`merge_feature_batches`
@@ -206,6 +248,11 @@ def embed_columns_padded(
     mini_batch_size: int | None = None,
     task_default: str | None = None,
 ) -> tuple[list[Tensor], list[Tensor]]:
+    # [FUNCTION DOC]
+    # Multi-vector counterpart of embed_columns without first-column separation. With more than one column, tries merging;
+    # on success runs one chunked padded forward (task taken from the merged dict's "task" key or task_default) and splits
+    # embeddings and masks back per column, converting the masks to boolean. Otherwise runs a chunked padded forward per
+    # column. Returns a pair: list of per-column token embedding tensors (batch, tokens, dim) and list of boolean masks.
     """The multi-vector counterpart of :func:`embed_columns`.
 
     Returns per-column ``(batch_size, tokens, dim)`` embeddings and their boolean scoring masks.

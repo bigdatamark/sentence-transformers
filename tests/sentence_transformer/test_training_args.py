@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for SentenceTransformerTrainingArguments: parsing via transformers' HfArgumentParser (JSON string
+# arguments for prompts, router and learning rate mappings, batch sampler enums), JSON validation of mapping
+# arguments, warmup_steps/warmup_ratio compatibility across transformers 4 and 5, and the warning about
+# non-persistent spawned dataloader workers.
 from __future__ import annotations
 
 import multiprocessing
@@ -12,6 +17,10 @@ from sentence_transformers.sentence_transformer.training_args import SentenceTra
 
 
 def test_hf_argument_parser():
+    # [FUNCTION DOC]
+    # Parses a command line with output dir, JSON prompts, no-duplicates batch sampler, proportional multi-dataset
+    # sampler, JSON router mapping, JSON learning rate mapping and a learning rate, and asserts each field holds
+    # the parsed dict, enum or float value.
     # See https://github.com/huggingface/sentence-transformers/issues/3090
     # Ensure that the HfArgumentParser can be used to parse SentenceTransformerTrainingArguments.
     parser = HfArgumentParser((SentenceTransformerTrainingArguments,))
@@ -51,6 +60,8 @@ def test_hf_argument_parser():
 
 
 def test_hf_argument_parser_no_duplicates_hashed():
+    # [FUNCTION DOC]
+    # Asserts the "no_duplicates_hashed" batch sampler string parses to the matching enum member.
     parser = HfArgumentParser((SentenceTransformerTrainingArguments,))
     dataclasses = parser.parse_args_into_dataclasses(
         args=[
@@ -66,6 +77,9 @@ def test_hf_argument_parser_no_duplicates_hashed():
 
 @pytest.mark.parametrize("argument_name", ["router_mapping", "learning_rate_mapping"])
 def test_hf_argument_parser_incorrect_string_arguments(argument_name):
+    # [FUNCTION DOC]
+    # Parametrized over the two mapping arguments; asserts a JSON string parses to a dict (without output dir) and
+    # that a non-JSON string makes the parser raise ValueError.
     parser = HfArgumentParser((SentenceTransformerTrainingArguments,))
     dataclasses = parser.parse_args_into_dataclasses(
         args=[
@@ -87,6 +101,8 @@ def test_hf_argument_parser_incorrect_string_arguments(argument_name):
 
 @pytest.mark.parametrize("argument_name", ["router_mapping", "learning_rate_mapping"])
 def test_incorrect_string_arguments(argument_name):
+    # [FUNCTION DOC]
+    # Same as above but constructing the arguments object directly instead of through the parser.
     args = SentenceTransformerTrainingArguments(
         **{
             argument_name: '{"dataset1": {"column_A": "query", "column_B": "document"}}',
@@ -129,6 +145,12 @@ def test_incorrect_string_arguments(argument_name):
 def test_warmup_arguments_are_compatible_across_transformers_versions(
     kwargs, expected_v5_or_newer, expected_v4, caplog
 ):
+    # [FUNCTION DOC]
+    # Parametrized over warmup kwargs with separate expectations for transformers 5+ and 4. Constructs the
+    # arguments while capturing warnings, maps "default" expectations to 0 steps and to a None (v5) or 0.0 (v4)
+    # ratio, and asserts the resulting warmup_steps and warmup_ratio (approximately for numbers). On v5 with a
+    # warmup ratio given, asserts a deprecation warning about warmup_ratio was logged and none of those records
+    # came from a transformers logger.
     """Check that warmup_steps / warmup_ratio end up in the expected field.
 
     We parametrize over different user inputs and branch expectations based on the
@@ -190,6 +212,11 @@ def test_warmup_arguments_are_compatible_across_transformers_versions(
 def test_warns_about_non_persistent_spawned_dataloader_workers(
     start_method, kwargs, expect_warning, explicit_start_method, caplog, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # Parametrized over start method, kwargs, the expected warning, and whether the start method is explicit.
+    # Monkeypatches the multiprocessing start method getters (explicit value, or None with the given method as
+    # platform default), constructs the arguments with a default output dir (overridable by kwargs, where "unused"
+    # suppresses the warning) and asserts whether the persistent-workers warning was logged.
     """The warning must not depend on whether the start method was set explicitly or is the platform
     default, so both routes through ``_workers_are_spawned`` are exercised with the same expectations."""
     if explicit_start_method:
@@ -207,11 +234,17 @@ def test_warns_about_non_persistent_spawned_dataloader_workers(
 
 
 def test_workers_are_spawned_does_not_lock_in_the_start_method(monkeypatch):
+    # [FUNCTION DOC]
+    # Monkeypatches the start method getter to record its allow_none argument and return None, constructs the
+    # arguments with 4 workers and asserts the getter was called exactly once with allow_none True (so the start
+    # method is never locked in).
     """Constructing training arguments must never fix the start method, which would make a later
     ``multiprocessing.set_start_method`` call raise."""
     calls = []
 
     def fake_get_start_method(allow_none=False):
+        # [FUNCTION DOC]
+        # HELPER: Records the allow_none argument in the enclosing list and returns None.
         calls.append(allow_none)
         return None
 

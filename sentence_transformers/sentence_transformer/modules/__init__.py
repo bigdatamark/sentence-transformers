@@ -1,3 +1,9 @@
+# [PACKAGE DOC]
+# Package of modules used to build SentenceTransformer pipelines. Re-exports the shared base
+# modules (Dense, InputModule, Module, Normalize, Asym, Router, Transformer) together with the
+# dense-specific modules defined here (BoW, CLIPModel, CNN, Dropout, LayerNorm, LSTM, Pooling,
+# StaticEmbedding, WeightedLayerPooling, WordEmbeddings, WordWeights) so all can be imported from
+# one path. Has no runtime behavior beyond these imports.
 from __future__ import annotations
 
 # Base modules are re-exported here so all modules used to build a SentenceTransformer

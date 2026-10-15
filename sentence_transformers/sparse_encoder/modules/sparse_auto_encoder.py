@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Sparse autoencoder module for CSR (Contrastive Sparse Representation) models. It maps a dense
+# sentence embedding to a wide latent space, keeps the top-k activations to get a sparse embedding,
+# and during training also produces the reconstructions needed by CSRReconstructionLoss. The decoder
+# is tied to the encoder weights.
 from __future__ import annotations
 
 try:
@@ -13,25 +18,43 @@ from sentence_transformers.base.modules.module import Module
 
 
 class TiedTranspose(nn.Module):
+    # [CLASS DOC]
+    # HELPER: Tied decoder layer that applies the transpose of a given linear layer's weight (no bias),
+    # mapping from the linear layer's output space back to its input space.
     def __init__(self, linear: nn.Linear):
+        # [FUNCTION DOC]
+        # Stores the linear layer whose weight is shared.
         super().__init__()
         self.linear = linear
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Raises ValueError if the linked layer has a bias; otherwise returns the input multiplied by the
+        # linked weight matrix (the transpose of the linear map).
         if self.linear.bias is not None:
             raise ValueError("TiedTranspose does not support layers with bias.")
         return F.linear(x, self.linear.weight.t(), None)
 
     @property
     def weight(self) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Property returning the transpose of the linked layer's weight.
         return self.linear.weight.t()
 
     @property
     def bias(self) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Property returning the linked layer's bias.
         return self.linear.bias
 
 
 class SparseAutoEncoder(Module):
+    # [CLASS DOC]
+    # Sparse autoencoder module. Parameters: pre_bias (input size, subtracted before encoding and added
+    # after decoding), encoder (linear input_dim to hidden_dim without bias), latent_bias (hidden size)
+    # and a tied decoder. Buffer stats_last_nonzero counts, per latent, the calls since it was last
+    # active (used to find dead latents for the auxiliary loss). Config keys: input_dim, hidden_dim,
+    # k, k_aux, normalize, dead_threshold. Accepts max_active_dims as a forward kwarg.
     """
     This module implements the Sparse AutoEncoder architecture based on the paper:
     Beyond Matryoshka: Revisiting Sparse Coding for Adaptive Representation, https://huggingface.co/papers/2503.01776
@@ -64,6 +87,9 @@ class SparseAutoEncoder(Module):
         normalize: bool = False,
         dead_threshold: int = 30,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores dimensions and options, creates the parameters, the tied decoder and a zero
+        # stats_last_nonzero buffer, and defines the auxiliary mask function.
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -80,6 +106,11 @@ class SparseAutoEncoder(Module):
         self.register_buffer("stats_last_nonzero", torch.zeros(hidden_dim, dtype=torch.long))
 
         def auxk_mask_fn(x):
+            # [FUNCTION DOC]
+            # HELPER: Nested function that zeroes, in place on the tensor data, every latent that is not dead
+            # (dead meaning inactive for more than dead_threshold calls) and returns the same tensor.
+            # KNOWN ISSUE: Mutates its input in place; top_k passes the shared pre-activation tensor, so a
+            # later top-k on the same tensor (the 4k pass in forward) sees only dead latents.
             dead_mask = self.stats_last_nonzero > dead_threshold
             x.data *= dead_mask  # inplace to save memory
             return x
@@ -87,6 +118,10 @@ class SparseAutoEncoder(Module):
         self.auxk_mask_fn = auxk_mask_fn
 
     def encode_pre_act(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the pre-activation latents: the input minus pre_bias, multiplied by the encoder weight,
+        # plus latent_bias.
+        # KNOWN ISSUE: The docstring documents a latent_slice parameter that does not exist.
         """
         :param x: input data (shape: [batch, input_dim])
         :param latent_slice: slice of latents to compute
@@ -98,6 +133,9 @@ class SparseAutoEncoder(Module):
         return latents_pre_act
 
     def LN(self, x: torch.Tensor, eps: float = 1e-5):
+        # [FUNCTION DOC]
+        # HELPER: Normalizes each row to zero mean and unit standard deviation (plus eps). Returns the
+        # normalized tensor, the means and the standard deviations.
         mu = x.mean(dim=-1, keepdim=True)
         x = x - mu
         std = x.std(dim=-1, keepdim=True)
@@ -105,6 +143,9 @@ class SparseAutoEncoder(Module):
         return x, mu, std
 
     def prepare(self, x: torch.Tensor):
+        # [FUNCTION DOC]
+        # HELPER: If normalize is false returns the input and an empty info dict; otherwise returns the
+        # row-normalized input and a dict with mu and std.
         if not self.normalize:
             return x, dict()
         x, mu, std = self.LN(x)
@@ -113,6 +154,12 @@ class SparseAutoEncoder(Module):
     def top_k(
         self, x: torch.Tensor, k: int | None = None, compute_aux: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        # [FUNCTION DOC]
+        # Keeps the k largest pre-activation values per row (default self.k), zeroing the rest, then
+        # applies ReLU. Updates stats_last_nonzero (a buffer mutation, even in inference): latents chosen
+        # with a value above 1e-5 are reset to 0, then every count is incremented. If k_aux is set and
+        # compute_aux, also computes ReLU of the k_aux largest values among dead latents only. Returns the
+        # top-k latents and the auxiliary latents (or None). Raises if k exceeds hidden_dim.
         """
         :param x: input data (shape: [batch, input_dim])
         :return: tuple of (top-k latents (shape: [batch, hidden_dim]), auxiliary latents or None)
@@ -146,6 +193,9 @@ class SparseAutoEncoder(Module):
         return latents_k, latents_auxk
 
     def decode(self, latents: torch.Tensor, info=None) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Decodes latents back to the input space with the tied decoder plus pre_bias; when normalize is
+        # set, rescales with info's std and mean (asserting info is given). Returns the reconstruction.
         """
         :param latents: autoencoder latents (shape: [batch, hidden_dim])
         :return: reconstructed data (shape: [batch, n_inputs])
@@ -161,6 +211,19 @@ class SparseAutoEncoder(Module):
     def forward(
         self, features: dict[str, torch.Tensor], max_active_dims: int | None = None
     ) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Uses max_active_dims as k if given, else self.k. In inference mode: prepares the input
+        # "sentence_embedding", computes pre-activations and top-k latents (no auxiliary), stores them as
+        # "sentence_embedding" and returns. In training: computes top-k latents with auxiliary latents,
+        # top-4k latents, and their decodings, and adds to features sentence_embedding_backbone (the
+        # prepared input), sentence_embedding_encoded (pre-activations), sentence_embedding_encoded_4k,
+        # auxiliary_embedding, decoded_embedding_k, decoded_embedding_4k, decoded_embedding_aux and
+        # decoded_embedding_k_pre_bias (the k reconstruction minus pre_bias); sets "sentence_embedding" to
+        # the top-k latents. Returns the mutated dict.
+        # KNOWN ISSUE: With normalize enabled, the backbone is the normalized input while the decodings are
+        # denormalized, so reconstruction losses compare different scales; if k_aux is 0 the auxiliary
+        # latents are None and decoding them fails; the in-place dead mask applied during the first top-k
+        # corrupts the pre-activations used for the 4k pass.
         k = max_active_dims if max_active_dims is not None else self.k
         x = features["sentence_embedding"]
 
@@ -200,6 +263,8 @@ class SparseAutoEncoder(Module):
         return features
 
     def save(self, output_path, safe_serialization: bool = True) -> None:
+        # [FUNCTION DOC]
+        # Saves the config JSON and torch weights (safetensors when safe_serialization) to output_path.
         self.save_config(output_path)
         self.save_torch_weights(output_path, safe_serialization=safe_serialization)
 
@@ -214,6 +279,9 @@ class SparseAutoEncoder(Module):
         local_files_only: bool = False,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads config and weights from a local path or Hub repo, constructs the module
+        # and returns it with weights loaded.
         hub_kwargs = {
             "subfolder": subfolder,
             "token": token,
@@ -227,9 +295,13 @@ class SparseAutoEncoder(Module):
         return model
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a string with the class name and its config dict.
         return f"SparseAutoEncoder({self.get_config_dict()})"
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns hidden_dim, the output embedding dimension (only k entries are non-zero).
         """
         Get the dimension of the embedding. Warning: the number of non-zero elements in the embedding is only k out of the hidden_dim.
 

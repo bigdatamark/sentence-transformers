@@ -1,3 +1,6 @@
+# [MODULE DOC] Paraphrase mining evaluator: mines the most similar sentence pairs from a collection with the model and
+# compares them against gold duplicate pairs, reporting average precision, best F1 and its precision, recall
+# and similarity threshold. Optionally appends results to a CSV.
 from __future__ import annotations
 
 import csv
@@ -16,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class ParaphraseMiningEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator state: sentences and ids (parallel lists from the id-to-sentence map, in insertion order),
+    # duplicates (nested mapping id to id to bool, defaulting to False), total_num_duplicates (count of unique
+    # unordered gold pairs whose ids are both present), mining parameters (query_chunk_size, corpus_chunk_size,
+    # max_pairs, top_k), batch_size, show_progress_bar, name, truncate_dim, write_csv, CSV file name and headers.
+    # Primary metric is "average_precision".
     """
     Given a large set of sentences, this evaluator performs paraphrase (duplicate) mining and
     identifies the pairs with the highest similarity. It compare the extracted paraphrase pairs
@@ -105,6 +113,10 @@ class ParaphraseMiningEvaluator(BaseEvaluator):
         write_csv: bool = True,
         truncate_dim: int | None = None,
     ):
+        # [FUNCTION DOC] Split the sentence map into id and sentence lists. Use the given duplicates dict or a fresh nested default
+        # dict; mark each pair from duplicates_list in both directions when both ids exist. Optionally replace the
+        # graph with its transitive closure. Count unique sorted id pairs marked duplicate in either direction where
+        # both ids exist. Build CSV file name ("_name" suffix if set) and headers.
         super().__init__()
         self.sentences = []
         self.ids = []
@@ -156,6 +168,14 @@ class ParaphraseMiningEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Log a header, mine candidate pairs with the paraphrase mining utility (sorted by descending score, each a
+        # (score, i, j) triple of sentence indices) using the stored parameters, and log the count. Walk the pairs in
+        # order: each candidate increments the extracted count; when it is a gold duplicate, compute precision and
+        # recall (recall 0 when there are no gold pairs) and F1, add precision to a running sum, and on F1 improvement
+        # record precision, recall, F1 and the threshold as the midpoint between this and the next pair's score.
+        # Average precision is the precision sum divided by the number of gold pairs (0 if none). Logs results,
+        # optionally writes/appends a CSV row, returns name-prefixed metrics (average_precision, f1, precision,
+        # recall, threshold) after storing them in model card data.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -243,6 +263,9 @@ class ParaphraseMiningEvaluator(BaseEvaluator):
 
     @staticmethod
     def add_transitive_closure(graph):
+        # [FUNCTION DOC] Make a duplicate graph transitive: for each not-yet-visited node, find its connected component by
+        # breadth-first traversal over neighbor keys, then mark every pair of nodes in the component as duplicates in
+        # both directions, marking them visited. Mutates and returns the graph (must support nested default lookups).
         nodes_visited = set()
         for a in list(graph.keys()):
             if a not in nodes_visited:
@@ -269,6 +292,8 @@ class ParaphraseMiningEvaluator(BaseEvaluator):
         return graph
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict with add_transitive_closure, max_pairs, top_k, and truncate_dim if set.
+        # KNOWN ISSUE: "add_transitive_closure" is filled with the static method object rather than the boolean constructor flag, which is never stored.
         config_dict = {
             "add_transitive_closure": self.add_transitive_closure,
             "max_pairs": self.max_pairs,

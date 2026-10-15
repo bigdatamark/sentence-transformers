@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: demonstrate query generation. Seeds torch, numpy and random with 0, loads the BeIR/query-gen-msmarco-t5-large-v1
+# T5 model (CUDA if available), and for each of nine hard-coded Python/Java paragraphs samples 3 queries (top_p 0.95,
+# max length 64) without gradient tracking, printing the paragraph and numbered queries. A trailing string literal shows
+# example output. Side effects: model download, stdout.
 import random
 
 import numpy as np

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Defines InputModule, the base class for modules that sit first in a model and convert raw inputs (texts, images,
+# messages, ...) into feature tensors, in addition to the generic Module save/load helpers. Provides the default
+# modality list, the preprocess entry point with a backward-compatibility bridge to the deprecated tokenize method, and
+# tokenizer saving. Uses the transformers logger (for one-time warnings).
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -16,6 +21,10 @@ logger = transformers_logging.get_logger(__name__)
 
 
 class InputModule(Module):
+    # [CLASS DOC]
+    # Abstract input module. Class attributes: save_in_root (True: the module is saved in the model's root folder rather
+    # than a numbered subfolder) and tokenizer (annotation only: a transformers tokenizer or a tokenizers-library
+    # Tokenizer set by subclasses). Subclasses must implement forward and save, and should implement preprocess.
     """
     Subclass of :class:`sentence_transformers.base.modules.Module`, base class for all input modules in the Sentence
     Transformers library, i.e. modules that are used to process inputs and optionally also perform processing
@@ -69,11 +78,15 @@ class InputModule(Module):
 
     @property
     def modalities(self) -> list[Modality]:
+        # [FUNCTION DOC]
+        # Property: supported input modalities; the base returns only text.
         """The list of supported input modalities. Defaults to ``["text"]``."""
         return ["text"]
 
     @staticmethod
     def _prepend_prompt(inputs: list[str], prompt: str) -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns a new list with the prompt string prepended to each text.
         """Prepend a prompt string to each text input."""
         return [prompt + text for text in inputs]
 
@@ -83,6 +96,11 @@ class InputModule(Module):
         prompt: str | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor | Any]:
+        # [FUNCTION DOC]
+        # Base preprocessing entry point. If the subclass overrides the deprecated tokenize method (but relies on this
+        # preprocess), logs a one-time deprecation warning, prepends the prompt to every input if a prompt is given, and returns
+        # the subclass's tokenize result with the kwargs. Otherwise raises NotImplementedError. The class identity check avoids
+        # infinite mutual recursion with the base tokenize.
         """
         Preprocesses the input texts and returns a dictionary of preprocessed features.
 
@@ -109,6 +127,8 @@ class InputModule(Module):
         raise NotImplementedError(f"{type(self).__name__} must implement the `preprocess` method.")
 
     def tokenize(self, texts: list[str], **kwargs) -> dict[str, torch.Tensor | Any]:
+        # [FUNCTION DOC]
+        # Deprecated: logs a one-time warning and delegates to preprocess with the texts and kwargs.
         """
         .. deprecated::
             `tokenize` is deprecated. Use `preprocess` instead.
@@ -129,6 +149,11 @@ class InputModule(Module):
         return self.preprocess(texts, **kwargs)
 
     def save_tokenizer(self, output_path: str, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves the tokenizer into output_path if the module has one: transformers tokenizers via their pretrained-save
+        # method (kwargs forwarded), tokenizers-library Tokenizer objects via their own save method. Otherwise does nothing.
+        # KNOWN ISSUE: a tokenizers-library Tokenizer saves to a single file path, but it is given the output directory path,
+        # so saving such a tokenizer fails or writes to the wrong place.
         """
         Saves the tokenizer to the specified output path.
 

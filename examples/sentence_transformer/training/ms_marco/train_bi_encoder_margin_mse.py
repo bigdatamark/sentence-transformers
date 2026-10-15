@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Example script: train a distilbert-base-uncased bi-encoder on MS MARCO with MarginMSELoss using the
+# Hofstaetter et al. BERT-CAT ensemble margins. Seeds random/torch/numpy with 12 and configures INFO logging at import.
+# Running as a script calls main().
 """
 This example shows how to train a bi-encoder on the MS MARCO Passage Ranking dataset
 (https://github.com/microsoft/MSMARCO-Passage-Ranking) using MarginMSELoss with the
@@ -46,6 +50,14 @@ numpy.random.seed(12)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Builds a dot-product SentenceTransformer (fp32 weights, max length
+    # 300, model card metadata), loads the msmarco corpus and queries into id->text dicts and the first 1,000,000
+    # bert-ensemble-margin-mse triplets, maps IDs to text (columns query/positive/negative/score, score used as label),
+    # trains 1 epoch with MarginMSELoss (batch 32, lr 5e-5, 10% warmup, bf16, eval/save every 10%, log every 1%),
+    # evaluating NanoBEIR (msmarco, nfcorpus, nq) under bf16 autocast before and after training. Saves to
+    # models/<run_name>/final and tries a Hub push, logging an error on failure.
+    # Side effects: heavy network/disk use, logging, GPU compute.
     model_name = "distilbert/distilbert-base-uncased"
     train_batch_size = 32
     max_seq_length = 300
@@ -79,6 +91,10 @@ def main():
     # 4. Resolve IDs to text once with .map(). The ``score`` column stays as-is and is picked
     # up as the loss label by the data collator's default label-column heuristic.
     def id_to_text_map(batch):
+        # [FUNCTION DOC]
+        # HELPER: batched map function. Input: a batch dict with query_id, positive_id, negative_id and score lists.
+        # Returns a dict with query, positive and negative texts looked up in the enclosing queries/corpus dicts
+        # (KeyError if an id is missing) and the unchanged score list.
         return {
             "query": [queries[qid] for qid in batch["query_id"]],
             "positive": [corpus[pid] for pid in batch["positive_id"]],

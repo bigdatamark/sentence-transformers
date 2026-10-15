@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: multi-task training of bert-base-uncased on two datasets at once: AllNLI pair-class with SoftmaxLoss
+# (3 labels) and STSb scored pairs with CosineSimilarityLoss, passed to the trainer as name-keyed dicts of datasets
+# and losses with ROUND_ROBIN multi-dataset batch sampling. Batch 16, 1 epoch, fp16, eval/save every 100 steps using
+# an STSb validation evaluator. Afterwards evaluates on STSb test, saves to output/training_multi-task_<model>-<timestamp>/final
+# and tries a Hub push of "<model>-multi-task". Side effects: network, disk, GPU, logging.
 """
 This is an example how to train SentenceTransformers in a multi-task setup.
 

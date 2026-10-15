@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Modality detection, input parsing and chat-message conversion for multimodal models. Optionally imports PIL and
+# torchcodec decoder classes (None if unavailable). Provides: string heuristics that classify URLs/paths/data URIs as
+# image, video or audio; helpers that unwrap dict-wrapped or decoder-wrapped audio/video into raw arrays while
+# collecting batch-level processor kwargs (audio sampling rate, per-video metadata); InputFormatter, which groups a
+# batch of raw inputs by modality for a processor and converts inputs to chat messages in "structured" (content list
+# of typed dicts) or "flat" (content is the raw value) form; and module functions infer_modality, infer_batch_modality,
+# format_modality and raise_unsupported_modality_error. Module constants: model types known to need the flat format,
+# the pair roles ("query", "document") and probe string pairs used to test whether a chat template carries both roles.
+# Logs via the standard logging module.
 """Modality detection, input parsing, and message format conversion."""
 
 from __future__ import annotations
@@ -57,11 +67,17 @@ PAIR_ROLE_PROBES = (("alpha", "bravo"), ("charlie", "bravo"), ("alpha", "foxtrot
 
 
 def _looks_like_url(text: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the string starts with "http://" or "https://" and contains no spaces.
     """Check if a string looks like a valid URL (starts with http(s) and has no spaces)."""
     return text.startswith(("http://", "https://")) and " " not in text
 
 
 def _is_media_url_or_path(text: str, extensions: tuple[str, ...]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the string is a URL whose lower-cased path ends with one of the given extensions (False for
+    # URLs that fail to parse), or a non-URL string whose lower-cased value ends with one of the extensions and names an
+    # existing local file. Side effect: filesystem existence check.
     """Check if a string is a URL or local file path with one of the given extensions."""
     if _looks_like_url(text):
         try:
@@ -74,6 +90,9 @@ def _is_media_url_or_path(text: str, extensions: tuple[str, ...]) -> bool:
 
 
 def is_image_url_or_path(text: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True for strings starting with "data:image/", or image URLs/existing paths with a common image extension
+    # (jpg, jpeg, png, gif, bmp, tiff, webp).
     """Check if a string is an image URL, file path, or data URI."""
     if text.startswith("data:image/"):
         return True
@@ -81,6 +100,9 @@ def is_image_url_or_path(text: str) -> bool:
 
 
 def is_video_url_or_path(text: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True for video URLs/existing paths with a common video extension (mp4, avi, mov, wmv, flv, mkv), or for URLs
+    # whose host is one of the YouTube domains; False otherwise (including unparsable URLs).
     """Check if a string is a video URL or file path."""
     if _is_media_url_or_path(text, (".mp4", ".avi", ".mov", ".wmv", ".flv", ".mkv")):
         return True
@@ -99,16 +121,24 @@ def is_video_url_or_path(text: str) -> bool:
 
 
 def is_audio_url_or_path(text: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True for audio URLs/existing paths with an extension among mp3, wav, ogg, flac, aac.
     """Check if a string is an audio URL or file path."""
     return _is_media_url_or_path(text, (".mp3", ".wav", ".ogg", ".flac", ".aac"))
 
 
 def is_message_dict(value: Any) -> TypeIs[MessageDict]:
+    # [FUNCTION DOC]
+    # Type guard: returns True if the value is a dict containing both "role" and "content" keys.
     """Check if a value is a single chat message: a dict with ``"role"`` and ``"content"`` keys."""
     return isinstance(value, dict) and "role" in value and "content" in value
 
 
 def _is_non_text_pair(sample: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the sample is a 2-element list/tuple that is not a pair of two strings and in which neither
+    # element is a message dict nor a non-empty list starting with a dict. Such pairs must be turned into query/document
+    # messages.
     """Check if a sample is a non-text pair (2-element tuple/list with at least one non-string element).
 
     Text pairs ``(str, str)`` are handled natively by tokenizers and detected as ``"text"`` modality
@@ -130,6 +160,9 @@ def _is_non_text_pair(sample: Any) -> bool:
 
 
 def _record_sampling_rate(sampling_rate: int, extra_modality_kwargs: dict[str, dict[str, Any]]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: stores the sampling rate under the "audio" entry of the extra kwargs mapping (mutated in place). Raises
+    # ValueError if a different sampling rate was already recorded for this batch.
     """Record the batch-level ``sampling_rate``, raising if samples disagree.
 
     Feature extractors accept a single ``sampling_rate`` for the whole batch, so conflicting
@@ -149,6 +182,11 @@ def _unwrap_audio(
     audio_value: AudioInput | list[AudioInput] | tuple[AudioInput, ...],
     extra_modality_kwargs: dict[str, dict[str, Any]],
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: converts an audio input to a raw value. Lists/tuples are processed element-wise and returned as a list.
+    # Dicts record their "sampling_rate" (if present) and return their "array". Audio decoder objects are fully decoded,
+    # their sample rate recorded, and the channels averaged into a 1-D numpy array. Anything else is returned unchanged.
+    # Mutates the extra kwargs mapping; may raise ValueError on conflicting sampling rates.
     """Unwrap dict-wrapped audio or an ``AudioDecoder`` into a raw array, collecting ``sampling_rate``.
 
     Passes through unchanged if ``audio_value`` is already a raw array/tensor/URL/path.
@@ -168,10 +206,15 @@ def _unwrap_audio(
 
 
 def _as_sequence(value: Any) -> list | tuple:
+    # [FUNCTION DOC]
+    # HELPER: returns the value itself if it is a list or tuple, otherwise a one-element list containing it.
     return value if isinstance(value, (list, tuple)) else [value]
 
 
 def _is_video_frames(value: Any) -> TypeIs[list[ImageInput] | tuple[ImageInput, ...]]:
+    # [FUNCTION DOC]
+    # HELPER: type guard returning True if the value is a non-empty list/tuple whose every element is inferred as an image
+    # (so it represents one video's frames); returns False if any element's modality cannot be inferred.
     if not isinstance(value, (list, tuple)) or not value:
         return False
     try:
@@ -184,6 +227,13 @@ def _unwrap_video(
     video_value: VideoInput | list[VideoInput] | tuple[VideoInput, ...],
     extra_modality_kwargs: dict[str, dict[str, Any]],
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: converts a video input to a raw value while appending one metadata entry per video to the "video_metadata"
+    # list under the "video" entry of the extra kwargs mapping. A frame list is first wrapped as a dict without metadata.
+    # Other lists/tuples are processed element-wise and flattened into one list. Dicts append their metadata (or None) and
+    # return their array, a frame sequence being wrapped in a one-element list containing the frame list. Video decoder
+    # objects are fully decoded and get metadata built from the decoder (average fps, frame count, duration and frame
+    # indices). Anything else (paths, URLs, arrays) gets a None metadata entry and is returned unchanged.
     """Unwrap dict-wrapped video or a ``VideoDecoder`` into a raw array, collecting ``video_metadata``.
 
     Passes through unchanged if ``video_value`` is already a raw array/tensor/URL/path. Appends one
@@ -219,6 +269,13 @@ def _reconcile_video_metadata(
     typed_inputs: list[tuple[Modality | Literal["pair"], Any]],
     extra_modality_kwargs: dict[str, dict[str, Any]],
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: post-processes the collected video metadata for a whole batch. If none was collected, returns. If every entry
+    # is None, removes the metadata key (and the "video" kwargs entry if it becomes empty) so the processor uses defaults.
+    # Otherwise gathers all videos from the typed inputs (plain video inputs and the "video" part of multimodal dicts) and
+    # fills each None entry with default metadata derived from the video's length (frame count, frame indices, fps and
+    # duration None). Raises ValueError if such a video is a string or has no length, and the strict zip raises if the
+    # counts of videos and metadata entries differ. Mutates the kwargs mapping in place.
     """Resolve the per-sample video metadata entries collected by :func:`_unwrap_video`.
 
     If no video in the batch carried metadata, the key is dropped so the processor infers defaults
@@ -261,6 +318,11 @@ def _reconcile_video_metadata(
 
 
 class InputFormatter:
+    # [CLASS DOC]
+    # Parses raw input batches for a model processor. Attributes: model_type (string from the model config), processor
+    # (optional processor/tokenizer), supported_modalities (optional list restricting which media heuristics apply),
+    # message_format ("structured" or "flat"), and a private cache of the last pair-role probe result (snapshot of
+    # template and kwargs, plus the failure reason or None).
     """Handles input parsing, modality detection, and message format conversion.
 
     This class manages the complete input preprocessing pipeline:
@@ -295,6 +357,9 @@ class InputFormatter:
         processor=None,
         supported_modalities: list[Modality] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores model_type, processor and supported_modalities, clears the pair-role probe cache, and resolves message_format:
+        # "auto" infers it from the processor (or "structured" when there is no processor); other values are used as given.
         self.model_type = model_type
         self.processor = processor
         self.supported_modalities = supported_modalities
@@ -305,6 +370,11 @@ class InputFormatter:
             self.message_format = message_format
 
     def _infer_format(self, processor) -> Literal["structured", "flat"]:
+        # [FUNCTION DOC]
+        # HELPER: returns the message format the processor expects. Uses the known-model-type override table first; if the
+        # processor has no non-empty string chat template, returns "structured"; if the template contains any of several
+        # substrings indicating content is indexed or typed (such as content index access or a "type" field), returns
+        # "structured"; otherwise "flat".
         """Infer the message format expected by the processor.
 
         Checks known model types first, then inspects the processor's chat template
@@ -342,6 +412,19 @@ class InputFormatter:
         self,
         inputs: Sequence[SingleInput | PairInput],
     ) -> tuple[Modality, dict[str, list], defaultdict[str, dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Classifies and groups a batch of inputs. Returns a triple: the batch modality (a name, a tuple of names, or
+        # "message"), a dict mapping processor input names (modality names) to lists of values, and a defaultdict of extra
+        # per-modality processor kwargs. Empty input returns text modality with an empty text list. Each item is classified:
+        # non-text pairs are tagged "pair"; otherwise its modality is inferred (respecting supported_modalities), single-key
+        # multimodal dicts are unwrapped to their value, audio/video values (also inside multimodal dicts, which are shallow
+        # copied) are unwrapped while collecting sampling rate and video metadata, and a single message dict is wrapped in a
+        # list. Video metadata is then reconciled. If any non-text pair exists, every item is converted to a message list
+        # (pairs and text pairs via pair_to_messages, messages unchanged, others via to_message) and "message" is returned. If
+        # all items share one string modality, values are grouped under that key. If they share one tuple modality, values are
+        # split per modality key in the first item's key order, except that when message support is allowed (unrestricted, or
+        # "message" supported) and items differ in key order, everything is converted to messages instead. Mixed modalities
+        # are converted to messages (debug log). May raise ValueError from modality inference or unwrapping.
         """Parse inputs and group by modality.
 
         Analyzes a list of inputs to detect their modality (text, image, audio, video, message)
@@ -459,6 +542,13 @@ class InputFormatter:
         return modality, processed_inputs, extra_modality_kwargs
 
     def pair_roles_failure(self, chat_template_kwargs: dict[str, Any] | None = None) -> str | None:
+        # [FUNCTION DOC]
+        # Returns why the processor's chat template cannot carry a query/document pair, or None if it can. Returns a fixed
+        # reason if the processor has no chat template. Uses a cached verdict when the template and kwargs equal the cached
+        # snapshot. Otherwise renders three probe pairs (a baseline and one variation per role) through the processor's
+        # chat-template rendering without tokenizing, passing the given kwargs; if rendering raises any exception, the reason
+        # names the exception; else any role whose varied render equals the baseline is reported as not reaching the prompt.
+        # Logs the verdict at debug level and caches it with a deep copy of the template and kwargs.
         """Why the chat template cannot carry a ``query``/``document`` pair, or None when it can.
 
         Decided by rendering probe pairs and diffing the outputs, never by reading the template source:
@@ -503,6 +593,8 @@ class InputFormatter:
         return failure
 
     def has_pair_roles(self, messages_batch: list[list[dict[str, Any]]]) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if any conversation in the batch contains messages with both the "query" and the "document" role.
         """Whether any conversation in a batch carries both of the ``query``/``document`` pair roles.
 
         Anchored on produced messages so both routes into :meth:`pair_to_messages` are covered, and
@@ -512,6 +604,12 @@ class InputFormatter:
         return any(pair_roles <= {message.get("role") for message in messages} for messages in messages_batch)
 
     def pair_to_messages(self, pair: tuple | list) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Converts a two-element pair into messages with roles "query" (first) and "document" (second); raises ValueError if
+        # the pair does not have exactly two elements. Each element's modality is inferred. In flat format each element becomes
+        # one message whose content is the raw element. In structured format, dicts that are already modality-keyed are used
+        # as typed input, other values are wrapped under their modality key, and to_message builds the message with the role.
+        # Returns the list of messages.
         """Convert a pair of inputs to query/document message format.
 
         Each element of the pair is wrapped in a message with role ``"query"`` (first element)
@@ -539,6 +637,13 @@ class InputFormatter:
         return messages
 
     def to_message(self, typed_input: dict[Modality, Any], role: str = "user") -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Converts a dict from modality to value into a single-message list with the given role (default "user"). In flat
+        # format with exactly one modality, content is the raw value; with several modalities it logs a warning and falls back
+        # to structured. Structured content is a list of typed entries, each holding a "type" key naming the modality and the
+        # item under the modality name as key: video values that are frame sequences count as one video (tuples converted to
+        # lists), other multimodal-key values that are lists/tuples are expanded to one entry per item, and any other key
+        # (e.g. "message") contributes a single entry.
         """Convert a typed input dictionary to message format.
 
         Produces a single message with the given ``role``. For query/document pairs,
@@ -581,6 +686,11 @@ class InputFormatter:
     def batch_to_message(
         self, modality: Modality, processor_inputs: dict
     ) -> tuple[Literal["message"], dict[str, list]]:
+        # [FUNCTION DOC]
+        # Converts grouped processor inputs (modality name to list of values) back to per-sample messages. Returns "message"
+        # and a dict with the list of message lists. Empty input yields an empty list. The batch size is taken from the first
+        # list. For each index, a typed input is built from the keys present in the given modality (in the input dict's order);
+        # a lone text value that is a text pair goes through pair_to_messages, everything else through to_message.
         """Convert a batch of modality-specific inputs into the unified message format.
 
         Args:
@@ -609,11 +719,18 @@ class InputFormatter:
 
     @staticmethod
     def is_text_pair(value: Any) -> bool:
+        # [FUNCTION DOC]
+        # Static: returns True if the value is a list/tuple of exactly two strings (a cross-encoder text pair).
         """Whether a single input is a text pair, i.e. cross-encoder ``(query, document)`` input."""
         return isinstance(value, (tuple, list)) and len(value) == 2 and all(isinstance(part, str) for part in value)
 
     @staticmethod
     def is_text_only_messages(messages_batch: list[list[dict[str, Any]]]) -> bool:
+        # [FUNCTION DOC]
+        # Static: returns True if every message in every conversation has text-only content: string content counts as text,
+        # list content is text only if every item's "type" (default "text") is "text", and any other content type returns False.
+        # KNOWN ISSUE: list content items are assumed to be dicts; a list containing non-dict items raises AttributeError
+        # instead of returning False.
         """Check whether all messages in a batch contain only text content.
 
         Works with both flat format (``{"content": "hello"}``) and structured format
@@ -638,6 +755,11 @@ class InputFormatter:
         return True
 
     def normalize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Converts messages to the configured format and returns a new list. Messages lacking "role" or "content" are skipped
+        # with a warning. In flat mode, structured content with exactly one item that has a "text" key becomes that text;
+        # other structured content is kept with a warning. In structured mode, string content becomes a single text item.
+        # Everything else, and all extra keys, are kept unchanged.
         """Normalize messages to the target format (``self.message_format``).
 
         Extra keys beyond ``"role"`` and ``"content"`` are preserved during conversion.
@@ -679,6 +801,9 @@ class InputFormatter:
     def prepend_prompt_to_messages(
         self, messages: list[list[dict[str, Any]]], prompt: str
     ) -> list[list[dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Returns new message lists with a system message holding the prompt prepended to each; the system content is the raw
+        # prompt in flat format or a single text item in structured format.
         """Prepend a system prompt to message format inputs.
 
         Args:
@@ -698,6 +823,9 @@ class InputFormatter:
     def prepend_prompt_to_texts(
         self, texts: list[str | tuple[str, str] | list[str]], prompt: str
     ) -> list[str | list[str]]:
+        # [FUNCTION DOC]
+        # Returns a new list where each string has the prompt prepended, and for pairs (any non-string sequence) the prompt is
+        # prepended to the first element only, producing a list.
         """Prepend a prompt to text format inputs.
 
         For single texts, prepends the prompt directly.
@@ -723,6 +851,16 @@ def infer_modality(
     sample: SingleInput | PairInput | Any,
     supported_modalities: list[Modality] | None = None,
 ) -> Modality:
+    # [FUNCTION DOC]
+    # Infers the modality of one sample by type and structure, without a processor. Order: PIL image is "image", audio
+    # decoder "audio", video decoder "video". Strings: image-like, video-like or audio-like URLs/paths map to that modality
+    # unless supported_modalities is given and excludes it (then "text"); other strings and two-string tuples/lists are
+    # "text". A message dict, or a non-empty list starting with one, is "message". Dicts with "array" plus "sampling_rate"
+    # are "audio", with "array" plus "video_metadata" are "video", and with "array" alone raise ValueError. Other non-empty
+    # dicts must only use the multimodal keys (else ValueError, with hints when "video_metadata" or "sampling_rate" are
+    # used as sibling keys); a single key returns that name, several keys return the sorted tuple of names. Empty dicts
+    # raise ValueError. Arrays/tensors: 1-2 dims "audio", 3 dims "image", 4-5 dims "video", other ranks ValueError. Any
+    # other type raises ValueError.
     """Infer the modality of a single input sample by inspecting its type/structure.
 
     Pure type-based detection, does not require a processor or tokenizer.
@@ -835,6 +973,9 @@ def infer_batch_modality(
     samples: Sequence[SingleInput | PairInput],
     supported_modalities: list[Modality] | None = None,
 ) -> Modality:
+    # [FUNCTION DOC]
+    # Returns the shared modality of all samples, "message" if they differ, or "text" for an empty batch. Propagates
+    # ValueError from per-sample inference.
     """Infer the modality of a batch of input samples.
 
     If all samples share the same modality, that modality is returned. If the batch contains
@@ -856,6 +997,8 @@ def infer_batch_modality(
 
 
 def format_modality(modality: Modality) -> str:
+    # [FUNCTION DOC]
+    # Returns the modality name, or a tuple's names joined with "+".
     """Format a modality for display, e.g. ``("text", "image")`` becomes ``"text+image"``."""
     if isinstance(modality, tuple):
         return "+".join(modality)
@@ -868,6 +1011,13 @@ def raise_unsupported_modality_error(
     supported_modalities: list[Modality],
     source: str,
 ) -> NoReturn:
+    # [FUNCTION DOC]
+    # Always raises ValueError with a message tailored to why the modality is unsupported by the named source. For the
+    # "message" batch modality it re-infers each sample (ignoring inference errors): all-message inputs or a mix including
+    # messages report that chat-style inputs are unsupported; other mixes report the base modalities the source lacks, or,
+    # if all parts are supported, that they cannot be combined in one batch. A tuple modality whose parts are all supported
+    # reports that they cannot be fused in one input. Otherwise reports the modality as unsupported. All messages list the
+    # supported modalities.
     """Raise a clear ``ValueError`` explaining why ``modality`` is not supported.
 
     Shared by :meth:`BaseModel.preprocess` and :meth:`Transformer.preprocess` so both raise the

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Training tests for SentenceTransformer: fine-tunes a DistilBERT model on STS-Benchmark with
+# CosineSimilarityLoss or on AllNLI with SoftmaxLoss, then checks the STSB test Spearman score. Skipped at
+# module level when training extras are missing.
+# KNOWN ISSUE: The module docstring says it tests pretrained model scores, but this module actually trains
+# models and then evaluates them (it was copied from the pretrained STSB test module).
 """
 Tests that the pretrained models produce the correct scores on the STSbenchmark dataset
 """
@@ -26,6 +32,9 @@ if not is_training_available():
 
 @pytest.fixture()
 def nli_resource() -> Generator[Dataset, None, None]:
+    # [FUNCTION DOC]
+    # Fixture: downloads the "pair-class" train split of the AllNLI dataset from the Hub (network), keeps at most
+    # the first 10000 rows, renames premise/hypothesis to sentence1/sentence2 and yields the dataset.
     max_train_samples = 10000
     nli_dataset = load_dataset("sentence-transformers/all-nli", "pair-class", split="train")
     nli_dataset = nli_dataset.select(range(min(max_train_samples, len(nli_dataset))))
@@ -34,6 +43,10 @@ def nli_resource() -> Generator[Dataset, None, None]:
 
 
 def evaluate_stsb_test(model: SentenceTransformer, expected_score: float, test_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Evaluates the model with an EmbeddingSimilarityEvaluator named "sts-test" on the dataset's
+    # sentence1/sentence2/score columns, prints the primary metric times 100 and asserts it exceeds the expected
+    # score or is within 0.1 of it.
     evaluator = EmbeddingSimilarityEvaluator(
         sentences1=test_dataset["sentence1"],
         sentences2=test_dataset["sentence2"],
@@ -51,6 +64,9 @@ def evaluate_stsb_test(model: SentenceTransformer, expected_score: float, test_d
     not is_training_available(), reason='Sentence Transformers was not installed with the `["train"]` extra.'
 )
 def test_train_stsb_slow(distilbert_base_uncased_model: SentenceTransformer, stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: trains for one epoch on the full STSB train split with CosineSimilarityLoss (batch 16, warmup ratio
+    # 0.1, output in a temporary directory) and expects a test score of about 80.
     model = distilbert_base_uncased_model
     train_dataset = stsb_dataset_dict["train"]
     test_dataset = stsb_dataset_dict["test"]
@@ -77,6 +93,8 @@ def test_train_stsb_slow(distilbert_base_uncased_model: SentenceTransformer, sts
     not is_training_available(), reason='Sentence Transformers was not installed with the `["train"]` extra.'
 )
 def test_train_stsb(distilbert_base_uncased_model: SentenceTransformer, stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Skipped in CI: trains on the first 100 STSB training rows and expects a test score of about 60.
     model = distilbert_base_uncased_model
     train_dataset = stsb_dataset_dict["train"].select(range(100))
     test_dataset = stsb_dataset_dict["test"]
@@ -105,6 +123,9 @@ def test_train_stsb(distilbert_base_uncased_model: SentenceTransformer, stsb_dat
 def test_train_nli_slow(
     distilbert_base_uncased_model: SentenceTransformer, nli_resource: Dataset, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Slow: trains on the NLI fixture with a 3-label SoftmaxLoss sized to the model's embedding dimension and
+    # expects an STSB test score of about 50.
     model = distilbert_base_uncased_model
     test_dataset = stsb_dataset_dict["test"]
     train_loss = SoftmaxLoss(
@@ -136,6 +157,8 @@ def test_train_nli_slow(
 def test_train_nli(
     distilbert_base_uncased_model: SentenceTransformer, nli_resource: Dataset, stsb_dataset_dict: DatasetDict
 ) -> None:
+    # [FUNCTION DOC]
+    # Skipped in CI: trains with SoftmaxLoss on the first 100 NLI rows and expects an STSB test score of about 50.
     model = distilbert_base_uncased_model
     test_dataset = stsb_dataset_dict["test"]
     train_dataset = nli_resource.select(range(100))

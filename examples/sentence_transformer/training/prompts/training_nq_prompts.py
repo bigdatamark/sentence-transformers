@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: train microsoft/mpnet-base on Natural Questions (query, answer) pairs with
+# CachedMultipleNegativesRankingLoss (mini-batch 16, batch 256, lr 2e-5, bf16, NO_DUPLICATES, eval/save every 50 steps),
+# optionally using prompts. With use_prompts, the trainer prepends "query: " to the query column and "document: " to
+# the answer column, and NanoBEIR evaluation uses the same query/corpus prompts. include_prompts_in_pooling controls
+# whether prompt tokens take part in pooling, and the run name reflects both flags. Seeds random/torch/numpy with 12.
+# Evaluates before and after training, saves to models/<run_name>/final and pushes to the Hub (an upload failure raises).
+# Side effects: network, disk, GPU, logging.
 # See https://huggingface.co/collections/tomaarsen/training-with-prompts-672ce423c85b4d39aed52853 for some already trained models
 
 import logging

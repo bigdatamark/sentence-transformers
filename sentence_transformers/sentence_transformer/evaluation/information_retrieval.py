@@ -1,3 +1,7 @@
+# [MODULE DOC] Information retrieval evaluator for SentenceTransformer models: embeds queries and a (chunked) corpus,
+# retrieves the top documents per query under one or more score functions with deterministic tie-breaking,
+# and computes Accuracy@k, Precision@k, Recall@k, MRR@k, NDCG@k and MAP@k against binary relevance
+# judgments. Optionally writes a CSV of metrics and JSONL files of ranked predictions.
 from __future__ import annotations
 
 import json
@@ -22,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 class InformationRetrievalEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator state: queries_ids (only query ids that have at least one relevant document, in input order),
+    # queries and corpus (lists aligned with queries_ids / corpus_ids), relevant_docs (query id to set of corpus
+    # ids), corpus_chunk_size, the k lists for each metric, show_progress_bar, batch_size, name, write_csv,
+    # score_functions (name to callable producing a query-by-document score matrix; None means use the model's
+    # similarity at call time), sorted score_function_names, optional main_score_function, truncate_dim, query and
+    # corpus prompts / prompt names, write_predictions, CSV and predictions file names, and a lazily cached
+    # tensor of corpus id ranks.
+    # KNOWN ISSUE: The docstring describes query_prompt and query_prompt_name as used when encoding the corpus; the code uses them for the queries.
     """
     This class evaluates an Information Retrieval (IR) setting.
 
@@ -152,6 +164,10 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         corpus_prompt_name: str | None = None,
         write_predictions: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Filter and store queries (dropping those without relevant docs), store corpus ids and texts in insertion
+        # order, store all configuration, convert main_score_function to a SimilarityFunction when given (ValueError
+        # if invalid), build the CSV file name (with "_name" suffix when a name is set), CSV headers for the configured
+        # score functions, and the predictions file name if predictions are written.
         super().__init__()
         self.queries_ids = []
         for qid in queries:
@@ -198,6 +214,8 @@ class InformationRetrievalEvaluator(BaseEvaluator):
             self.predictions_file = "Information-Retrieval_evaluation" + name + "_predictions.jsonl"
 
     def _append_csv_headers(self, score_function_names):
+        # [FUNCTION DOC] HELPER: Append CSV headers "<score>-Accuracy@k", "<score>-Precision@k", "<score>-Recall@k", "<score>-MRR@k",
+        # "<score>-NDCG@k", "<score>-MAP@k" for every score function and k. Mutates csv_headers.
         for score_name in score_function_names:
             for k in self.accuracy_at_k:
                 self.csv_headers.append(f"{score_name}-Accuracy@{k}")
@@ -224,6 +242,13 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         *args,
         **kwargs,
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Run evaluation. Logs a header. If no score functions were given, uses the model's similarity function
+        # (named by its similarity_fn_name) and appends its CSV headers. Computes all metrics (extra positional and
+        # keyword arguments are forwarded, plus output_path). If output_path is set and write_csv is on, creates the
+        # directory and writes a comma-joined row (with headers if the file is new, else appended). If no primary
+        # metric has been chosen yet, uses "<main function>_ndcg@<largest ndcg k>" or, without a main function, the
+        # score function with the best NDCG at the largest k. Flattens scores to "<fn>_<metric>@<k>" keys, prefixes
+        # the evaluator name, stores them in the model card data and returns them.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -298,6 +323,8 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         return metrics
 
     def get_corpus_id_ranks(self) -> Tensor:
+        # [FUNCTION DOC] HELPER: Return (and cache on first use) a long tensor giving each corpus entry's position in ascending
+        # corpus id order; used as an integer tie-break key.
         """Position of each corpus entry in the ascending ``corpus_ids`` order, cached across calls."""
         if self._corpus_id_ranks is None:
             order = sorted(range(len(self.corpus_ids)), key=self.corpus_ids.__getitem__)
@@ -312,6 +339,17 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         corpus_embeddings: Tensor | None = None,
         output_path: str | None = None,
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Retrieve and score. corpus_model defaults to model; precomputed corpus_embeddings may be supplied. max_k is the
+        # largest k across all metric lists. Encodes queries with the query encoder and prompt. For each corpus chunk
+        # (progress bar optional), encodes the chunk with the document encoder (or slices precomputed embeddings),
+        # and for each score function computes the score matrix and takes the top min(max_k, chunk size) per query.
+        # If a query row has ties at the top-k boundary, the selection is redone with an integer key so that higher
+        # scores come first and ties are broken by lowest corpus id rank. Each query's hits are merged as
+        # (score, corpus id) pairs, sorted by descending score then ascending corpus id, and truncated to max_k.
+        # Hits are converted to dicts with corpus_id and score. If write_predictions and output_path are set, writes
+        # one JSONL file per score function (overwriting) with query_id, query text and sorted results. Logs query
+        # and corpus counts, computes metrics per score function, logs them for each function name, and returns a
+        # dict from function name to the metric dict.
         if corpus_model is None:
             corpus_model = model
 
@@ -457,6 +495,10 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         prompt: str | None = None,
         **kwargs,
     ) -> np.ndarray:
+        # [FUNCTION DOC] HELPER: Encode inputs with the model's generic, query or document encode method (selected by
+        # encode_fn_name None, "query" or "document"), passing prompt name, prompt, batch size, progress bar and
+        # truncation, and returning a tensor.
+        # KNOWN ISSUE: Any other encode_fn_name leaves the encode function unassigned and raises an UnboundLocalError; also the return type annotation says numpy array but a tensor is returned.
         if encode_fn_name is None:
             encode_fn = model.encode
         elif encode_fn_name == "query":
@@ -475,6 +517,14 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         )
 
     def compute_metrics(self, queries_result_list: list[object]):
+        # [FUNCTION DOC] Compute metrics from per-query hit lists (aligned with queries_ids). For each query, sorts hits by
+        # descending score then ascending corpus id. Accuracy@k: 1 if any relevant doc in the top k. Precision@k:
+        # relevant count in top k divided by k. Recall@k: that count divided by number of relevant docs. MRR@k:
+        # reciprocal rank of the first relevant hit in the top k. NDCG@k: DCG of binary predicted relevance in the top
+        # k divided by DCG of an ideal list of all-ones with length equal to the number of relevant docs. MAP@k: sum
+        # of precision at each relevant hit's rank divided by the smaller of k and the number of relevant docs.
+        # Accuracy and MRR are averaged over all stored queries; the others by mean. Returns a dict with keys
+        # accuracy@k, precision@k, recall@k, ndcg@k, mrr@k, map@k, each mapping k to a value.
         # Init score computation values
         num_hits_at_k = {k: 0 for k in self.accuracy_at_k}
         precisions_at_k = {k: [] for k in self.precision_recall_at_k}
@@ -568,6 +618,7 @@ class InformationRetrievalEvaluator(BaseEvaluator):
         }
 
     def output_scores(self, scores):
+        # [FUNCTION DOC] HELPER: Log each metric for each k (accuracy, precision and recall as percentages, the rest to 4 decimals).
         for k in scores["accuracy@k"]:
             logger.info("Accuracy@{}: {:.2f}%".format(k, scores["accuracy@k"][k] * 100))
 
@@ -588,12 +639,15 @@ class InformationRetrievalEvaluator(BaseEvaluator):
 
     @staticmethod
     def compute_dcg_at_k(relevances, k):
+        # [FUNCTION DOC] HELPER: Discounted cumulative gain of the first k relevances: sum of relevance divided by log base 2 of
+        # (position + 2), positions starting at 0.
         dcg = 0
         for i in range(min(len(relevances), k)):
             dcg += relevances[i] / np.log2(i + 2)  # +2 as we start our idx at 0
         return dcg
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict with truncate_dim and the four prompt settings that are not None.
         config_dict = {}
         config_dict_candidate_keys = [
             "truncate_dim",

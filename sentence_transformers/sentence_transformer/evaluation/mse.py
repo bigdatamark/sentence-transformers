@@ -1,3 +1,5 @@
+# [MODULE DOC] MSE evaluator for knowledge distillation: compares a student model's embeddings of target sentences
+# against fixed teacher embeddings of source sentences computed at construction time.
 from __future__ import annotations
 
 import csv
@@ -16,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 class MSEEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator holding precomputed source_embeddings (teacher), target_sentences, show_progress_bar, batch_size,
+    # name, truncate_dim, write_csv, CSV file name ("mse_evaluation_<name>_results.csv") and headers. Primary
+    # metric is "negative_mse" so that higher is better.
     """
     Computes the mean squared error (x100) between the computed sentence embedding
     and some target sentence embedding.
@@ -80,6 +85,9 @@ class MSEEvaluator(BaseEvaluator):
         write_csv: bool = True,
         truncate_dim: int | None = None,
     ):
+        # [FUNCTION DOC] Store settings and compute the teacher embeddings of the source sentences immediately (side effect: model
+        # inference at construction).
+        # KNOWN ISSUE: teacher_model defaults to None, but it is used unconditionally to encode the source sentences, so omitting it raises an AttributeError.
         super().__init__()
         self.truncate_dim = truncate_dim
         self.target_sentences = target_sentences
@@ -97,6 +105,10 @@ class MSEEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch=-1, steps=-1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Encode target sentences with the given (student) model, compute the mean of squared element-wise
+        # differences against the teacher embeddings, multiplied by 100. Logs it, optionally writes/appends a CSV
+        # row (epoch, steps, mse), returns {"<name>_negative_mse": negative mse} after storing it in model card data.
+        # Source and target lists must be aligned and of equal length for broadcasting to work.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -138,6 +150,7 @@ class MSEEvaluator(BaseEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> np.ndarray:
+        # [FUNCTION DOC] HELPER: Encode inputs to numpy using the batch size, progress bar and truncation settings.
         return model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -149,9 +162,11 @@ class MSEEvaluator(BaseEvaluator):
 
     @property
     def description(self) -> str:
+        # [FUNCTION DOC] Return the description "Knowledge Distillation".
         return "Knowledge Distillation"
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict containing truncate_dim when it is set.
         config_dict = {}
         if self.truncate_dim is not None:
             config_dict["truncate_dim"] = self.truncate_dim

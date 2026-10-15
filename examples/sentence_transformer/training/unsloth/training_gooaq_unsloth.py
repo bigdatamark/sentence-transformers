@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: LoRA finetuning with Unsloth. Loads a model (default bert-base-uncased, or first CLI arg) through
+# FastSentenceTransformer (max length 1024, no full finetuning), attaches a LoRA adapter (r 64, alpha 128, dropout 0.1,
+# Unsloth gradient checkpointing, random_state 3407) and casts it to bfloat16. Trains on 1,000,000 GooAQ pairs (10k held
+# out, seed 12) with CachedMultipleNegativesRankingLoss (mini-batch 32, batch 1024, lr 2e-5, 10% warmup, bf16,
+# NO_DUPLICATES, eval/save every 10%). Evaluates default NanoBEIR before and after, saves to
+# models/<model>-gooaq-unsloth/final and tries a Hub push. Side effects: network, disk, GPU, logging.
 import logging
 import sys
 import traceback

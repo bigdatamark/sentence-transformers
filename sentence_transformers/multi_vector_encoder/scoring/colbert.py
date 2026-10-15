@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# ColBERT-family late-interaction scoring functions. MaxSim: for each query token, take the maximum
+# similarity (dot product) over the document's real tokens, then sum over the query's real tokens; the
+# "mean" variants divide by the query's real token count (MeanMaxSim). All functions accept lists, numpy
+# arrays or tensors, optional boolean masks, an optional element budget for chunking, and delegate the
+# actual math to the shared maxsim / maxsim_pairwise utilities. Outputs are float32.
 from __future__ import annotations
 
 import numpy as np
@@ -15,6 +21,11 @@ def colbert_kd_scores(
     chunk_elements: int | None = None,
     length_normalize: bool = False,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # Listwise distillation scoring. Inputs: queries batch by tokens by dim, documents batch by N by tokens by
+    # dim, optional masks of matching shapes, element budget, and length-normalize flag. Converts inputs to
+    # tensors, then for each of the N candidate positions computes pairwise MaxSim between query i and its
+    # candidate at that position, and stacks into batch by N scores.
     """Compute MaxSim scores for knowledge distillation.
 
     The query embeddings have shape ``(batch_size, q_tokens, dim)``. The document embeddings have the
@@ -70,6 +81,9 @@ def colbert_scores_pairwise(
     chunk_elements: int | None = None,
     length_normalize: bool = False,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # Pairwise MaxSim for matched (query i, document i) rows: forwards to maxsim_pairwise with masks renamed and
+    # returns one score per row.
     """Pairwise ColBERT (MaxSim) scoring for matched ``(query_i, document_i)`` pairs.
 
     Takes ``(batch_size, q_tokens, dim)`` query embeddings and ``(batch_size, d_tokens, dim)`` document
@@ -102,6 +116,11 @@ def colbert_scores(
     chunk_elements: int | None = None,
     length_normalize: bool = False,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # All-pairs contrastive scoring. Inputs: queries Q by tokens by dim and document groups D by N by tokens by
+    # dim with optional masks. For each group position n, computes the full Q by D MaxSim matrix against that
+    # position's documents, stacks along a last axis, and reshapes to Q by D times N so column j times N plus n
+    # holds query against document n of group j (query-major). Converts embeddings, not masks, to tensors.
     """ColBERT (MaxSim) contrastive scoring for in-batch negatives.
 
     Takes ``(Q_query, q_tokens, dim)`` query embeddings and ``(Q_doc, N, d_tokens, dim)`` stacked
@@ -146,6 +165,9 @@ def mean_colbert_scores(
     chunk_elements: int | None = None,
     length_normalize: bool = True,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # MeanMaxSim all-pairs scoring: same as the contrastive ColBERT scoring but with length normalization on by
+    # default.
     """MeanMaxSim contrastive scoring: :func:`colbert_scores` divided by each query's real token count.
 
     Pair it with ``model.similarity_fn_name = "meanmaxsim"`` so evaluation scores the way training did.
@@ -171,6 +193,8 @@ def mean_colbert_scores_pairwise(
     chunk_elements: int | None = None,
     length_normalize: bool = True,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # MeanMaxSim pairwise scoring: the pairwise ColBERT scoring with length normalization on by default.
     """MeanMaxSim pairwise scoring, the :func:`colbert_scores_pairwise` counterpart of
     :func:`mean_colbert_scores`. Use it as :class:`MultiVectorMarginMSELoss`'s ``similarity_fct``.
     ``length_normalize`` defaults to True here, and False recovers plain
@@ -193,6 +217,8 @@ def mean_colbert_kd_scores(
     chunk_elements: int | None = None,
     length_normalize: bool = True,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # MeanMaxSim listwise distillation scoring: the ColBERT KD scoring with length normalization on by default.
     """MeanMaxSim listwise KD scoring, the :func:`colbert_kd_scores` counterpart of
     :func:`mean_colbert_scores`. Use it as :class:`MultiVectorDistillKLDivLoss`'s ``similarity_fct``.
     ``length_normalize`` defaults to True here, and False recovers plain :func:`colbert_kd_scores`."""

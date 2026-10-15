@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Script: export the sentence-transformers/parallel-sentences-talks dataset to gzip TSV files
+# parallel-sentences/talks-en-<lang>-<split>.tsv.gz (lang in de, es, it, fr, ar, tr; split in train, dev).
+# Each line is "english<TAB>non_english" after stripping; pairs with an empty side are dropped. Existing files are
+# skipped; subsets/splits that fail to load are reported and skipped. Prints counts and "---DONE---".
+# Side effects: network, disk, stdout.
 """
 This script writes parallel sentence tsv files that can be used to extend existing sentence
 embedding models to new languages.

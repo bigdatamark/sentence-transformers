@@ -1,3 +1,7 @@
+# [MODULE DOC] Binary classification evaluator for SentenceTransformer models: embeds sentence pairs, scores each pair
+# with one or more similarity functions, and finds thresholds that best separate label-1 (similar) from
+# label-0 (dissimilar) pairs, reporting accuracy, F1, precision, recall, average precision and Matthews
+# correlation. Optionally appends results to a CSV file and logs them.
 from __future__ import annotations
 
 import csv
@@ -25,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 
 class BinaryClassificationEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator holding parallel lists sentences1, sentences2 and labels (each 0 or 1), plus name, batch_size,
+    # show_progress_bar, write_csv, truncate_dim, similarity_fn_names (subset of cosine/dot/euclidean/manhattan;
+    # empty means use the model's own similarity function at call time), csv_file name (includes name) and
+    # csv_headers (epoch, steps, then one column per similarity function and metric).
+    # KNOWN ISSUE: The docstring says the returned score is accuracy, but the primary metric is actually average precision (ap, or max_ap with several similarity functions).
     """
     Evaluate a model based on the similarity of the embeddings by calculating the accuracy of identifying similar and
     dissimilar sentences.
@@ -94,6 +103,9 @@ class BinaryClassificationEvaluator(BaseEvaluator):
         truncate_dim: int | None = None,
         similarity_fn_names: list[Literal["cosine", "dot", "euclidean", "manhattan"]] | None = None,
     ):
+        # [FUNCTION DOC] Store inputs; assert the three lists have equal length and every label is 0 or 1 (AssertionError otherwise).
+        # If show_progress_bar is None, enable it when the logger level is INFO or DEBUG. Build the CSV file name
+        # and initial headers, then append metric headers for the configured similarity functions.
         super().__init__()
         self.sentences1 = sentences1
         self.sentences2 = sentences2
@@ -121,6 +133,8 @@ class BinaryClassificationEvaluator(BaseEvaluator):
         self._append_csv_headers(self.similarity_fn_names)
 
     def _append_csv_headers(self, similarity_fn_names: list[str]) -> None:
+        # [FUNCTION DOC] HELPER: Append "<similarity>_<metric>" CSV headers for each given similarity name and each of accuracy,
+        # accuracy_threshold, f1, precision, recall, f1_threshold, ap, mcc. Mutates csv_headers.
         metrics = [
             "accuracy",
             "accuracy_threshold",
@@ -138,6 +152,8 @@ class BinaryClassificationEvaluator(BaseEvaluator):
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC] Alternate constructor: take texts[0] and texts[1] and label from each InputExample and build the evaluator,
+        # forwarding extra keyword arguments.
         sentences1 = []
         sentences2 = []
         scores = []
@@ -151,6 +167,13 @@ class BinaryClassificationEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Run the evaluation. Logs a header mentioning epoch/steps and truncation. If no similarity functions are
+        # configured, adopt the model's similarity function name and append its CSV headers. Computes per-function
+        # metrics, then if output_path is given and write_csv is on, creates the directory and writes a CSV row
+        # (epoch, steps, metric values in header order), writing headers first if the file is new, else appending.
+        # Flattens metrics to "<fn>_<metric>" keys; with more than one function also adds "max_<metric>" (max across
+        # functions) and sets primary_metric to "max_ap", otherwise "<fn>_ap". Prefixes keys with the evaluator
+        # name, stores them in the model card data, and returns the dict.
         """
         Compute the evaluation metrics for the given model.
 
@@ -222,6 +245,14 @@ class BinaryClassificationEvaluator(BaseEvaluator):
         return metrics
 
     def compute_metrics(self, model: SentenceTransformer) -> dict[str, dict[str, float]]:
+        # [FUNCTION DOC] Embed the sentences and compute metrics per similarity function. If the inputs are hashable, embeds the
+        # unique union of both lists once and looks embeddings up; otherwise (TypeError, e.g. images) embeds both
+        # lists separately. Scores pairs with cosine or dot (higher is more similar) or Manhattan / Euclidean
+        # distance (negated back to positive distances, lower is more similar). For each configured function finds
+        # the best accuracy threshold and best F1 threshold, computes average precision (scores sign-flipped for
+        # distances), and Matthews correlation using the F1 threshold. Logs each metric. Returns a dict from
+        # function name to a dict of accuracy, accuracy_threshold, f1, f1_threshold, precision, recall, ap, mcc.
+        # Raises KeyError for an unknown similarity function name.
         try:
             # If the sentences are hashable, then we can use a set to avoid embedding the same sentences multiple
             # times
@@ -304,6 +335,8 @@ class BinaryClassificationEvaluator(BaseEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> np.ndarray:
+        # [FUNCTION DOC] HELPER: Encode inputs with the model to numpy using the evaluator's batch size, progress bar setting and
+        # truncation dimension, forwarding extra keyword arguments.
         return model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -315,6 +348,11 @@ class BinaryClassificationEvaluator(BaseEvaluator):
 
     @staticmethod
     def find_best_acc_and_threshold(scores, labels, high_score_more_similar: bool):
+        # [FUNCTION DOC] Find the threshold maximizing accuracy. Sort (score, label) pairs from most to least similar. Walk the
+        # sorted list (excluding the last element), counting positives seen so far and negatives remaining; accuracy
+        # at each cut is their sum over the total; on improvement record the midpoint between this and the next
+        # score as the threshold. Returns (best accuracy, threshold), threshold -1 if never improved. Asserts equal
+        # lengths. Labels must be a numpy array for the negative count.
         assert len(scores) == len(labels)
         rows = list(zip(scores, labels))
 
@@ -342,6 +380,10 @@ class BinaryClassificationEvaluator(BaseEvaluator):
 
     @staticmethod
     def find_best_f1_and_threshold(scores, labels, high_score_more_similar: bool):
+        # [FUNCTION DOC] Find the threshold maximizing F1. Sort pairs from most to least similar; walking all but the last, treat
+        # the first i+1 as predicted positive, compute precision (correct over extracted) and recall (correct over
+        # total positives) and F1 once any correct is found; on improvement store F1, precision, recall and the
+        # midpoint threshold. Returns (f1, precision, recall, threshold), zeros if never improved. Asserts equal lengths.
         assert len(scores) == len(labels)
 
         scores = np.asarray(scores)
@@ -377,6 +419,7 @@ class BinaryClassificationEvaluator(BaseEvaluator):
         return best_f1, best_precision, best_recall, threshold
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict containing truncate_dim only when it is set.
         config_dict = {}
         if self.truncate_dim is not None:
             config_dict["truncate_dim"] = self.truncate_dim

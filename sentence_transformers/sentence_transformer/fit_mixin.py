@@ -1,3 +1,8 @@
+# [MODULE DOC] Deprecated v2-style training entry points for SentenceTransformer, provided as a mixin. "fit" converts
+# legacy (DataLoader, loss) objectives into a Hugging Face DatasetDict and trains through
+# SentenceTransformerTrainer, using three trainer callbacks defined here to reproduce the old saving,
+# per-epoch evaluation and user-callback behavior. "old_fit" is the original hand-written training loop.
+# Also contains learning-rate scheduler selection, the legacy smart batching collate and checkpoint helpers.
 from __future__ import annotations
 
 import json
@@ -37,6 +42,9 @@ if TYPE_CHECKING:
 
 
 class SaveModelCallback(TrainerCallback):
+    # [CLASS DOC] Trainer callback that saves the model to output_dir. With an evaluator and save_best_model, saves whenever an
+    # evaluation's primary metric improves; without an evaluator, saves once at the end of training. Attributes:
+    # output_dir, evaluator, save_best_model, best_metric (None until the first matching evaluation).
     """A Callback to save the model to the `output_dir`.
 
     There are two cases:
@@ -48,6 +56,7 @@ class SaveModelCallback(TrainerCallback):
     """
 
     def __init__(self, output_dir: str, evaluator: BaseEvaluator | None, save_best_model: bool) -> None:
+        # [FUNCTION DOC] Store the output directory, evaluator and save flag; start with no best metric.
         super().__init__()
         self.output_dir = output_dir
         self.evaluator = evaluator
@@ -55,6 +64,8 @@ class SaveModelCallback(TrainerCallback):
         self.best_metric = None
 
     def is_better(self, new_metric: float) -> bool:
+        # [FUNCTION DOC] HELPER: Return whether new_metric beats best_metric: greater, unless the evaluator has a greater_is_better
+        # attribute set to False, in which case smaller.
         if getattr(self.evaluator, "greater_is_better", True):
             return new_metric > self.best_metric
         return new_metric < self.best_metric
@@ -68,6 +79,9 @@ class SaveModelCallback(TrainerCallback):
         model: SentenceTransformer,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC] On each evaluation (when an evaluator exists and save_best_model is set), look for metric keys ending with
+        # the evaluator's primary_metric (or "evaluator"); if the value is the first seen or better, record it and save
+        # the model to output_dir (disk I/O).
         if self.evaluator is not None and self.save_best_model:
             metric_key = getattr(self.evaluator, "primary_metric", "evaluator")
             for key, value in metrics.items():
@@ -84,11 +98,15 @@ class SaveModelCallback(TrainerCallback):
         model: SentenceTransformer,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC] At the end of training, save the model to output_dir only when there is no evaluator.
         if self.evaluator is None:
             model.save(self.output_dir)
 
 
 class EvaluatorCallback(TrainerCallback):
+    # [CLASS DOC] Trainer callback that runs the evaluator at the end of every epoch (the old fit behavior) and forwards the
+    # metrics to the trainer's on_evaluate callbacks. Attributes: evaluator, output_path (with "/eval" appended and
+    # created when given), metric_key_prefix "eval", trainer (must be assigned after the trainer is created).
     """The SentenceTransformers.fit method always ran the evaluator on every epoch,
     in addition to every "evaluation_steps". This callback is responsible for that.
 
@@ -96,6 +114,8 @@ class EvaluatorCallback(TrainerCallback):
     """
 
     def __init__(self, evaluator: BaseEvaluator, output_path: str | None = None) -> None:
+        # [FUNCTION DOC] Store the evaluator; if an output path is given, join "eval" to it and create that directory (side effect).
+        # Set the metric prefix and leave trainer unset.
         super().__init__()
         self.evaluator = evaluator
         self.output_path = output_path
@@ -114,6 +134,9 @@ class EvaluatorCallback(TrainerCallback):
         model: SentenceTransformer,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC] Run the evaluator with the model, output path, the fractional epoch and global step. Wrap a non-dict result
+        # as {"evaluator": value}. Prefix every key not already starting with "eval_" with that prefix (mutating the
+        # dict). If a trainer is attached, invoke its callback handler's on_evaluate with these metrics.
         evaluator_metrics = self.evaluator(
             model, output_path=self.output_path, epoch=state.epoch, steps=state.global_step
         )
@@ -130,12 +153,15 @@ class EvaluatorCallback(TrainerCallback):
 
 
 class OriginalCallback(TrainerCallback):
+    # [CLASS DOC] Trainer callback that calls a legacy user callback with (score, epoch, steps) after each evaluation.
+    # Attributes: callback and evaluator.
     """A Callback to invoke the original callback function that was provided to SentenceTransformer.fit()
 
     This callback has the following signature: `(score: float, epoch: int, steps: int) -> None`
     """
 
     def __init__(self, callback: Callable[[float, int, int], None], evaluator: BaseEvaluator) -> None:
+        # [FUNCTION DOC] Store the user callback and evaluator.
         super().__init__()
         self.callback = callback
         self.evaluator = evaluator
@@ -148,6 +174,9 @@ class OriginalCallback(TrainerCallback):
         metrics: dict[str, Any],
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC] Find the first metric key ending with the evaluator's primary_metric (or "evaluator") and call the user
+        # callback with its value, the state's epoch and global step, returning the callback's result. Does nothing if
+        # no key matches.
         metric_key = getattr(self.evaluator, "primary_metric", "evaluator")
         for key, value in metrics.items():
             if key.endswith(metric_key):
@@ -155,6 +184,9 @@ class OriginalCallback(TrainerCallback):
 
 
 class FitMixin:
+    # [CLASS DOC] Mixin injected into SentenceTransformer that provides the deprecated fit and old_fit training methods. It
+    # relies on the host class providing named_parameters, preprocess, save, device, to and the model card
+    # variables used by old_fit.
     """Mixin class for injecting the `fit` and `old_fit` methods into SentenceTransformer models"""
 
     def fit(
@@ -180,6 +212,23 @@ class FitMixin:
         checkpoint_save_total_limit: int = 0,
         resume_from_checkpoint: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Deprecated training via the modern trainer. Raises ImportError if the datasets library is missing.
+        # Sets every data loader's collate function to identity (mutation) so it yields raw InputExamples. For each
+        # loader (numbered from 1): choose the batch sampler (no-duplicates for NoDuplicatesDataLoader, group-by-label
+        # when its dataset is a SentenceLabelDataset, otherwise default; the last loader decides), take its batch size
+        # (default 8), iterate it fully to collect texts and labels, and build a Dataset with columns sentence_0,
+        # sentence_1, ... plus a "label" column unless all labels are 0. Stores them as "_dataset_<i>" in a
+        # DatasetDict with matching loss keys. If steps_per_epoch is positive it becomes max_steps for a single epoch,
+        # otherwise (more epochs) a warning is logged and it is ignored. Builds training arguments: output dir is the
+        # checkpoint path or a fresh "checkpoints/model[_n]" directory, round-robin multi-dataset sampling, epochs,
+        # step-based evaluation when evaluation_steps is positive, gradient clipping, fp16 for use_amp, progress bar,
+        # step-based saving only with a checkpoint path, and checkpoint limits. Computes total steps (steps per epoch
+        # defaults to the smallest dataset length divided by batch size, times epochs), builds an optimizer with weight
+        # decay on all parameters except biases and LayerNorm weights, and the named scheduler. Adds an
+        # EvaluatorCallback (and an OriginalCallback when a user callback is given) if an evaluator exists, creates the
+        # trainer, attaches it to the EvaluatorCallback, adds a SaveModelCallback when output_path is set, and, if
+        # resuming is requested, picks the highest-numbered "checkpoint-N" directory in checkpoint_path (warning and
+        # starting fresh if none or if the directory is missing). Finally trains. Returns None.
         """
         Deprecated training method from before Sentence Transformers v3.0, it is recommended to use
         :class:`~sentence_transformers.sentence_transformer.trainer.SentenceTransformerTrainer` instead. This method uses
@@ -247,6 +296,7 @@ class FitMixin:
 
         # Clear the dataloaders from collate functions as we just want raw InputExamples
         def identity(batch):
+            # [FUNCTION DOC] HELPER: Identity collate function returning the batch list unchanged.
             return batch
 
         for data_loader in data_loaders:
@@ -285,6 +335,8 @@ class FitMixin:
         train_dataset_dict = DatasetDict(train_dataset_dict)
 
         def _default_checkpoint_dir() -> str:
+            # [FUNCTION DOC] HELPER: Return "checkpoints/model", or the first "checkpoints/model_<n>" (n from 1) that does not exist or
+            # is an empty directory. Reads the file system.
             dir_name = "checkpoints/model"
             idx = 1
             while Path(dir_name).exists() and len(list(Path(dir_name).iterdir())) != 0:
@@ -396,6 +448,9 @@ class FitMixin:
 
     @staticmethod
     def _get_scheduler(optimizer, scheduler: str, warmup_steps: int, t_total: int) -> LambdaLR:
+        # [FUNCTION DOC] Return a transformers learning-rate scheduler for the optimizer by case-insensitive name: constantlr,
+        # warmupconstant (warmup_steps), warmuplinear, warmupcosine, warmupcosinewithhardrestarts (warmup_steps and
+        # t_total). Raises ValueError for any other name.
         """
         Returns the correct learning rate scheduler. Available scheduler:
 
@@ -426,6 +481,10 @@ class FitMixin:
             raise ValueError(f"Unknown scheduler {scheduler}")
 
     def smart_batching_collate(self, batch: list[InputExample]) -> tuple[list[dict[str, Tensor]], Tensor]:
+        # [FUNCTION DOC] Legacy collate function: given a list of InputExamples, transpose texts so each position across examples
+        # becomes a column, tokenize each column with the model's preprocess method, and collect labels into a tensor
+        # (stacked from numpy arrays when labels are arrays, otherwise built directly). Returns (list of feature
+        # dicts, label tensor).
         """
         Transforms a batch from a SmartBatchingDataset to a batch of tensors for the model
         Here, batch is a list of InputExample instances: [InputExample(...), ...]
@@ -475,6 +534,20 @@ class FitMixin:
         checkpoint_save_steps: int = 500,
         checkpoint_save_total_limit: int = 0,
     ) -> None:
+        # [FUNCTION DOC] Deprecated original training loop. Adds a training section to the legacy model card variables (objective
+        # descriptions from the deprecated template plus a JSON dump of fit parameters) and clears the cached card
+        # text. With use_amp creates a gradient scaler (NPU, CUDA, or generic by device type). Moves the model and
+        # loss modules to the device and sets each data loader's collate function to smart batching collate. Resets
+        # best_score to a large negative value. Steps per epoch default to the shortest data loader. Creates one
+        # optimizer (weight decay except biases and LayerNorm) and scheduler per loss module. For each epoch, zeroes
+        # grads and sets train mode; each step iterates over objectives round-robin, taking the next batch (restarting
+        # an exhausted iterator), moving labels and features to the device, computing the loss (under autocast with
+        # scaled backward, unscale, clipping and scaler step when using AMP; the scheduler step is skipped when the
+        # scale changed) or plain backward, clipping and step otherwise, then zeroing grads and stepping the scheduler.
+        # Every evaluation_steps steps runs mid-training evaluation and resets train mode; every checkpoint_save_steps
+        # global steps saves a checkpoint. After each epoch evaluates with steps -1. Saves the final model when there
+        # is no evaluator but an output path, and saves a final checkpoint when a checkpoint path is set.
+        # KNOWN ISSUE: The scheduler step is skipped whenever the AMP loss scale changes, including when the scaler periodically grows the scale after successful steps, so some valid steps also skip the scheduler.
         """
         Deprecated training method from before Sentence Transformers v3.0, it is recommended to use
         :class:`sentence_transformers.sentence_transformer.trainer.SentenceTransformerTrainer` instead. This method should
@@ -687,6 +760,10 @@ class FitMixin:
             self._save_checkpoint(checkpoint_path, checkpoint_save_total_limit, global_step)
 
     def _eval_during_training(self, evaluator, output_path, save_best_model, epoch, steps, callback) -> None:
+        # [FUNCTION DOC] HELPER: If output_path is given, create it and an "eval" subdirectory. If an evaluator exists, run it with
+        # that eval path, epoch and steps, call the user callback with the score, and when the score beats best_score
+        # store it and (if save_best_model) save the model to output_path.
+        # KNOWN ISSUE: Evaluators now return a dict of metrics, so comparing the score to best_score raises a TypeError, and saving with output_path None would also fail.
         """Runs evaluation during the training"""
         eval_path = output_path
         if output_path is not None:
@@ -704,6 +781,9 @@ class FitMixin:
                     self.save(output_path)
 
     def _save_checkpoint(self, checkpoint_path, checkpoint_save_total_limit, step) -> None:
+        # [FUNCTION DOC] HELPER: Save the model into checkpoint_path/<step>. If a positive total limit is set and more numeric
+        # checkpoint subdirectories exist than the limit, delete only the oldest one (by step number) with a
+        # recursive directory removal.
         # Store new checkpoint
         self.save(os.path.join(checkpoint_path, str(step)))
 

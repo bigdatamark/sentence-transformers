@@ -1,3 +1,9 @@
+# [PACKAGE DOC]
+# Training losses for CrossEncoder models. Pointwise losses: binary cross entropy, multi-class cross
+# entropy, MSE (distillation). Pairwise: margin MSE, RankNet. Contrastive: multiple negatives ranking and
+# its cached variant. Listwise: ListNet, ListMLE, position-aware PListMLE (with its lambda weight helper),
+# LambdaLoss with its weighting schemes (none, NDCG-Loss1, NDCG-Loss2, LambdaRank, NDCG-Loss2++), and
+# ADR-MSE. Only re-exports; no side effects.
 from __future__ import annotations
 
 from .adr_mse import ADRMSELoss

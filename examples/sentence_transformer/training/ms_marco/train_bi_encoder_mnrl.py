@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Example script: train a distilbert-base-uncased bi-encoder on MS MARCO with CachedMultipleNegativesRankingLoss
+# using hard negatives unioned from 13 mining systems (SYSTEMS maps names to Hub repos with "triplet-50-ids"
+# subsets) and filtered by a CrossEncoder margin. Seeds random/torch/numpy with 12 and configures INFO logging at import;
+# running as a script calls main().
 """
 This example shows how to train a bi-encoder on the MS MARCO Passage Ranking dataset
 (https://github.com/microsoft/MSMARCO-Passage-Ranking) using MultipleNegativesRankingLoss.
@@ -66,6 +71,15 @@ SYSTEMS = {
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Builds a SentenceTransformer (fp32, max length 300) with an appended
+    # Normalize module. Loads passage/query id->text dicts and MiniLM-L6-v2 CE scores (qid -> pid -> score). For each
+    # system row whose query and positive are scored, adds up to 5 new negatives per system that are scored and whose CE
+    # score is below positive score minus 3.0. Keeps queries with at least 4 negatives, builds a Dataset (qid, pid,
+    # neg_pids) with an on-the-fly transform, trains 1 epoch with cached MNRL (batch 256, mini-batch 32, lr 3.2e-5, 10%
+    # warmup, bf16, NO_DUPLICATES, eval/save every 10%), evaluates NanoBEIR before/after under bf16 autocast, saves to
+    # models/<run_name>/final and tries a Hub push. Side effects: heavy network/disk/GPU use, logging.
+    # KNOWN ISSUE: if a query appears in several systems with different positives, the first positive id is kept but later negatives are filtered against the other positive's CE score.
     model_name = "distilbert/distilbert-base-uncased"
     train_batch_size = 256  # In-batch negatives are the dominant signal in MNRL. Larger batches help quality.
     train_mini_batch_size = 32  # This controls the memory usage
@@ -145,6 +159,9 @@ def main():
 
     # The transform resolves IDs to text on-the-fly and samples fresh negatives per batch.
     def ids_to_text_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: dataset transform. For each row samples 4 negative ids without replacement and returns anchor (query
+        # text), positive (passage text) and negative_1..negative_4 columns of passage texts.
         sampled_neg_ids = [random.sample(neg_pids, num_negatives) for neg_pids in batch["neg_pids"]]
         return {
             "anchor": [query_dict[qid] for qid in batch["qid"]],

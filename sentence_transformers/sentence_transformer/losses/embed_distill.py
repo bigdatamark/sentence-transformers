@@ -1,3 +1,6 @@
+# [MODULE DOC] Embedding distillation loss (EmbedDistill): matches student embeddings to precomputed teacher embeddings given
+# as labels, per input column, with cosine, L2 or MSE distance and an optional learnable projection into the
+# teacher's dimension that can be saved and loaded as a safetensors file.
 from __future__ import annotations
 
 import os
@@ -14,12 +17,17 @@ from sentence_transformers.sentence_transformer.model import SentenceTransformer
 
 
 class EmbedDistillLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model (student), distance_metric ("mse", "l2" or "cosine"), projection_dim (optional
+    # int), projection (optional linear layer from student dimension to projection_dim, created on the model's
+    # device, trained with the loss but not saved with the model).
     def __init__(
         self,
         model: SentenceTransformer,
         distance_metric: Literal["mse", "l2", "cosine"] = "cosine",
         projection_dim: int | None = None,
     ) -> None:
+        # [FUNCTION DOC] Raises ValueError for an unknown distance metric. Stores settings and, when projection_dim is set, creates the
+        # projection layer sized from the student's embedding dimension.
         """
         Computes an embedding-distillation loss between the student model's embeddings
         and pre-computed teacher embeddings (passed as labels). For each input text column
@@ -164,6 +172,10 @@ class EmbedDistillLoss(nn.Module):
             self.projection = nn.Linear(student_dim, projection_dim, device=model.device)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor | None) -> Tensor:
+        # [FUNCTION DOC] Raises ValueError if labels are missing. Embeds every input column with the shared helper. Detaches labels. A
+        # 2-D label tensor (batch, teacher dim) is used as the target for every column; a 3-D tensor (batch, columns,
+        # teacher dim) is split per column and must have as many columns as inputs (ValueError otherwise); other ranks
+        # raise ValueError. Returns the loss from the per-column embedding lists.
         if labels is None:
             raise ValueError(
                 "EmbedDistillLoss requires pre-computed teacher embeddings as labels. "
@@ -195,6 +207,10 @@ class EmbedDistillLoss(nn.Module):
         return self.compute_loss_from_embeddings(embeddings, teacher_embeddings)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], teacher_embeddings: list[Tensor]) -> Tensor:
+        # [FUNCTION DOC] For each (student, teacher) column pair: move the teacher tensor to the student's device and dtype, apply the
+        # projection to the student when configured, and compute mean squared error ("mse"), the mean row-wise Euclidean
+        # norm of the difference ("l2"), or the mean of one minus row-wise cosine similarity ("cosine"). Returns the mean
+        # over columns.
         """Compute the embedding-distillation loss from already-computed embedding lists.
 
         Exposed so subclasses (or callers composing this with another loss) can reuse the
@@ -225,6 +241,8 @@ class EmbedDistillLoss(nn.Module):
         return torch.stack(losses).mean()
 
     def save_projection(self, path: str | os.PathLike) -> None:
+        # [FUNCTION DOC] Save the projection layer's weights to the given path in safetensors format (file I/O). Raises ValueError if no
+        # projection exists.
         """Persist the projection layer's weights so they can be reused in a later run.
 
         The standard Trainer save path only writes the student model, not the loss
@@ -247,6 +265,10 @@ class EmbedDistillLoss(nn.Module):
         save_safetensors_model(self.projection, str(path))
 
     def load_projection(self, path: str | os.PathLike) -> None:
+        # [FUNCTION DOC] Load projection weights from a safetensors file. The weight shape gives (output, input) sizes. If no projection
+        # exists yet, require the input size to equal the student's embedding dimension (ValueError otherwise), create a
+        # new linear layer on the model device and set projection_dim. If one exists, its shape must match (ValueError
+        # otherwise). Then load the state dict into it (mutation).
         """Load projection weights previously written with `save_projection`.
 
         If the loss was constructed without a `projection_dim`, the projection layer
@@ -282,6 +304,7 @@ class EmbedDistillLoss(nn.Module):
         self.projection.load_state_dict(state_dict)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with distance_metric and projection_dim.
         return {
             "distance_metric": self.distance_metric,
             "projection_dim": self.projection_dim,
@@ -289,6 +312,7 @@ class EmbedDistillLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the EmbedDistill paper.
         return """
 @article{kim2023embeddistill,
     title={EmbedDistill: A Geometric Knowledge Distillation for Information Retrieval},

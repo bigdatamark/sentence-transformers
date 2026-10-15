@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Model card support for SparseEncoder models: the model-card trainer callback and the dataclass
+# of card metadata, which labels the architecture (Asymmetric, Inference-free, SPLADE, CSR), adds
+# sparse-specific metadata and computes example similarities for the generated README.
 from __future__ import annotations
 
 import logging
@@ -18,11 +22,20 @@ logger = logging.getLogger(__name__)
 
 
 class SparseEncoderModelCardCallback(BaseModelCardCallback):
+    # [CLASS DOC]
+    # Trainer callback that updates the model card during training; adds nothing to
+    # BaseModelCardCallback and exists to give sparse models their own callback type.
     pass
 
 
 @dataclass
 class SparseEncoderModelCardData(BaseModelCardData):
+    # [CLASS DOC]
+    # Dataclass of model card metadata for SparseEncoder. Overrides defaults: snippet model class and
+    # placeholder id, task_name (filled at registration), tags (sentence-transformers, sparse-encoder,
+    # sparse), usage_examples (not an init argument), pipeline_tag (filled at registration),
+    # template_path pointing at model_card_template.md next to this file, model_type (default
+    # "Sparse Encoder") and the registered model reference.
     """A dataclass storing data used in the model card.
 
     Args:
@@ -90,6 +103,13 @@ class SparseEncoderModelCardData(BaseModelCardData):
     model: SparseEncoder | None = field(default=None, init=False, repr=False)
 
     def register_model(self, model: SparseEncoder) -> None:
+        # [FUNCTION DOC]
+        # Registers the model via the parent, then defaults task_name to "semantic search and sparse
+        # retrieval" and pipeline_tag to "feature-extraction" when unset. Inspects the classes of all
+        # nested modules and builds model_type labels: Asymmetric (a Router), Inference-free
+        # (SparseStaticEmbedding), SPLADE (SpladePooling), CSR (SparseAutoEncoder). Adds the lowercased
+        # labels as tags and sets model_type to the labels followed by "Sparse Encoder", joined by spaces.
+        # Mutates the card data.
         super().register_model(model)
 
         if self.task_name is None:
@@ -116,6 +136,10 @@ class SparseEncoderModelCardData(BaseModelCardData):
         self.model_type = " ".join(model_type)
 
     def get_model_specific_metadata(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent metadata plus output_dimensionality, a human-readable similarity_fn_name
+        # (cosine, dot, euclidean, manhattan mapped to fixed names, others title-cased with underscores
+        # replaced; "Dot Product" if unset) and the model's max_active_dims.
         metadata = super().get_model_specific_metadata()
         similarity_fn_name = "Dot Product"
         if self.model.similarity_fn_name:
@@ -135,6 +159,11 @@ class SparseEncoderModelCardData(BaseModelCardData):
         return metadata
 
     def run_usage_snippet(self) -> None:
+        # [FUNCTION DOC]
+        # Runs the parent hook (default examples), then, if widget examples are enabled, keeps at most three
+        # usage examples, prepares them for inference, encodes them, computes their pairwise similarity
+        # matrix and stores it as text (4 decimals, no scientific notation) with each line prefixed by a
+        # hash and space in self.similarities. Runs model inference and mutates the card data.
         super().run_usage_snippet()
 
         if not self.generate_widget_examples:
@@ -151,4 +180,6 @@ class SparseEncoderModelCardData(BaseModelCardData):
             self.similarities = "\n".join(f"# {line}" for line in str(similarity.cpu()).splitlines())
 
     def get_default_model_name(self) -> str:
+        # [FUNCTION DOC]
+        # Returns model_type as the default model name for the card.
         return self.model_type

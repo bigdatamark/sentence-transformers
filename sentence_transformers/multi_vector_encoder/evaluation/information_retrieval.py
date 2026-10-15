@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Information-retrieval evaluator for MultiVectorEncoder models. Reuses the dense InformationRetrievalEvaluator
+# (which encodes queries once, encodes and scores the corpus in chunks, keeps per-query top-k, and computes
+# MRR/NDCG/Recall/Precision/Accuracy/MAP at the configured cutoffs, with optional CSV and prediction
+# output) but plugs in late-interaction scoring and query/document encoders.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -24,6 +29,10 @@ logger = transformers_logging.get_logger(__name__)
 
 
 class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
+    # [CLASS DOC]
+    # Subclass of InformationRetrievalEvaluator. Extra state: an element budget for the MaxSim scoring
+    # intermediate. Score functions default to being resolved from the model's similarity name at first call.
+    # XTR scoring is rejected because its global top-k is incompatible with per-chunk corpus scoring.
     """Evaluates a :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` model on an information-retrieval
     (IR) task. For each query, the model retrieves the top-k closest documents from the corpus using
     ColBERT-style MaxSim scoring, then reports the standard IR metrics (MRR@k, NDCG@k, Recall@k,
@@ -115,6 +124,12 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         score_functions: dict[str, Callable[[Tensor, Tensor], Tensor]] | None = None,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # Validate and construct. Raises ValueError if a non-None truncation dimension is given; if custom score
+        # functions are given together with an element budget; or if any custom score function (unwrapping
+        # functools partials and torch.compile wrappers) is the XTR scoring function or an XTR scoring instance.
+        # Stores the element budget and passes queries, corpus, relevance judgments, corpus chunk size, score
+        # functions and remaining kwargs to the parent.
         if kwargs.get("truncate_dim") is not None:
             raise ValueError(
                 "truncate_dim is not supported by MultiVectorEncoder evaluators: multi-vector token "
@@ -161,6 +176,13 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         *args,
         **kwargs,
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Run evaluation. For each explicitly given query/corpus prompt, warns once if the model has a registered
+        # prompt for that role (first of "query", or of "document"/"passage"/"corpus", found in the model's
+        # prompts) that the explicit prompt does not start with, since the explicit one replaces it. If no score
+        # functions are set yet, resolves the model's similarity function (binding the element budget if set),
+        # stores it as the only score function under the model's similarity name, and appends CSV headers for it
+        # (mutating the evaluator permanently). Delegates to the parent and returns its metrics dict.
         for explicit_prompt, param_name, role_keys in (
             (self.query_prompt, "query_prompt", ("query",)),
             (self.corpus_prompt, "corpus_prompt", ("document", "passage", "corpus")),
@@ -198,6 +220,11 @@ class MultiVectorInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         prompt: str | None = None,
         **kwargs,
     ) -> list[Tensor] | Tensor:
+        # [FUNCTION DOC]
+        # Encode inputs, dropping any truncation-dimension kwarg. Uses the query encoder for "query", document
+        # encoder for "document", else the generic encoder, passing prompt name, prompt, batch size, progress-bar
+        # flag and kwargs. Query embeddings (a ragged list) are right-padded with zeros into one 3D tensor so they
+        # can be reused across corpus chunks; documents are returned as the ragged list.
         # MultiVectorEncoder.encode doesn't accept truncate_dim, drop it before forwarding.
         kwargs.pop("truncate_dim", None)
         if encode_fn_name == "query":

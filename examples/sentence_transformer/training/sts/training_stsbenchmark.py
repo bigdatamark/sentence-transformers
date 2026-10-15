@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilbert-base-uncased, or first CLI arg) on STSb scored pairs with
+# CosineSimilarityLoss (regresses the cosine similarity of the two embeddings onto the 0..1 score). Batch 16, 4 epochs,
+# fp16, eval/save every 100 steps with an STSb validation evaluator; afterwards evaluates on STSb test, saves to
+# output/training_stsbenchmark_<model>-<timestamp>/final and tries a Hub push of "<model>-sts".
+# Side effects: network, disk, GPU, logging.
 """
 This examples trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) for the STSbenchmark from scratch. It generates sentence embeddings
 that can be compared using cosine-similarity to measure the similarity.

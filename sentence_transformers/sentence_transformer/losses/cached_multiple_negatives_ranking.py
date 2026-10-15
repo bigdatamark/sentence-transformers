@@ -1,3 +1,8 @@
+# [MODULE DOC] Cached multiple negatives ranking loss: MultipleNegativesRankingLoss (InfoNCE with in-batch negatives)
+# combined with Gradient Cache so huge batches fit in a fixed memory budget. Gradient caching mechanics
+# (no-grad embedding, cached embedding gradients, backward-hook replay) come from the shared CachedLossMixin;
+# this module provides the chunked loss computation. Also re-exports RandContext and mini-batch helpers for
+# backwards compatibility.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -24,6 +29,11 @@ from sentence_transformers.util import all_gather_with_grad, cos_sim, get_rank, 
 
 
 class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
+    # [CLASS DOC] Loss module combining CachedLossMixin with a wrapped MultipleNegativesRankingLoss that owns and validates all
+    # loss hyperparameters (scale, similarity_fct, gather_across_devices, directions, partition_mode, hardness_mode,
+    # hardness_strength). Those names are exposed as read-only properties and assignments to them are forwarded to
+    # the wrapped loss. Own attributes: model, loss (the wrapped loss), mini_batch_size, mini_batch_num_tokens,
+    # show_progress_bar.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -41,6 +51,9 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
         hardness_mode: Literal["in_batch_negatives", "hard_negatives", "all_negatives"] | None = None,
         hardness_strength: float = 0.0,
     ) -> None:
+        # [FUNCTION DOC] Raises ValueError for models starting with a static embedding (cannot be mini-batched) or an invalid token
+        # budget. Stores the model, builds the wrapped loss from the hyperparameters (which may raise its own validation
+        # errors), and stores the mini-batch and progress bar settings.
         """
         Boosted version of :class:`MultipleNegativesRankingLoss` (https://huggingface.co/papers/1705.00652) by GradCache (https://huggingface.co/papers/2101.06983).
 
@@ -202,6 +215,8 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
     )
 
     def __setattr__(self, name: str, value: Any) -> None:
+        # [FUNCTION DOC] Route assignment of a delegated hyperparameter name to the wrapped loss once it exists; otherwise use normal
+        # module attribute assignment.
         """Delegate assignments of the wrapped loss's hyperparameters to the wrapped loss.
 
         Without this, ``loss.scale = 5.0`` would hit the setterless property and raise, and
@@ -215,35 +230,56 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
 
     @property
     def scale(self) -> float:
+        # [FUNCTION DOC] Return the wrapped loss's scale.
         return self.loss.scale
 
     @property
     def similarity_fct(self) -> Callable[[Tensor, Tensor], Tensor]:
+        # [FUNCTION DOC] Return the wrapped loss's similarity function.
         return self.loss.similarity_fct
 
     @property
     def gather_across_devices(self) -> bool:
+        # [FUNCTION DOC] Return the wrapped loss's gather_across_devices flag.
         return self.loss.gather_across_devices
 
     @property
     def directions(self) -> tuple[str, ...]:
+        # [FUNCTION DOC] Return the wrapped loss's directions tuple.
         return self.loss.directions
 
     @property
     def partition_mode(self) -> str:
+        # [FUNCTION DOC] Return the wrapped loss's partition mode.
         return self.loss.partition_mode
 
     @property
     def hardness_mode(self) -> str | None:
+        # [FUNCTION DOC] Return the wrapped loss's hardness mode.
         return self.loss.hardness_mode
 
     @property
     def hardness_strength(self) -> float:
+        # [FUNCTION DOC] Return the wrapped loss's hardness strength.
         return self.loss.hardness_strength
 
     def calculate_loss(
         self, reps: list[list[Tensor]], labels: Tensor | None = None, *, with_backward: bool = False
     ) -> Tensor:
+        # [FUNCTION DOC] Compute the InfoNCE loss in row chunks of mini_batch_size. Inputs: per-column lists of embedding chunks
+        # (column 0 queries, the rest documents: positive then hard negatives); labels unused. Concatenate chunks; when
+        # gathering across devices, gather queries and documents with gradient support and offset local row indices by
+        # rank times local batch size. All documents are concatenated column-wise into one candidate set. For each
+        # chunk of local rows: query-to-doc similarities against all documents are always computed; optional
+        # query-to-query (self entries set to negative infinity), doc-to-query (local positives vs all queries) and
+        # doc-to-doc (local positives vs all documents, with all documents of the same query masked to negative
+        # infinity). If hardness weighting is on, a penalty of hardness_strength times the detached raw query-to-doc
+        # similarity is added to selected negatives: only explicit hard negatives ("hard_negatives"), only other rows'
+        # documents ("in_batch_negatives"), or all but the own positive ("all_negatives"). All similarities are
+        # multiplied by scale and penalties added. The positive score is the query's own positive. The normalizer is
+        # one log-sum-exp over all directions concatenated ("joint") or the mean of per-direction log-sum-exps
+        # ("per_direction"). The chunk loss is the mean negative log-likelihood scaled by chunk size over batch size;
+        # with with_backward it is back-propagated and detached. Returns the sum.
         """Calculate the all-pairs InfoNCE loss, chunked over ``mini_batch_size`` rows of the score
         matrix. The labels are unused: the positive pair is the in-batch diagonal."""
         queries = torch.cat(reps[0])
@@ -372,12 +408,15 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
         return sum(losses)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Raises ValueError with fewer than two input columns; otherwise run the gradient-cached forward from the mixin.
         sentence_features = list(sentence_features)
         if len(sentence_features) < 2:
             raise ValueError(f"Expected at least 2 inputs, got {len(sentence_features)}")
         return self.forward_cached(sentence_features, labels)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: scale, similarity function name, mini-batch settings, gather flag, directions, partition
+        # mode and hardness settings.
         return {
             "scale": self.scale,
             "similarity_fct": similarity_fct_name(self.similarity_fct),
@@ -392,10 +431,12 @@ class CachedMultipleNegativesRankingLoss(CachedLossMixin, nn.Module):
 
     @property
     def temperature(self) -> float:
+        # [FUNCTION DOC] Return the temperature, one over scale.
         return 1.0 / self.scale
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the Gradient Cache paper.
         return """
 @misc{gao2021scaling,
     title={Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup},

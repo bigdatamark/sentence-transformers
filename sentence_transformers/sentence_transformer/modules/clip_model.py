@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Deprecated CLIPModel module, kept so older saved models that reference it still load. It is a
+# thin subclass of the generic Transformer module configured for CLIP text and image features.
 from __future__ import annotations
 
 import logging
@@ -9,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class CLIPModel(Transformer):
+    # [CLASS DOC]
+    # Legacy CLIP module subclassing Transformer. Maps text inputs to the CLIP text features method and
+    # image inputs to the image features method, outputting a "sentence_embedding" feature.
     """Legacy module kept only for backward compatibility with older saved models.
 
     New multimodal models should use :class:`~sentence_transformers.base.modules.Transformer` directly,
@@ -21,6 +27,10 @@ class CLIPModel(Transformer):
     def __init__(
         self, model_name_or_path: str = "openai/clip-vit-base-patch32", _from_auto_load: bool = False, **kwargs
     ) -> None:
+        # [FUNCTION DOC]
+        # Constructs the module. Logs a deprecation warning unless created via load (_from_auto_load).
+        # Renames a legacy processor_name keyword to tokenizer_name_or_path, then delegates to the
+        # Transformer constructor with the model name (default openai/clip-vit-base-patch32) and kwargs.
         if not _from_auto_load:
             logger.warning("The CLIPModel module is deprecated. Please use the Transformer module instead.")
         if "processor_name" in kwargs:
@@ -29,11 +39,19 @@ class CLIPModel(Transformer):
 
     @classmethod
     def load(cls, model_name_or_path: str, **kwargs) -> CLIPModel:
+        # [FUNCTION DOC]
+        # Class method that loads the module: reads constructor kwargs from the saved config via
+        # _load_init_kwargs and constructs the class with _from_auto_load set so no warning is logged.
         init_kwargs = cls._load_init_kwargs(model_name_or_path=model_name_or_path, **kwargs)
         return cls(model_name_or_path=model_name_or_path, _from_auto_load=True, **init_kwargs)
 
     @staticmethod
     def _get_default_modality_config(config: dict[str, Any]) -> tuple[ModalityConfig, str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the default modality config and output name. Text maps to get_text_features and
+        # image to get_image_features of the transformers CLIP model, each with an output name inferred
+        # (pooler output vs plain tensor) from that method; the module output name is
+        # "sentence_embedding". The config argument is unused. Imports transformers lazily.
         """Get the default modality configuration for the current transformer task.
 
         Returns:

@@ -1,3 +1,21 @@
+# [MODULE DOC]
+# Script: build the "quora-IR-dataset" from the original Quora duplicate questions TSV (downloaded with http_get if
+# missing). Steps, all at module level, with the random module seeded to 42:
+# 1) Read pairs, cleaning newlines/tabs and skipping empty questions; store qid -> text, the rows, and a symmetric
+#    duplicates graph (nested defaultdicts of booleans) for is_duplicate == "1".
+# 2) Add near-exact duplicates: lowercase, rewrite a few common paraphrases, drop punctuation and stopwords, then join
+#    tokens with no separator; questions with the same normalized form are linked (count of new links is printed).
+# 3) Repeat a transitive-closure pass over the graph until no new links are added.
+# 4) Shuffle rows and assign question clusters to train/dev/test sets so no question appears in two splits: a row with
+#    one assigned question moves the other question into the same split; otherwise a new split is chosen by a counter
+#    (counter mod 10 equal to 0 is dev, 1 or 2 is test, else train). The question and all its duplicates go together.
+#    Asserts the splits are disjoint.
+# 5) Writes graph files (sentences, pairwise/list/connected-node duplicate graphs, per-split question ids),
+#    duplicate-mining corpus/duplicates files per split, classification pair files (rows whose two questions are in
+#    the same split), and information-retrieval files: a corpus of all train questions plus non-query dev/test
+#    questions, and up to 5000 dev / 10000 test queries that have duplicates, each listed with its duplicate qids.
+# Side effects: network download, creates directories and many TSV files, prints statistics.
+# KNOWN ISSUE: the docstring states an 85%/5%/10% train/dev/test split, but the counter assigns new clusters roughly 70% train, 10% dev and 20% test.
 """
 The Quora Duplicate Questions dataset contains questions pairs from Quora (www.quora.com)
 along with a label whether the two questions are a duplicate, i.e., have an identical intention.
@@ -387,6 +405,9 @@ print("Test sentences:", len(test_ids))
 
 # Extract the ids for duplicate questions for train/dev/test
 def get_duplicate_set(ids_set):
+    # [FUNCTION DOC]
+    # HELPER: given a set of question ids, return the set of sorted (id_a, id_b) tuples for every duplicate link of each
+    # id in the global duplicates graph.
     dups_set = set()
     for a in ids_set:
         for b in duplicates[a]:
@@ -452,6 +473,9 @@ with open("quora-IR-dataset/graph/duplicates-graph-connected-nodes.tsv", "w", en
 
 
 def write_qids(name, ids_list):
+    # [FUNCTION DOC]
+    # HELPER: write quora-IR-dataset/graph/<name>-questions.tsv with a "qid" header followed by the ids sorted numerically,
+    # newline-separated (no trailing newline).
     with open("quora-IR-dataset/graph/" + name + "-questions.tsv", "w", encoding="utf8") as fOut:
         fOut.write("qid\n")
         fOut.write("\n".join(sorted(ids_list, key=lambda x: int(x))))
@@ -464,6 +488,9 @@ write_qids("test", test_ids)
 
 ####### Output for duplicate mining #######
 def write_mining_files(name, ids, dups):
+    # [FUNCTION DOC]
+    # HELPER: write the duplicate-mining files for one split: <name>_corpus.tsv with qid and question text for every id in
+    # ids (from the global sentences dict), and <name>_duplicates.tsv with one qid1/qid2 line per pair in dups.
     with open("quora-IR-dataset/duplicate-mining/" + name + "_corpus.tsv", "w", encoding="utf8") as fOut:
         fOut.write("qid\tquestion\n")
         for id in ids:

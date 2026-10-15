@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Scoring-mask module for late-interaction models. It rewrites the attention mask in the feature dict so
+# that it marks exactly which token embeddings take part in MaxSim scoring (adding query-expansion
+# positions, removing skiplisted tokens, optionally keeping only an allowlist of token ids).
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,6 +20,12 @@ logger = logging.get_logger(__name__)
 
 
 class MultiVectorMask(Module):
+    # [CLASS DOC]
+    # Module placed last in a MultiVectorEncoder pipeline. Config attributes: skiplist words (token strings to
+    # exclude, default none), skiplist tasks (tasks the skiplist applies to, default only "document"; a missing
+    # task counts as "document"), and an optional allowlist of token ids kept for non-query inputs (e.g. image
+    # patch tokens). The task name is accepted as a forward keyword. Holds a lazily resolved tensor of skiplist
+    # token ids, filled once the tokenizer is known.
     """Module that overwrites ``features["attention_mask"]`` with the per-row *scoring* mask for
     late-interaction (ColBERT-style) models.
 
@@ -74,6 +84,10 @@ class MultiVectorMask(Module):
         skiplist_tasks: str | list[str] | None = None,
         keep_only_token_ids: list[int] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store a copy of the skiplist words (empty list if None), normalize skiplist tasks (single string becomes a
+        # one-item list; None becomes the list containing "document"), copy the allowlist (or None), and set the
+        # resolved skiplist id tensor to None.
         super().__init__()
         self.skiplist_words: list[str] = list(skiplist_words) if skiplist_words is not None else []
         if isinstance(skiplist_tasks, str):
@@ -87,9 +101,16 @@ class MultiVectorMask(Module):
         self._skiplist_ids: Tensor | None = None
 
     def on_model_ready(self, model: BaseModel) -> None:
+        # [FUNCTION DOC]
+        # Hook called when the owning model is fully built; resolves the skiplist using the model's tokenizer.
         self.resolve_with_tokenizer(model.tokenizer)
 
     def resolve_with_tokenizer(self, tokenizer) -> None:
+        # [FUNCTION DOC]
+        # Convert skiplist words to token ids with the tokenizer. With no words, sets resolved ids to None. Otherwise
+        # converts each word; a word mapping to the tokenizer's unknown-token id (and not literally the unknown
+        # token string) is dropped as unresolved. Logs a one-time warning listing dropped words. Stores a long
+        # tensor of the resolved ids, or None if none resolved. Mutates the module state.
         """Convert ``skiplist_words`` to token IDs using ``tokenizer``.
 
         Called by :class:`MultiVectorEncoder` after the tokenizer is fully initialised. The skiplist
@@ -122,6 +143,14 @@ class MultiVectorMask(Module):
         self._skiplist_ids = torch.tensor(resolved, dtype=torch.long) if resolved else None
 
     def forward(self, features: dict[str, Tensor], task: str | None = None) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Compute the scoring mask. Inputs: features dict and optional task. If the features are in flattened
+        # (unpadded, variable-length attention) form, first re-pads them to batch by sequence form. If there are no
+        # token ids, returns the features unchanged. Otherwise starts from the boolean attention mask; for query
+        # task, ORs in the query-expansion position mask if present; if the effective task (missing means
+        # "document") is in the skiplist tasks and resolved skiplist ids exist, clears positions whose token id is
+        # in the skiplist; for any non-query task with a non-empty allowlist, keeps only positions whose id is in
+        # the allowlist. Writes the boolean mask back as the attention mask (mutating the dict) and returns it.
         # The MVE encode loop slices per-row by ``attention_mask``, so any FA2-flat encoder output
         # is re-padded back to ``(B, T, D)`` here.
         if "cu_seq_lens_q" in features:
@@ -152,4 +181,6 @@ class MultiVectorMask(Module):
         return features
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Save only the module config (no weights) into the output directory; other arguments are ignored.
         self.save_config(output_path)

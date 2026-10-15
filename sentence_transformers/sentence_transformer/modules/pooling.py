@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pooling module that reduces variable-length token embeddings to a fixed-size sentence embedding.
+# Supports the modes cls, max, mean, mean_sqrt_len_tokens, weightedmean and lasttoken, alone or
+# several concatenated, both on padded batches and on flattened (FlashAttention-2 unpadded) batches.
+# Also handles the legacy boolean pooling_mode_* keyword arguments and config keys, mapping each to
+# its mode name (the legacy key table order defines the concatenation order).
 from __future__ import annotations
 
 import functools
@@ -24,6 +30,11 @@ _LEGACY_POOLING_MODE_KWARGS: dict[str, str] = {
 
 
 def _convert_legacy_pooling_kwargs(kwargs: dict[str, Any]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Converts legacy pooling_mode_* boolean keys in a kwargs/config dict, in place, into one
+    # pooling_mode key. Does nothing if no legacy keys are present. If pooling_mode is absent, collects
+    # the modes whose legacy key is truthy, in table order; uses "mean" if none are active, a single
+    # string if one, or a tuple if several. Always deletes the legacy keys found. Returns nothing.
     """Convert legacy ``pooling_mode_*`` bool keys to a single ``pooling_mode`` key in-place.
 
     Old keys are removed from *kwargs*. If ``pooling_mode`` is already present, the old keys
@@ -44,6 +55,8 @@ def _convert_legacy_pooling_kwargs(kwargs: dict[str, Any]) -> None:
 
 
 def _deprecated_pooling_mode_kwargs(func):
+    # [FUNCTION DOC]
+    # HELPER: Decorator for functions that take pooling keyword arguments. Returns a wrapper.
     """Decorator that converts legacy ``pooling_mode_*`` bool kwargs to the new ``pooling_mode`` format.
 
     When any of the old boolean keyword arguments (e.g. ``pooling_mode_cls_token=True``) are passed,
@@ -53,6 +66,9 @@ def _deprecated_pooling_mode_kwargs(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Wrapper that, if any legacy pooling_mode_* keyword is passed, emits a FutureWarning
+        # naming them, converts them to pooling_mode in the kwargs, then calls the wrapped function.
         old_kwargs = [k for k in kwargs if k in _LEGACY_POOLING_MODE_KWARGS]
         if old_kwargs:
             warnings.warn(
@@ -68,6 +84,10 @@ def _deprecated_pooling_mode_kwargs(func):
 
 
 class Pooling(Module):
+    # [CLASS DOC]
+    # Pooling module. Config keys: embedding_dimension, pooling_mode, include_prompt (the old key
+    # word_embedding_dimension is renamed). The output dimension is the number of modes times
+    # embedding_dimension, with pooled vectors concatenated in the given mode order.
     """Performs pooling on token embeddings to produce fixed-size sentence embeddings.
 
     Generates a fixed-size sentence embedding from variable-length token embeddings. Supports
@@ -97,6 +117,11 @@ class Pooling(Module):
         pooling_mode: PoolingMode | tuple[PoolingMode, ...] | list[PoolingMode] = "mean",
         include_prompt: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Validates and stores the pooling config. A one-element list/tuple of modes becomes a plain
+        # string, a longer one a tuple. Raises ValueError for any mode not in POOLING_MODES. Stores
+        # embedding_dimension, pooling_mode, include_prompt and computes pooling_output_dimension.
+        # Accepts deprecated keyword names through the two decorators.
         super().__init__()
 
         if isinstance(pooling_mode, (list, tuple)):
@@ -114,11 +139,21 @@ class Pooling(Module):
 
     @classmethod
     def load_config(cls, *args, **kwargs) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Class method that loads the saved config via the parent class and converts legacy pooling keys
+        # in it before returning it.
         config = super().load_config(*args, **kwargs)
         _convert_legacy_pooling_kwargs(config)
         return config
 
     def forward(self, features: dict[str, Tensor | Any], **kwargs) -> dict[str, Tensor | Any]:
+        # [FUNCTION DOC]
+        # Pools the "token_embeddings" in features into "sentence_embedding" (mutating and returning the
+        # dict). If include_prompt is false and "prompt_length" is present, converts it (int or tensor) to
+        # an int. If "cu_seq_lens_q" is present (flattened unpadded batch) uses the flattened path.
+        # Otherwise uses the attention mask when its length matches the token sequence length, else an
+        # all-ones mask, removes prompt positions from a copy of the mask when needed, and uses the padded
+        # path. Concatenates the pooled vectors along the last dimension.
         token_embeddings = features["token_embeddings"]
         prompt_length: int | None = None
 
@@ -152,6 +187,11 @@ class Pooling(Module):
 
     @staticmethod
     def _exclude_prompt_from_mask(attention_mask: Tensor, prompt_length: int) -> Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Returns a copy of the attention mask with prompt tokens zeroed. Finds each row's first
+        # real token via argmax. If no row is left-padded, zeros the first prompt_length positions;
+        # otherwise zeros every position before that row's padding length plus prompt_length. Works on a
+        # copy so callers' masks stay unchanged.
         """Zero out prompt token positions in the attention mask so they are excluded from pooling.
 
         Operates on a copy: the gradient-cached losses re-embed the caller's features in their backward
@@ -174,6 +214,16 @@ class Pooling(Module):
         attention_mask: Tensor,
         features: dict[str, Tensor],
     ) -> list[Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Computes one pooled tensor per configured mode for a padded batch (batch, seq, dim):
+        # cls uses precomputed "cls_token_embeddings" if present, else the first unmasked token per row
+        # (works for left padding). max takes the per-dimension maximum over unmasked tokens (masked
+        # positions set to minus infinity). mean and mean_sqrt_len_tokens share the masked sum, divided by
+        # the token count (or "token_weights_sum" if present), clamped to at least 1e-9, or by its square
+        # root. weightedmean weights tokens by their 1-based position, dividing by the weight sum (or
+        # "token_weights_sum"). lasttoken takes the last unmasked token per row (the final position if a
+        # row is fully masked), casting the mask to int32 while tracing for ONNX. Returns the list of
+        # pooled tensors in mode order.
         modes = (self.pooling_mode,) if isinstance(self.pooling_mode, str) else self.pooling_mode
         output_vectors: list[Tensor] = []
 
@@ -248,6 +298,22 @@ class Pooling(Module):
         features: dict[str, Tensor],
         prompt_length: int | None = None,
     ) -> list[Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Computes pooled tensors for a flattened batch where token_embeddings has shape
+        # (1, total_tokens, dim) and "cu_seq_lens_q" holds cumulative sequence boundaries. For modes other
+        # than cls/lasttoken, builds per-token segment ids (from "seq_idx" if present, which may also
+        # change the sequence count and lengths, else by repeating sequence indices by length). When
+        # prompt_length is given, clamps it to the shortest sequence length, drops the first that many
+        # tokens of each sequence and records within-sequence positions. Then per mode: cls uses
+        # "cls_token_embeddings" or each sequence's first token; lasttoken each sequence's last token;
+        # mean/mean_sqrt_len_tokens use an index-add sum divided by the effective length or its square
+        # root; max uses a scatter max reduction; weightedmean weights by 1-based within-sequence
+        # position. Returns the list in mode order.
+        # KNOWN ISSUE: cls and lasttoken ignore prompt exclusion here, while the padded path picks the first
+        # non-prompt token for cls, so results differ between the two paths when include_prompt is false.
+        # The prompt is also clamped to the shortest sequence in the batch rather than per sequence. When
+        # seq_idx and a prompt are both present, effective_lengths is recomputed from cu_seq_lens_q, and the
+        # weightedmean offsets fallback assumes cu_seq_lens_q segments.
         all_embeddings = token_embeddings.squeeze(0)  # (total_tokens, hidden_dim)
         cu_seq_lens_q = features["cu_seq_lens_q"]  # (num_seqs + 1,)
         seq_lengths = cu_seq_lens_q[1:] - cu_seq_lens_q[:-1]  # (num_seqs,)
@@ -328,7 +394,11 @@ class Pooling(Module):
         return output_vectors
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the pooled output dimension.
         return self.pooling_output_dimension
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves only the config JSON to output_path.
         self.save_config(output_path)

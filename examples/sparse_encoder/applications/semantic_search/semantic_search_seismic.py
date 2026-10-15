@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: sparse semantic search with the Seismic library (pyseismic-lsr). Encodes and decodes the first 10,000 Natural
+# Questions answers with SPLADE into token->weight form, then loops forever: encodes/decodes the current queries
+# (initially the first two dataset queries), calls semantic_search_seismic (top 5; index built on first call and reused),
+# prints timings and hits, and reads the next query from stdin. Side effects: network, in-memory index, stdin/stdout.
 """
 This script contains an example how to perform semantic search with Seismic.
 For more information, please refer to the documentation:

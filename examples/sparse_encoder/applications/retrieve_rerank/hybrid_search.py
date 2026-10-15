@@ -1,3 +1,14 @@
+# [MODULE DOC]
+# Script: compare retrieval pipelines on NanoNFCorpus. Builds id->text dicts for corpus and queries (dropping empty texts)
+# and query -> set of relevant corpus ids. Runs: (1) sparse retrieval with a granite sparse encoder (fill-mask transformer
+# plus max SPLADE pooling) through SparseInformationRetrievalEvaluator, (2) dense retrieval with multi-qa-MiniLM-L6-cos-v1
+# through InformationRetrievalEvaluator, both writing prediction JSONL files under runs/<model>/result and freeing GPU
+# memory after; (3,4) reranking of each prediction list with the ms-marco-MiniLM-L6-v2 CrossEncoder via
+# CrossEncoderRerankingEvaluator; (5) hybrid search fusing both lists with ReciprocalRankFusionEvaluator (top 10, rrf_k 60);
+# (6) reranking the fused predictions. Logs NDCG@10 per step and prints a summary table of NDCG@10, MRR@10 and MAP (the
+# plain retrieval MAP values come from the rerankers' base_map). Side effects: network, many directories and files under
+# runs/, GPU, logging/stdout.
+# KNOWN ISSUE: the dense retrieval section logs "STEP 2" although it is the third step.
 import logging
 import os
 

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# The SparseEncoder model: a sequence of modules (built on the shared BaseModel) that maps text to
+# high-dimensional sparse embeddings, either SPLADE style (masked-language-model transformer plus
+# SpladePooling, vocabulary-sized output) or CSR style (dense encoder plus pooling plus a sparse
+# autoencoder). Provides encoding (single- or multi-process, with optional top-k active dimension
+# pruning and sparse tensor output), similarity functions, sparsity statistics, intersection and
+# decoding of embeddings into tokens, and default module construction when loading plain
+# transformer or SentenceTransformer checkpoints.
 from __future__ import annotations
 
 import itertools
@@ -32,6 +40,12 @@ logger = transformers_logging.get_logger(__name__)
 
 
 class SparseEncoder(BaseModel):
+    # [CLASS DOC]
+    # Sparse embedding model. Class attributes: the model card data class, default Hub organization
+    # "sparse-encoder", default prompts for "query" and "document" (both None), the model_type name,
+    # and the supported similarity names (cosine, dot, euclidean, manhattan). Instance state added on
+    # top of BaseModel: max_active_dims (default limit on non-zero output dimensions) and the
+    # similarity function name with its matrix and pairwise similarity callables.
     """
     Loads or creates a SparseEncoder model that can be used to map text to sparse embeddings.
 
@@ -169,6 +183,14 @@ class SparseEncoder(BaseModel):
         similarity_fn_name: str | SimilarityFunction | None = None,
         max_active_dims: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Creates the model. Sets the similarity function name first (validated by the setter) so config
+        # parsing can see it, then delegates loading or construction (model path or explicit modules,
+        # device, prompts, default prompt name, cache, trust_remote_code, revision, local-only, token,
+        # model/processor/config kwargs, model card data, backend) to BaseModel. Raises ValueError if
+        # max_active_dims is not positive. If max_active_dims is None, uses the k of the first
+        # SparseAutoEncoder module, if any. The deprecated keyword tokenizer_kwargs maps to
+        # processor_kwargs.
         # Set before super().__init__() so _parse_model_config can check these
         self.similarity_fn_name = similarity_fn_name
 
@@ -220,6 +242,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_query for static type checking only; the implementation below is used at runtime.
 
     @overload
     def encode_query(
@@ -238,6 +262,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_query for static type checking only; the implementation below is used at runtime.
 
     @overload
     def encode_query(
@@ -257,6 +283,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_query for static type checking only; the implementation below is used at runtime.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
     @overload
@@ -276,6 +304,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_query for static type checking only; the implementation below is used at runtime.
 
     @deprecated_kwargs(sentences="inputs")
     def encode_query(
@@ -294,6 +324,10 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | Tensor:
+        # [FUNCTION DOC]
+        # Encodes inputs as queries. If neither prompt_name nor prompt is given and a "query" prompt exists,
+        # uses it. Then calls encode with all arguments and task "query" (used by Router modules). Returns
+        # whatever encode returns. The deprecated keyword sentences maps to inputs.
         """
         Computes embeddings specifically optimized for query representation.
 
@@ -367,6 +401,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_document for static type checking only; the implementation below is used at runtime.
 
     @overload
     def encode_document(
@@ -385,6 +421,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_document for static type checking only; the implementation below is used at runtime.
 
     @overload
     def encode_document(
@@ -404,6 +442,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_document for static type checking only; the implementation below is used at runtime.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
     @overload
@@ -423,6 +463,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode_document for static type checking only; the implementation below is used at runtime.
 
     @deprecated_kwargs(sentences="inputs")
     def encode_document(
@@ -441,6 +483,10 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | Tensor:
+        # [FUNCTION DOC]
+        # Encodes inputs as documents. If neither prompt_name nor prompt is given, uses the first existing
+        # prompt among "document", "passage" and "corpus". Then calls encode with all arguments and task
+        # "document". The deprecated keyword sentences maps to inputs.
         """
         Computes embeddings specifically optimized for document/passage representation.
 
@@ -517,6 +563,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode for static type checking only; the implementation below is used at runtime.
 
     @overload
     def encode(
@@ -535,6 +583,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode for static type checking only; the implementation below is used at runtime.
 
     @overload
     def encode(
@@ -554,6 +604,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Type overload of encode for static type checking only; the implementation below is used at runtime.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from encode_query) still resolve.
     @overload
@@ -573,6 +625,8 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | Tensor: ...
+        # [FUNCTION DOC]
+        # Type overload of encode for static type checking only; the implementation below is used at runtime.
 
     @deprecated_kwargs(sentences="inputs")
     def encode(
@@ -591,6 +645,22 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | Tensor:
+        # [FUNCTION DOC]
+        # Encodes inputs into sparse embeddings.
+        # Steps: if show_progress_bar is None, shows it when the logger level is INFO or DEBUG. Raises
+        # ValueError if batch_size is not positive. Wraps a single input in a list (and unwraps the result
+        # at the end); converts other non-list iterables (numpy arrays via tolist) to lists. Raises
+        # ValueError for extra kwargs the model does not accept (task and processing_kwargs are always
+        # allowed). If a pool or non-empty device list is given, delegates to _multi_process (outputs
+        # forced to CPU) and returns. Otherwise resolves the prompt, moves the model to the device (default
+        # the model's device) and sets eval mode (mutating the model). Uses the given max_active_dims or
+        # the model's default and passes it to the forward pass. Sorts inputs by descending length
+        # (interleaving when inputs can be flattened), and per batch preprocesses, moves features to the
+        # device, runs the model in inference mode to get "sentence_embedding", keeps only the top
+        # max_active_dims values per row if set, converts to sparse COO if convert_to_sparse_tensor and to
+        # CPU if save_to_cpu. Restores the original order. If convert_to_tensor, stacks into one tensor (an
+        # empty, optionally sparse, tensor when there are no inputs); otherwise returns a list of
+        # per-input tensors.
         """
         Computes sparse sentence embeddings.
 
@@ -790,11 +860,16 @@ class SparseEncoder(BaseModel):
         return all_embeddings
 
     def _get_model_config(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the parent model config extended with the similarity function name, for saving.
         return super()._get_model_config() | {
             "similarity_fn_name": self._similarity_fn_name,
         }
 
     def _parse_model_config(self, model_config: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Parses a saved model config via the parent, then adopts the saved similarity_fn_name only
+        # if the user did not set one and the saved name is a supported single-vector similarity.
         super()._parse_model_config(model_config)
         # Inherit a supported saved similarity_fn_name unless the user overrode it (multi-vector
         # names like "maxsim", e.g. from converted MultiVectorEncoder saves, fall through).
@@ -804,6 +879,9 @@ class SparseEncoder(BaseModel):
 
     @property
     def similarity_fn_name(self) -> Literal["cosine", "dot", "euclidean", "manhattan"]:
+        # [FUNCTION DOC]
+        # Property returning the similarity function name; if none is set, sets it to "dot" first
+        # (mutating the model) and returns it.
         """Return the name of the similarity function used by :meth:`SparseEncoder.similarity` and :meth:`SparseEncoder.similarity_pairwise`.
 
         Returns:
@@ -824,6 +902,11 @@ class SparseEncoder(BaseModel):
         self,
         value: Literal["cosine", "dot", "euclidean", "manhattan"] | SimilarityFunction | None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Setter for the similarity function name. Accepts a SimilarityFunction enum (converted to its
+        # string) or a string or None. Raises ValueError for unsupported names (with a hint to use
+        # MultiVectorEncoder for "maxsim"). Stores the name and, when not None, the matching matrix and
+        # pairwise similarity functions.
         if isinstance(value, SimilarityFunction):
             value = value.value
         if value is not None and value not in self.SUPPORTED_SIMILARITY_FN_NAMES:
@@ -839,6 +922,8 @@ class SparseEncoder(BaseModel):
             self._similarity_pairwise = SimilarityFunction.to_similarity_pairwise_fn(value)
 
     def set_pooling_include_prompt(self, include_prompt: bool) -> None:
+        # [FUNCTION DOC]
+        # Sets include_prompt on the first Pooling module of the model, if any (mutation).
         """
         Sets the ``include_prompt`` attribute in the pooling layer in the model, if there is one.
 
@@ -855,6 +940,10 @@ class SparseEncoder(BaseModel):
         embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Returns the matrix of similarity scores between every embedding of the first collection and
+        # every embedding of the second, using the configured similarity function (initializing it to dot
+        # if unset).
         """
         Compute the similarity between two collections of embeddings. The output will be a matrix with the similarity
         scores between all embeddings from the first parameter and all embeddings from the second parameter. This
@@ -902,6 +991,9 @@ class SparseEncoder(BaseModel):
         embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Returns the vector of similarity scores between corresponding pairs of embeddings using the
+        # configured pairwise similarity function (initializing it to dot if unset).
         """
         Compute the similarity between two collections of embeddings. The output will be a vector with the similarity
         scores between each pair of embeddings.
@@ -946,6 +1038,14 @@ class SparseEncoder(BaseModel):
         chunk_size: int | None = None,
         **encode_kwargs,
     ) -> list[Tensor] | Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Encodes inputs across worker processes. Disables per-worker progress bars. If no pool is
+        # given but device is a list, starts a pool (and always stops it at the end). Chooses a chunk size
+        # of about a tenth of the inputs per process, capped at 5000 and at least 1, unless given. Puts
+        # (chunk id, chunk, encode kwargs) items on the input queue, collects one result per chunk from the
+        # output queue (with an optional progress bar) and sorts them by chunk id. Re-raises the first
+        # exception returned by a worker. Concatenates results: lists are chained, tensors concatenated,
+        # numpy arrays concatenated; with no chunks and convert_to_tensor, returns an empty tensor.
         """Internal method for multi-process encoding.
 
         Distributes encoding across multiple processes using the provided pool or list of devices.
@@ -1005,6 +1105,12 @@ class SparseEncoder(BaseModel):
     def _multi_process_worker(
         target_device: str, model: SparseEncoder, input_queue: Queue, results_queue: Queue
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Static worker loop run in each process: repeatedly takes (chunk id, inputs, kwargs) from
+        # the input queue, encodes them on target_device, moves tensor results to CPU and puts
+        # (chunk id, embeddings) on the results queue. On an error, logs it, tries to put (chunk id,
+        # exception) on the results queue, and stops. Stops when the queue raises Empty; in practice the
+        # process is terminated externally.
         """Internal working process to encode sentences in multi-process setup.
 
         Workers are terminated externally via ``stop_multi_process_pool``.
@@ -1028,6 +1134,10 @@ class SparseEncoder(BaseModel):
                 break
 
     def get_embedding_dimension(self) -> int | None:
+        # [FUNCTION DOC]
+        # Returns the output dimension: scanning modules from last to first, the first non-None result of
+        # get_embedding_dimension, get_sentence_embedding_dimension or get_word_embedding_dimension;
+        # None if none is known. Sparse encoders do not support truncation.
         """
         Returns the number of dimensions in the output of :meth:`SparseEncoder.encode`.
 
@@ -1057,6 +1167,8 @@ class SparseEncoder(BaseModel):
         category=FutureWarning,
     )
     def get_sentence_embedding_dimension(self) -> int | None:
+        # [FUNCTION DOC]
+        # Deprecated alias for get_embedding_dimension (emits a FutureWarning).
         return self.get_embedding_dimension()
 
     def _load_default_modules(
@@ -1071,6 +1183,14 @@ class SparseEncoder(BaseModel):
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Builds default modules for a checkpoint that is not a saved SparseEncoder. Merges token,
+        # trust_remote_code, revision and local_files_only into the model, processor and config kwargs and
+        # loads the Hugging Face config (network or cache). If any architecture name ends with
+        # ForMaskedLM, builds a fill-mask Transformer followed by SpladePooling with max pooling; otherwise
+        # builds a feature-extraction Transformer, mean Pooling and a SparseAutoEncoder with hidden size 4
+        # times the pooled dimension, k 256 and k_aux 512. Logs which layout is used. Unless local-only,
+        # records the base model in the model card data. Returns the modules and an empty kwargs dict.
         """
         Creates a simple transformer-based model and returns the modules.
         For models with a ForMaskedLM architecture, uses SpladePooling with 'max' strategy.
@@ -1161,6 +1281,13 @@ class SparseEncoder(BaseModel):
         config_kwargs: dict[str, Any] | None = None,
         model_type: str | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a non-SparseEncoder saved model into a SparseEncoder. For model types other than
+        # SentenceTransformer, defers to the parent. For a SentenceTransformer, loads its modules from its
+        # modules config (storing module_kwargs on the model), finds the output dimension from the last
+        # module that reports one (raising ValueError if none does), appends a SparseAutoEncoder with hidden
+        # size 4 times that dimension, k of a quarter of it and k_aux of half of it, clears the stored model
+        # card text, and returns the modules and module kwargs.
         """Converts a non-SparseEncoder model into a SparseEncoder by appending a SparseAutoEncoder.
 
         If ``model_type`` is ``"SentenceTransformer"``, loads the SentenceTransformer modules and appends a
@@ -1227,6 +1354,11 @@ class SparseEncoder(BaseModel):
 
     @staticmethod
     def sparsity(embeddings: torch.Tensor) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Static method returning sparsity statistics for a 1D or 2D tensor: "active_dims", the mean number
+        # of non-zero values per row, and "sparsity_ratio", one minus that divided by the dimension. Raises
+        # TypeError for non-tensors and ValueError for other ranks. Empty inputs give 0 active dims and
+        # ratio 1. Converts to sparse CSR to count non-zeros per row (on CPU if the device does not support it).
         """
         Calculate sparsity statistics for the given embeddings, including the mean number of active
         (non-zero) dimensions and the mean sparsity ratio.
@@ -1288,6 +1420,8 @@ class SparseEncoder(BaseModel):
 
     @property
     def max_seq_length(self) -> int:
+        # [FUNCTION DOC]
+        # Property returning the maximum input sequence length (delegates to BaseModel).
         """
         Returns the maximal input sequence length for the model. Longer inputs will be truncated.
 
@@ -1307,6 +1441,8 @@ class SparseEncoder(BaseModel):
 
     @max_seq_length.setter
     def max_seq_length(self, value: int) -> None:
+        # [FUNCTION DOC]
+        # Setter that sets max_seq_length on the first module (truncation length for future inputs).
         """
         Property to set the maximal input sequence length for the model. Longer inputs will be truncated.
         """
@@ -1315,6 +1451,9 @@ class SparseEncoder(BaseModel):
 
     @property
     def transformers_model(self) -> PreTrainedModel | None:
+        # [FUNCTION DOC]
+        # Property returning the first underlying Hugging Face PreTrainedModel found, or None (delegates
+        # to BaseModel).
         """
         Property to get the underlying transformers PreTrainedModel instance, if it exists.
         Note that it's possible for a model to have multiple underlying transformers models, but this property
@@ -1338,6 +1477,8 @@ class SparseEncoder(BaseModel):
         return super().transformers_model
 
     def _get_splade_pooling(self) -> SpladePooling | None:
+        # [FUNCTION DOC]
+        # HELPER: Returns the first top-level SpladePooling module, or None.
         """Returns the SpladePooling module if present, or None. Only searches top-level modules."""
         for module in self._modules.values():
             if isinstance(module, SpladePooling):
@@ -1346,6 +1487,9 @@ class SparseEncoder(BaseModel):
 
     @property
     def splade_pooling_chunk_size(self) -> int | None:
+        # [FUNCTION DOC]
+        # Property returning the SpladePooling chunk size (tokens per chunk along the sequence), or None
+        # with a logged warning when there is no SpladePooling module.
         """
         Returns the chunk size of the SpladePooling module, if present.
 
@@ -1367,6 +1511,8 @@ class SparseEncoder(BaseModel):
 
     @splade_pooling_chunk_size.setter
     def splade_pooling_chunk_size(self, value: int | None) -> None:
+        # [FUNCTION DOC]
+        # Setter for the SpladePooling chunk size; logs a warning instead when there is no SpladePooling module.
         """
         Sets the chunk size of the SpladePooling module, if present.
         """
@@ -1381,6 +1527,13 @@ class SparseEncoder(BaseModel):
         embeddings_1: torch.Tensor,
         embeddings_2: torch.Tensor,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Static method computing the shared active dimensions of a 1D embedding and a 1D or 2D embedding.
+        # Converts both to sparse, raises ValueError if the first is not 1D, if the last dimensions differ,
+        # or if the second has another rank. Multiplies element-wise (row by row for 2D), coalesces, and
+        # returns a sparse COO tensor keeping only positive products, shaped like the second input.
+        # KNOWN ISSUE: The docstring says the result keeps the minimum contribution of both embeddings, but
+        # the code returns their element-wise product.
         """
         Compute the intersection of two sparse embeddings via element-wise multiplication.
 
@@ -1444,6 +1597,13 @@ class SparseEncoder(BaseModel):
     def decode(
         self, embeddings: torch.Tensor, top_k: int | None = None
     ) -> list[tuple[str, float]] | list[list[tuple[str, float]]]:
+        # [FUNCTION DOC]
+        # Decodes sparse embeddings into (token, weight) lists sorted by descending weight. Raises
+        # ValueError if top_k is not positive or the tensor is not 1D/2D, TypeError if not a tensor.
+        # Converts to coalesced sparse COO; for each row takes its non-zero entries, keeps the top_k largest
+        # (or all, sorted), converts token ids to token strings with the tokenizer, and pairs them with the
+        # weights. Returns one list for 1D input, or a list of lists for 2D input (empty lists for rows with
+        # no active values).
         """
         Decode a sparse embedding into (token, weight) pairs sorted by descending weight.
 
@@ -1515,6 +1675,9 @@ class SparseEncoder(BaseModel):
         return results[0] if was_1d else results
 
     def _push_to_hub_usage_tip(self, repo_id: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns markdown for a Hub pull request explaining how to test the model from the PR
+        # revision, using this class name, repo_id and backend.
         class_name = self.__class__.__name__
         backend = self.get_backend()
         return f"""\

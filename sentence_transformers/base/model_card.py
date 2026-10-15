@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Model card generation shared by all model families. Contains: a running min/mean/max accumulator; BaseModelCardCallback,
+# a trainer callback that records tags, datasets, losses, widget examples, hyperparameters and training/evaluation
+# logs into the model's card data during training; helper functions for library versions, duration/log formatting and
+# collecting nested losses; BaseModelCardData, a dataclass (extending the Hub CardData) that stores everything needed to
+# render a model card (languages, license, datasets with statistics and examples, evaluation results, training logs,
+# hyperparameters, carbon emissions, citations, usage examples, assets such as images/audio saved next to the model) and
+# converts it to YAML metadata plus template variables; and generate_model_card, which renders the final Markdown via a
+# Hub ModelCard template. Optionally uses datasets (Image/Audio/Video features), PIL and torchcodec decoders. May make
+# network calls to the Hugging Face Hub for dataset/model info unless local_files_only is set. Logs via logging.
 from __future__ import annotations
 
 import json
@@ -70,6 +80,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _MinMeanMax:
+    # [CLASS DOC]
+    # HELPER: dataclass accumulating the min, max, total and count of scalar values (min starts at positive infinity, max
+    # at negative infinity).
     """Running min/mean/max accumulator. Holds scalars only."""
 
     min: float = float("inf")
@@ -78,6 +91,8 @@ class _MinMeanMax:
     count: int = 0
 
     def add_many(self, values) -> None:
+        # [FUNCTION DOC]
+        # HELPER: updates min, max, total and count with every value of the iterable. Mutates the instance.
         for value in values:
             if value < self.min:
                 self.min = value
@@ -88,6 +103,8 @@ class _MinMeanMax:
 
     @property
     def mean(self) -> float:
+        # [FUNCTION DOC]
+        # HELPER: property returning total divided by count, or 0.0 when no values were added.
         return self.total / self.count if self.count else 0.0
 
 
@@ -98,7 +115,12 @@ if TYPE_CHECKING:
 
 
 class BaseModelCardCallback(TrainerCallback):
+    # [CLASS DOC]
+    # Trainer callback that fills the model's card data during training. Attribute: default_args_dict (the default
+    # training argument values, used to detect non-default hyperparameters).
     def __init__(self, default_args_dict: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Stores the dict of default training arguments.
         super().__init__()
         self.default_args_dict = default_args_dict
 
@@ -111,6 +133,12 @@ class BaseModelCardCallback(TrainerCallback):
         trainer: BaseTrainer,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # At trainer initialisation: adds the "generated_from_trainer" tag; stores the first CodeCarbon callback found on the
+        # trainer (if any) in the card data; if train/eval datasets exist, extracts their metadata (names, ids, statistics,
+        # examples, loss info) into the card's train_datasets/eval_datasets; collects all losses (including nested ones) into
+        # the card data; and if no widget examples exist yet, sets them from the eval dataset (or the train dataset if there
+        # is none). Mutates the model's card data; may access the Hub.
         model.model_card_data.add_tags("generated_from_trainer")
 
         # Try to set the code carbon callback if it exists
@@ -147,6 +175,10 @@ class BaseModelCardCallback(TrainerCallback):
         model: BaseModel,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # At training start: converts the training arguments to a dict and stores in the card data all hyperparameters except
+        # a fixed set of logging/saving/evaluation bookkeeping keys, plus the subset whose values differ from the defaults
+        # (only keys present in the defaults). Records the training start time.
         ignore_keys = {
             "output_dir",
             "logging_dir",
@@ -192,6 +224,11 @@ class BaseModelCardCallback(TrainerCallback):
         metrics: dict[str, float],
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # After evaluation: builds a dict of evaluation losses from metric keys that start with "eval_" and end with "_loss",
+        # naming each by the remaining underscore-separated parts joined by spaces (a single plain "loss" is renamed to
+        # "Validation Loss"). Adds "eval_runtime" (if present) to the card's evaluation duration. Merges the losses into the
+        # last training log row if it has the current global step, otherwise appends a new row with epoch and step.
         loss_dict = {
             " ".join(key.split("_")[1:]): metrics[key]
             for key in metrics
@@ -225,6 +262,9 @@ class BaseModelCardCallback(TrainerCallback):
         logs: dict[str, float],
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # On logging: if the logs contain "loss", stores it as "Training Loss" in the last training log row when that row has
+        # the current global step, otherwise appends a new row with epoch, step and the training loss.
         if "loss" in logs:
             if (
                 model.model_card_data.training_logs
@@ -268,6 +308,9 @@ IGNORED_FIELDS = [
 
 
 def get_versions() -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns a dict of version strings for Python, sentence-transformers, transformers, torch, accelerate and
+    # datasets (each only if installed) and tokenizers (imported unconditionally, so an ImportError is raised if missing).
     versions = {
         "python": python_version(),
         "sentence_transformers": sentence_transformers_version,
@@ -290,6 +333,9 @@ def get_versions() -> dict[str, Any]:
 
 
 def format_duration(seconds: float) -> str:
+    # [FUNCTION DOC]
+    # HELPER: formats seconds as a one-decimal string in seconds (under a minute), minutes (under an hour), hours (under a
+    # day) or days.
     """Format a duration in seconds to a human-readable string, e.g. "23 minutes" or "1.6 hours"."""
     if seconds < 60:
         return f"{seconds:.1f} seconds"
@@ -304,12 +350,18 @@ def format_duration(seconds: float) -> str:
 
 
 def format_log(value: float | int | str) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: rounds floats to 4 decimals; returns other values unchanged.
     if isinstance(value, float):
         return round(value, 4)
     return value
 
 
 def get_losses(loss: nn.Module | dict[str, nn.Module]) -> list[nn.Module]:
+    # [FUNCTION DOC]
+    # HELPER: returns a flat list of loss modules: the values of a dict of losses or the single loss, then iteratively
+    # appends any not-yet-listed inner losses found as "loss", "document_regularizer" or "query_regularizer" attributes of
+    # listed losses (breadth-first, so nesting of any depth is covered).
     if isinstance(loss, dict):
         losses = list(loss.values())
     else:
@@ -331,6 +383,17 @@ def get_losses(loss: nn.Module | dict[str, nn.Module]) -> list[nn.Module]:
 
 @dataclass
 class BaseModelCardData(CardData):
+    # [CLASS DOC]
+    # Dataclass holding all model card data. User-settable fields: language (string or list, normalised to a list),
+    # license, model_name, model_id (must be "owner/name"), train_datasets and eval_datasets (lists of dicts with "name",
+    # "id", "revision", statistics, examples, loss info), task_name (default "retrieval"), tags (default library tags),
+    # local_files_only (skip Hub lookups) and generate_widget_examples. Fields filled automatically during training or
+    # saving: base model and revision, all/non-default hyperparameters, eval results per evaluator, training logs, widget
+    # examples, usage examples (and their display form with asset paths), label examples, CodeCarbon callback, training
+    # start time, evaluation duration, citations, best model step, ir_model flag, Hub dataset ids, similarity function
+    # description, first_save and widget_step flags, save directory, an asset path cache, and a cached dict. Constant
+    # fields: pipeline_tag, library_name, version info (computed at creation) and template path. The model reference is set
+    # via register_model.
     """A dataclass storing data used in the model card.
 
     Args:
@@ -412,6 +475,9 @@ class BaseModelCardData(CardData):
     model: BaseModel | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # [FUNCTION DOC]
+        # Normalises a string language to a one-element list, validates both dataset lists (see validate_datasets), and resets
+        # model_id to None with a warning if it does not contain exactly one slash.
         # We don't want to save "ignore_metadata_errors" in our Model Card
         if isinstance(self.language, str):
             self.language = [self.language]
@@ -429,6 +495,12 @@ class BaseModelCardData(CardData):
     def validate_datasets(
         self, dataset_list: list[dict[str, Any]], infer_languages: bool | None = None
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Processes dataset metadata dicts in place and returns them as a new list. A missing "name" is filled from "id". If an
+        # "id" is present and Hub lookups are allowed, fetches the dataset info: on any failure warns that it does not exist and
+        # removes the "id"; on success, if languages should be inferred (default: only when self.language is empty), appends
+        # the dataset's card languages not yet present to self.language, and records the dataset id in self.datasets. Network
+        # side effects and mutation of self.language / self.datasets.
         """
         Validate (i.e. check if the dataset IDs exist on the Hub) and process a list of dataset dictionaries.
 
@@ -476,6 +548,11 @@ class BaseModelCardData(CardData):
         return output_dataset_list
 
     def set_losses(self, losses: list[nn.Module]) -> None:
+        # [FUNCTION DOC]
+        # Builds the citations dict: always includes the Sentence-BERT BibTeX entry, plus each loss's "citation" attribute
+        # keyed by loss class name (losses without one are skipped). Losses sharing a citation are grouped and their names
+        # joined into "A, B and C" form as the key. Adds a "loss:<ClassName>" tag for every distinct loss class. Mutates
+        # self.citations and the tags.
         citations = {
             "Sentence Transformers": """
 @inproceedings{reimers-2019-sentence-bert,
@@ -499,6 +576,8 @@ class BaseModelCardData(CardData):
             inverted_citations[citation].append(loss)
 
         def join_list(losses: list[str]) -> str:
+            # [FUNCTION DOC]
+            # HELPER: joins names as "a, b and c"; a single name is returned as is.
             if len(losses) > 1:
                 return ", ".join(losses[:-1]) + " and " + losses[-1]
             return losses[0]
@@ -507,9 +586,26 @@ class BaseModelCardData(CardData):
         self.add_tags([f"loss:{loss}" for loss in {loss.__class__.__name__: loss for loss in losses}])
 
     def set_best_model_step(self, step: int) -> None:
+        # [FUNCTION DOC]
+        # Stores the step of the best checkpoint.
         self.best_model_step = step
 
     def set_widget_examples(self, dataset: Dataset | DatasetDict) -> None:
+        # [FUNCTION DOC]
+        # Builds widget examples and text usage examples from a dataset. Iterable datasets are skipped entirely. A single
+        # Dataset is wrapped in a dataset dict. Resets the widget list, then picks 5 random sub-dataset names with replacement
+        # and, per distinct name, the number of times it was chosen. For each (skipping iterable sub-datasets): with a custom
+        # format transform, up to 1000 random rows are materialised and only string values are kept (rows without any string
+        # values dropped; transform failures skip the sub-dataset); otherwise the string and dict-typed columns are selected
+        # and up to 1000 random rows sampled (empty datasets skipped). Rows are sorted by total text length; the shortest N
+        # (N = times chosen) are targets, the remaining ones a backup pool used shortest-first. Each target's texts (excluding
+        # "dataset_name") are topped up to 4 with texts from backup rows (the single text of single-text rows, otherwise the
+        # second text). Targets with fewer than 4 texts are skipped. Dict-valued texts (router mappings) are replaced by their
+        # first value. For the "sentence-similarity" pipeline a widget entry with a source sentence and the shuffled other
+        # sentences is added; otherwise a single random text. usage_examples is set to the first 4 texts. Finally, if the model
+        # supports any non-text modality, multimodal usage examples are set. Uses the random module and shows a progress bar.
+        # KNOWN ISSUE: a backup row with no text values (e.g. when no string columns exist) makes the code index the second
+        # text of an empty list and raise IndexError.
         if isinstance(dataset, (IterableDataset, IterableDatasetDict)):
             # We can't set widget examples from an IterableDataset without losing data
             return
@@ -612,6 +708,14 @@ class BaseModelCardData(CardData):
             self._set_multimodal_usage_examples(dataset)
 
     def _set_multimodal_usage_examples(self, dataset: DatasetDict) -> None:
+        # [FUNCTION DOC]
+        # HELPER: sets usage_examples to multimodal inputs based on the first sub-dataset (does nothing for iterable or empty
+        # datasets). For IR models with at least two non-"dataset_name" columns, the first row's first column becomes the query
+        # and up to 3 values of the second column from the first 100 rows, deduplicated by content hash, become documents.
+        # Otherwise columns are classified as text/image/audio/video by their dataset feature types. If the model lists a tuple
+        # modality whose parts are all available, up to 3 dicts mapping each part to the first matching column's value are
+        # built. Else the first single non-text model modality available in the dataset is used to collect up to 3 distinct
+        # values (by content hash) from the first 100 rows. If nothing matches, usage_examples is left unchanged.
         """Override :attr:`usage_examples` with multimodal inputs when the model supports non-text modalities.
 
         Respects the distinction between models that support modalities independently (e.g. CLIP
@@ -714,6 +818,12 @@ class BaseModelCardData(CardData):
                 return
 
     def save_usage_example_assets(self) -> None:
+        # [FUNCTION DOC]
+        # Saves non-text parts of usage_examples as files in an "assets" subfolder of save_dir and sets usage_examples_display
+        # to the same structure with relative asset paths in place of raw media. Does nothing without a save directory or
+        # examples, or if all examples are strings or lists of strings. Strings and all-string lists are kept; mixed lists and
+        # multimodal dicts have each non-string part saved; typed media dicts and other single items are saved whole. Items
+        # that fail to save are shown as "<TypeName>". Side effects: creates the directory and writes files.
         """Save non-text items in :attr:`usage_examples` as files in an ``assets/`` subdirectory.
 
         After saving, :attr:`usage_examples_display` is set with the same structure as
@@ -784,11 +894,17 @@ class BaseModelCardData(CardData):
 
     @staticmethod
     def _is_typed_media_dict(item: dict) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns True for a dict with "array" and either "sampling_rate" or "video_metadata".
         """Check if a dict is an AudioDict or VideoDict (vs a multimodal input dict)."""
         return isinstance(item, dict) and "array" in item and ("sampling_rate" in item or "video_metadata" in item)
 
     @staticmethod
     def _hash_asset(value: Any) -> int | None:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns a content hash for deduplicating media, or None if unsupported: from the "_hf_encoded" path
+        # and bytes when available (datasets decoders), from bytes, size and mode for PIL images, or from array bytes, shape
+        # and sampling rate for dicts whose "array" is a numpy array or tensor.
         """Compute an identity hash for an asset value, or None if the type is not supported."""
         # Audio / Video decoders carry the encoded source datasets re-encodes from. Hashing that
         # avoids a decode, and beats decoder metadata, which collides across same-shape clips.
@@ -808,6 +924,17 @@ class BaseModelCardData(CardData):
         return None
 
     def _save_asset(self, value: Any, assets_dir: str, idx: int, prefix: str = "") -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: writes one media value into the assets directory and returns its relative path ("assets/<prefix><kind>_<idx>
+        # .<ext>"), or None (with a warning) if it cannot be saved. Returns the cached path if an identical asset (by content
+        # hash) was saved before. Audio decoders are converted to an array/sampling-rate dict. Video decoders whose source file
+        # exists are copied as is (keeping the extension, default ".mp4"); otherwise decoded to a dict. PIL images are saved as
+        # RGB JPEG. Audio dicts are saved as WAV via torchaudio (1-D arrays made 2-D). Video dicts are converted to a
+        # frames-height-width-channels uint8 tensor (dropping a leading batch dim, transposing channels-first frames, scaling
+        # floats in [0, 1] to 0..255, clamping otherwise) and encoded to H.264 MP4 via PyAV at the metadata fps (default 24).
+        # Errors in the audio and video branches are swallowed and fall through to the warning. Caches the path by hash.
+        # KNOWN ISSUE: the fps lookup assumes video_metadata is a dict; a video dict with metadata None (or with fps None, as
+        # produced by the metadata reconciliation) raises inside the try block, so the video is silently not saved.
         """Save a non-text value to the assets directory, deduplicating by content hash.
 
         Args:
@@ -918,6 +1045,11 @@ class BaseModelCardData(CardData):
     def set_evaluation_metrics(
         self, evaluator: BaseEvaluator, metrics: dict[str, Any], epoch: int = 0, step: int = 0
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores a copy of the evaluator's metrics in eval_results_dict keyed by the evaluator. If the evaluator has a primary
+        # metric, collects the primary metric names (for a SequentialEvaluator, those of its sub-evaluators) and merges the
+        # matching metric values into the last training log row if it has the same step, else appends a new row with epoch and
+        # step.
         from sentence_transformers.base.evaluation import SequentialEvaluator
 
         self.eval_results_dict[evaluator] = copy(metrics)
@@ -943,6 +1075,13 @@ class BaseModelCardData(CardData):
                 )
 
     def set_label_examples(self, dataset: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Collects up to 3 examples per label from a dataset with "text" and "label" columns, each rendered as an HTML list
+        # item containing the text's representation, stopping once every class has 3 examples. Sets label_example_list to rows
+        # of label (mapped through the model's label names when the label is an int and names exist) and an HTML list of
+        # examples.
+        # KNOWN ISSUE: relies on a num_classes attribute that this dataclass does not define, so it raises AttributeError
+        # unless a subclass provides it.
         num_examples_per_label = 3
         examples = defaultdict(list)
         finished_labels = set()
@@ -964,6 +1103,11 @@ class BaseModelCardData(CardData):
         ]
 
     def infer_datasets(self, dataset: Dataset | DatasetDict, dataset_name: str | None = None) -> list[dict[str, str]]:
+        # [FUNCTION DOC]
+        # Returns dataset metadata dicts inferred from a dataset (recursively, one per sub-dataset of a DatasetDict). Each dict
+        # has "name" (the given name unless it is an auto-generated name of the form "_dataset_<n>", else the dataset's info
+        # name), "split", "size" if known from split info, and, when the first download checksum source is an "hf://datasets/"
+        # path with an "@" revision, the dataset "id" and the 40-character "revision".
         if isinstance(dataset, DatasetDict):
             return [
                 inferred_dataset
@@ -995,6 +1139,16 @@ class BaseModelCardData(CardData):
         return [dataset_output]
 
     def _compute_column_stats(self, dataset: Dataset, column: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: computes a statistics entry (dtype, modality display string and a "data" dict) for one column using at most
+        # the first 100 rows, read in chunks of 8 to bound memory. The modality is inferred from the first value (empty if not
+        # inferable). By first value type: media path strings get empty data; other strings are run through the model's
+        # preprocess (task "query" for retrieval-type first modules, else "document") and min/mean/max token counts from the
+        # attention mask are reported (character counts if no mask); bools/ints report each value's share as a percentage
+        # (prefixed "~" when there are several values); floats report rounded min/mean/max; lists report a fixed size or
+        # min/mean/max element counts; PIL images report min/mean/max width by height; audio dicts or decoders report duration
+        # statistics and the first sample's sampling rate; video decoders report duration and resolution statistics plus fps;
+        # anything else reports the type's full name with empty data.
         """Compute the stats entry for a single column using bounded-memory chunking.
 
         Iterates at most 100 rows in chunks of 8 so
@@ -1014,6 +1168,8 @@ class BaseModelCardData(CardData):
         stat_chunk_size = 8
 
         def chunks():
+            # [FUNCTION DOC]
+            # HELPER: generator yielding the column's values in consecutive slices of the chunk size over the first rows.
             for start in range(0, n_total, stat_chunk_size):
                 yield dataset[start : start + stat_chunk_size][column]
 
@@ -1159,6 +1315,14 @@ class BaseModelCardData(CardData):
         dataset_info: dict[str, Any],
         loss: dict[str, nn.Module] | nn.Module | None,
     ) -> dict[str, str]:
+        # [FUNCTION DOC]
+        # Fills and returns the dataset_info dict for one dataset (mutating it). Returns an empty dict for a missing or empty
+        # dataset. For regular datasets: sets "size", determines columns from the first row (excluding "dataset_name"), computes
+        # per-column stats and renders them as an indented Markdown table (type, modality, HTML list of details), and stores
+        # the first 3 rows as examples with a rendered examples table. For iterable datasets only the column names are used.
+        # Always sets "columns" (HTML code tags) and "loss" with the loss's full class name; if the loss offers a config dict,
+        # its values are formatted (nested modules shown as ClassName(base model, trust_remote_code, config args)) and dumped
+        # as indented JSON (pretty-printed repr if not JSON serialisable) in a fenced block under "config_code".
         """
         Given a dataset, compute the following:
         * Dataset Size
@@ -1190,6 +1354,8 @@ class BaseModelCardData(CardData):
                 dataset_info["stats"][column] = self._compute_column_stats(dataset, column)
 
             def to_html_list(data: dict):
+                # [FUNCTION DOC]
+                # HELPER: renders a dict as an HTML unordered list of "key: value" items, or an empty string for an empty dict.
                 if not data:
                     return ""
                 return "<ul><li>" + "</li><li>".join(f"{key}: {value}" for key, value in data.items()) + "</li></ul>"
@@ -1215,6 +1381,10 @@ class BaseModelCardData(CardData):
             config = loss.get_config_dict()
 
             def format_config_value(value: Any) -> str:
+                # [FUNCTION DOC]
+                # HELPER: returns non-module values unchanged; for modules returns the class name, followed in parentheses by the
+                # base model id repr (if the module has card data), "trust_remote_code=True" (if set) and key=repr(value) pairs from
+                # its config dict, when any of these exist.
                 if not isinstance(value, nn.Module):
                     return value
                 module_name = value.__class__.__name__
@@ -1250,6 +1420,13 @@ class BaseModelCardData(CardData):
         loss: nn.Module | dict[str, nn.Module],
         dataset_type: Literal["train", "eval"],
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Produces the final metadata list for train or eval datasets. If a dataset is present: user-provided metadata whose
+        # count does not match the number of (sub-)datasets is discarded with a warning; missing metadata is inferred; then
+        # metrics are computed per sub-dataset (using the matching loss when losses are given per dataset name) or for the
+        # single dataset. For training data, adds a "dataset_size:<total>" tag when sizes are known, and if ir_model is still
+        # undetermined, marks the model as IR when any column is named "query" or "question". Returns the result of validating
+        # the metadata (Hub lookups for ids).
         if dataset:
             if dataset_metadata and (
                 (isinstance(dataset, DatasetDict) and len(dataset_metadata) != len(dataset))
@@ -1296,6 +1473,9 @@ class BaseModelCardData(CardData):
         return self.validate_datasets(dataset_metadata)
 
     def register_model(self, model: BaseModel) -> None:
+        # [FUNCTION DOC]
+        # Stores the model reference. If ir_model is still undetermined, sets it True when the model has a direct Router child
+        # or a non-empty prompt named "query", "document", "passage" or "corpus".
         self.model = model
 
         if self.ir_model is not None:
@@ -1313,6 +1493,9 @@ class BaseModelCardData(CardData):
                 return
 
     def try_to_set_ir_model_from_evaluators(self) -> None:
+        # [FUNCTION DOC]
+        # Sets ir_model True if any recorded evaluator (or any sub-evaluator of a SequentialEvaluator) is an
+        # InformationRetrievalEvaluator or NanoBEIREvaluator. Imports those classes lazily.
         from sentence_transformers.base.evaluation import SequentialEvaluator
         from sentence_transformers.sentence_transformer.evaluation import (
             InformationRetrievalEvaluator,
@@ -1327,9 +1510,15 @@ class BaseModelCardData(CardData):
                 return
 
     def set_model_id(self, model_id: str) -> None:
+        # [FUNCTION DOC]
+        # Sets model_id.
         self.model_id = model_id
 
     def set_base_model(self, model_id: str, revision: str | None = None) -> bool:
+        # [FUNCTION DOC]
+        # Sets base_model and base_model_revision only if the model id can be verified on the Hub, returning True on success.
+        # Returns False without network access when local_files_only is set, or when the Hub lookup fails for any reason. A
+        # missing or "main" revision is replaced by the Hub's current commit sha.
         # We only set the base model if we can verify that it exists on the Hub
         if self.local_files_only:
             # Don't try to get the model info if we are not allowed to access the Hub
@@ -1346,14 +1535,20 @@ class BaseModelCardData(CardData):
         return True
 
     def set_language(self, language: str | list[str]) -> None:
+        # [FUNCTION DOC]
+        # Sets language, wrapping a string in a list.
         if isinstance(language, str):
             language = [language]
         self.language = language
 
     def set_license(self, license: str) -> None:
+        # [FUNCTION DOC]
+        # Sets license.
         self.license = license
 
     def add_tags(self, tags: str | list[str]) -> None:
+        # [FUNCTION DOC]
+        # Appends the given tag(s) (string or list) to tags, skipping ones already present.
         if isinstance(tags, str):
             tags = [tags]
         for tag in tags:
@@ -1361,6 +1556,11 @@ class BaseModelCardData(CardData):
                 self.tags.append(tag)
 
     def try_to_set_base_model(self) -> None:
+        # [FUNCTION DOC]
+        # Tries to discover the base model from the underlying transformers model's config name-or-path: candidates are the
+        # last two path parts joined by a slash, then every split of the final path part at an underscore into "owner/name".
+        # Calls set_base_model on each candidate until one succeeds (Hub lookups). Does nothing if there is no transformers
+        # model.
         if (transformers_model := self.model.transformers_model) is not None:
             base_model = transformers_model.config._name_or_path
             base_model_path = Path(base_model)
@@ -1380,6 +1580,15 @@ class BaseModelCardData(CardData):
                     break
 
     def format_eval_metrics(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Formats recorded evaluation results. For each evaluator: strips the evaluator's name prefix from metric keys (and
+        # the primary metric) when all keys carry it, converts numpy/torch scalars to Python values, builds table rows with the
+        # primary metric bolded, gets its description, dataset name (its "name" attribute) and config as an indented JSON block
+        # (string form if not serialisable), and builds Hub EvalResult entries for every metric convertible to float (strings
+        # with spaces are tried on their first word). Evaluators of the same class with the same metric set and config but a
+        # different dataset are merged into one table with one value column per dataset name. Returns a dict with
+        # "eval_metrics" (groups with rendered Markdown tables), "metrics" (all metric keys) and "model-index" (built from the
+        # eval results and model name).
         """Format the evaluation metrics for the model card.
 
         The following keys will be returned:
@@ -1401,6 +1610,9 @@ class BaseModelCardData(CardData):
                     primary_metric = primary_metric[len(name) + 1 :]
 
             def try_to_pure_python(value: Any) -> Any:
+                # [FUNCTION DOC]
+                # HELPER: returns the Python scalar of a numpy/torch scalar (anything with a dtype), or the value unchanged on failure
+                # or for other types.
                 """Try to convert a value from a Numpy or Torch scalar to pure Python, if not already pure Python"""
                 try:
                     if hasattr(value, "dtype"):
@@ -1443,6 +1655,9 @@ class BaseModelCardData(CardData):
             )
 
             def try_to_float(metric_value):
+                # [FUNCTION DOC]
+                # HELPER: converts a metric value to float; for strings containing spaces, retries on the first word; returns None if
+                # not convertible.
                 try:
                     return float(metric_value)
                 except Exception:
@@ -1509,6 +1724,11 @@ class BaseModelCardData(CardData):
         }
 
     def format_training_logs(self):
+        # [FUNCTION DOC]
+        # Renders training_logs as a Markdown table. Columns are the union of keys in first-seen order, sorted as Epoch, Step,
+        # Training Loss, Validation Loss, other keys ending in "loss", then everything else in first-seen order. Missing cells
+        # show "-"; the row of the best model step is bolded (values formatted). Returns a dict with "eval_lines" (the table)
+        # and "explain_bold_in_eval" (whether any bold appears).
         # Get the keys from all evaluation lines
         eval_lines_keys = []
         for lines in self.training_logs:
@@ -1518,6 +1738,8 @@ class BaseModelCardData(CardData):
 
         # Sort the metric columns: Epoch, Step, Training Loss, Validation Loss, Evaluator results
         def sort_metrics(key: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: sort key for a column name implementing the order described above.
             if key == "Epoch":
                 return 0
             if key == "Step":
@@ -1548,6 +1770,11 @@ class BaseModelCardData(CardData):
 
     @staticmethod
     def _video_decoder_to_dict(value: Any) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: static. Decodes all frames of a video decoder into a video dict ("array" frames tensor plus metadata with
+        # fps, total frame count and frame indices). Tries batch decoding of all frames, then all but the last frame, then
+        # frame-by-frame access until the first failure; if all fail on the given decoder, repeats with a fresh decoder built
+        # from the source path. Raises RuntimeError if nothing could be decoded.
         """Convert a ``VideoDecoder`` to a ``VideoDict`` by extracting all frames.
 
         Tries multiple strategies to extract frames:
@@ -1559,6 +1786,8 @@ class BaseModelCardData(CardData):
         path = getattr(value.metadata, "path", None)
 
         def _make_metadata(num_decoded_frames: int) -> dict[str, Any]:
+            # [FUNCTION DOC]
+            # HELPER: builds video metadata for the given number of decoded frames.
             return {
                 "fps": fps,
                 "total_num_frames": value.metadata.num_frames,
@@ -1566,6 +1795,8 @@ class BaseModelCardData(CardData):
             }
 
         def _try_decode(decoder) -> dict[str, Any] | None:
+            # [FUNCTION DOC]
+            # HELPER: applies the decoding strategies to one decoder and returns the video dict or None.
             n = len(decoder)
             # Try batch decode with get_frames_at
             for num_frames in (n, n - 1):
@@ -1612,6 +1843,9 @@ class BaseModelCardData(CardData):
 
     @staticmethod
     def _prepare_for_inference(value: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: static. Recursively converts video decoders (also inside dicts) to video dicts for inference; other values
+        # are returned unchanged.
         """Convert a value to a format suitable for model inference.
 
         ``VideoDecoder`` objects are converted to a ``VideoDict`` via :meth:`_video_decoder_to_dict`.
@@ -1624,6 +1858,9 @@ class BaseModelCardData(CardData):
         return value
 
     def run_usage_snippet(self) -> None:
+        # [FUNCTION DOC]
+        # Base hook run before rendering: sets default example sentences when usage_examples is unset. Subclasses override to
+        # actually run the model and compute similarities.
         if self.usage_examples is None:
             self.usage_examples = [
                 "The weather is lovely today.",
@@ -1632,6 +1869,10 @@ class BaseModelCardData(CardData):
             ]
 
     def generate_usage_snippet(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the fenced Python usage snippet for the card. Uses usage_examples_display (asset paths) if set, else
+        # usage_examples. With no examples, generates the default text snippet; if the original examples contain any item that
+        # is not a string or list, generates a non-text snippet; otherwise a text snippet.
         """Generate the Python usage code snippet for the model card.
 
         Returns the code block (including \\`\\`\\` delimiters) showing how to use this model.
@@ -1655,6 +1896,11 @@ class BaseModelCardData(CardData):
         return self._generate_text_snippet(display)
 
     def _generate_text_snippet(self, display: list[str] | None) -> str:
+        # [FUNCTION DOC]
+        # HELPER: builds a fenced Python snippet that imports the model class (subclass-provided "_snippet_model_class",
+        # default SentenceTransformer), loads model_id (or a subclass/default placeholder id), encodes the example sentences
+        # (given ones or three defaults), prints the embedding shape with the output dimensionality, and computes similarities,
+        # printing the recorded similarity output if available or else the expected shape.
         """Generate a text-only usage snippet."""
         model_class = getattr(self, "_snippet_model_class", "SentenceTransformer")
         default_model_id = getattr(self, "_snippet_default_model_id", "sentence_transformers_model_id")
@@ -1701,6 +1947,9 @@ class BaseModelCardData(CardData):
         return "```python\n" + "\n".join(lines) + "\n```"
 
     def _generate_non_text_snippet(self, display: list[str | dict[str, str]]) -> str:
+        # [FUNCTION DOC]
+        # HELPER: like the text snippet but for non-text inputs: lists each display item formatted as a code literal (asset
+        # paths turned into Hub URLs), encodes them and shows the similarity output or the expected shape.
         """Generate a usage snippet for non-text inputs (multimodal dicts or single-modality items)."""
         model_class = getattr(self, "_snippet_model_class", "SentenceTransformer")
         default_model_id = getattr(self, "_snippet_default_model_id", "sentence_transformers_model_id")
@@ -1742,6 +1991,10 @@ class BaseModelCardData(CardData):
         return "```python\n" + "\n".join(lines) + "\n```"
 
     def _render_examples_table(self, dataset_info: dict, asset_counter: int = 0) -> tuple[str, int]:
+        # [FUNCTION DOC]
+        # HELPER: renders the stored dataset examples (column-to-values mapping) as an indented Markdown table, formatting each
+        # cell (saving media as assets when possible) and threading the asset counter through. Returns the table (empty string
+        # if there are no examples) and the updated counter.
         """Render the examples table for a dataset, saving non-text values as assets when possible.
 
         Returns:
@@ -1763,6 +2016,11 @@ class BaseModelCardData(CardData):
         return indent(make_markdown_table(examples_lines).replace("-:|", "--|"), "  "), asset_counter
 
     def _format_and_save_example(self, value: Any, counter: int) -> tuple[str, int]:
+        # [FUNCTION DOC]
+        # HELPER: formats one example cell and returns it with the updated asset counter. Non-media values, or any value when
+        # no save directory is set, are shown as escaped text in a code tag. Media (PIL images, audio decoders/dicts, video
+        # decoders) are reused from the asset cache without incrementing the counter, or saved with the "example_" prefix
+        # (counter incremented) and rendered as an HTML media tag; if saving fails, falls back to text.
         """Format a dataset example value for the model card table, saving non-text values as assets.
 
         Delegates the actual file I/O to :meth:`_save_asset` and wraps the resulting path in the
@@ -1793,6 +2051,12 @@ class BaseModelCardData(CardData):
         return f"<code>{self._format_example_value(value)}</code>", counter
 
     def _example_asset_html(self, value: Any, rel_path: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns an inline HTML tag for a saved asset: an image tag (width 200) for PIL images, an audio player with
+        # the duration as fallback text for audio, a video player with the duration for video decoders, otherwise a text cell.
+        # KNOWN ISSUE: the audio duration divides the length of the array's first dimension by the sampling rate, which is
+        # wrong for multi-channel (channels by samples) arrays; the same calculation is used in the text formatter and the
+        # column statistics.
         """Generate an inline HTML tag for a saved example asset."""
         if PILImage and isinstance(value, PILImage):
             return f'<img src="{rel_path}" width="200">'
@@ -1812,6 +2076,11 @@ class BaseModelCardData(CardData):
 
     @staticmethod
     def _format_example_value(value: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns an HTML-escaped textual description of an example value: video decoders as duration,
+        # resolution and fps; PIL images as their size; audio (decoders or dicts) as duration and sampling rate; video dicts as
+        # a generic video tag; lists longer than 5 truncated to 5 items with an ellipsis; strings longer than 1000 characters
+        # truncated; then newlines become line-break tags and pipe characters are escaped.
         """Format a dataset example value for the model card examples table."""
         # AudioDecoder supports dict-like access but is not a dict
         if AudioDecoder is not None and isinstance(value, AudioDecoder):
@@ -1834,6 +2103,9 @@ class BaseModelCardData(CardData):
         return result
 
     def _format_snippet_value(self, value: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: formats a value as a code literal for the snippet: asset path strings become quoted Hub URLs (when a model
+        # id exists), dicts and lists are formatted recursively, everything else uses its repr.
         """Format a value for inclusion in a code snippet.
 
         Strings are shown as repr (quoted), and asset paths are converted to Hub URLs
@@ -1851,12 +2123,16 @@ class BaseModelCardData(CardData):
         return repr(value)
 
     def _asset_path_to_url(self, relative_path: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: turns a relative asset path into a Hub "resolve/main" URL when model_id is set; otherwise returns it as is.
         """Convert a relative asset path to a Hub URL if model_id is available, otherwise keep relative."""
         if self.model_id:
             return f"https://huggingface.co/{self.model_id}/resolve/main/{relative_path}"
         return relative_path
 
     def _get_snippet_output_dimensionality(self) -> int | str:
+        # [FUNCTION DOC]
+        # HELPER: returns the model's embedding dimension, or "?" if there is no model or retrieving it fails.
         if self.model:
             try:
                 return self.model.get_embedding_dimension()
@@ -1865,6 +2141,9 @@ class BaseModelCardData(CardData):
         return "?"
 
     def get_codecarbon_data(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns {"co2_eq_emissions": ...} built from the CodeCarbon tracker's emissions data: emissions in grams, energy
+        # consumed, source, training type "fine-tuning", on-cloud flag, CPU model, RAM size and GPU model (if any).
         emissions_data = self.code_carbon_callback.tracker._prepare_emissions_data()
         co2_eq_emissions: dict[str, Any] = {
             # * 1000 to convert kg to g
@@ -1881,6 +2160,9 @@ class BaseModelCardData(CardData):
         return {"co2_eq_emissions": co2_eq_emissions}
 
     def get_training_duration_data(self) -> dict[str, str | None]:
+        # [FUNCTION DOC]
+        # Returns formatted training time (total elapsed since training start minus evaluation time), evaluation time and
+        # total time; the latter two only when some evaluation time was recorded. All None if training never started.
         if self._training_start_time is None:
             return {"training_time": None, "evaluation_time": None, "total_time": None}
         total_duration = time.time() - self._training_start_time
@@ -1892,6 +2174,10 @@ class BaseModelCardData(CardData):
         }
 
     def get_model_specific_metadata(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns extra template variables from the model: max sequence length, string form of the model architecture, title
+        # cased supported modalities, and the first Transformer module's query and document lengths (None if absent). Empty
+        # dict without a model.
         if self.model is None:
             return {}
         from sentence_transformers.base.modules import Transformer
@@ -1907,12 +2193,22 @@ class BaseModelCardData(CardData):
         }
 
     def get_default_model_name(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "<ModelClass> based on <base model>" if a base model is known, else the model class name.
         if self.base_model:
             return f"{self.model.__class__.__name__} based on {self.base_model}"
         else:
             return self.model.__class__.__name__
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Builds the full template variable dict. On first save, tries to discover the base model (errors ignored). Fills a
+        # default model name. Falls back to IR detection from evaluators, runs the usage snippet hook, clears the asset cache,
+        # saves usage example assets, and (with a save directory) re-renders dataset example tables so media become assets;
+        # each of these logs a warning on failure. Collects all dataclass fields, then adds the usage snippet, formatted
+        # evaluation metrics and training logs (warnings on failure), a flag hiding the training log table when it has over
+        # 100 rows, CodeCarbon data (if a started tracker exists), training durations and model-specific metadata. Marks
+        # first_save False, removes the ignored internal fields, caches the dict for the next to_yaml call and returns it.
         # Try to set the base model
         if self.first_save and not self.base_model:
             try:
@@ -2014,6 +2310,10 @@ class BaseModelCardData(CardData):
         return super_dict
 
     def to_yaml(self, line_break=None) -> str:
+        # [FUNCTION DOC]
+        # Returns the YAML metadata header: uses (and clears) the dict cached by the previous to_dict call, or computes it,
+        # then dumps only the YAML-relevant fields whose values are not None or empty lists, preserving order and stripping
+        # surrounding whitespace.
         if self._cached_dict is not None:
             data = self._cached_dict
             self._cached_dict = None
@@ -2027,6 +2327,9 @@ class BaseModelCardData(CardData):
 
 
 def generate_model_card(model: BaseModel) -> str:
+    # [FUNCTION DOC]
+    # Renders the model's card data through the Hub model card template (with the hugging face emoji variable) and returns
+    # the Markdown text. If the card data has a model id, relative asset src attributes are rewritten to absolute Hub URLs.
     model_card = ModelCard.from_template(
         card_data=model.model_card_data, template_path=model.model_card_data.template_path, hf_emoji="🤗"
     )

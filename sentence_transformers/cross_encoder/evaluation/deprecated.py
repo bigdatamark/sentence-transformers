@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Deprecated legacy CrossEncoder evaluator names kept for backwards compatibility. Each class is marked
+# deprecated (emitting a deprecation warning on use) and subclasses one of the new evaluators. The
+# classification-style ones add a constructor from legacy InputExample objects.
 from __future__ import annotations
 
 from typing_extensions import deprecated
@@ -14,12 +18,17 @@ from sentence_transformers.cross_encoder.evaluation.reranking import CrossEncode
     "evaluation. It accepts approximately the same inputs as this evaluator."
 )
 class CEBinaryAccuracyEvaluator(CrossEncoderClassificationEvaluator):
+    # [CLASS DOC]
+    # Deprecated alias of the classification evaluator (formerly binary accuracy). Behavior is inherited.
     """
     This evaluator has been deprecated in favor of the more general CrossEncoderClassificationEvaluator.
     """
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC]
+        # Build an evaluator from a list of InputExample objects: collects each example's texts as a pair and its
+        # label, then calls the constructor with those pairs, labels and any extra kwargs. Returns the instance.
         sentence_pairs = []
         labels = []
 
@@ -35,12 +44,17 @@ class CEBinaryAccuracyEvaluator(CrossEncoderClassificationEvaluator):
     "evaluation. It accepts approximately the same inputs as this evaluator."
 )
 class CEBinaryClassificationEvaluator(CrossEncoderClassificationEvaluator):
+    # [CLASS DOC]
+    # Deprecated alias of the classification evaluator (formerly binary classification). Behavior inherited.
     """
     This evaluator has been deprecated in favor of the more general CrossEncoderClassificationEvaluator.
     """
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC]
+        # Build an evaluator from InputExample objects: pairs from each example's texts, labels from its label;
+        # extra kwargs forwarded to the constructor. Returns the instance.
         sentence_pairs = []
         labels = []
 
@@ -56,12 +70,17 @@ class CEBinaryClassificationEvaluator(CrossEncoderClassificationEvaluator):
     "evaluation. It accepts approximately the same inputs as this evaluator."
 )
 class CEF1Evaluator(CrossEncoderClassificationEvaluator):
+    # [CLASS DOC]
+    # Deprecated alias of the classification evaluator (formerly F1). Behavior inherited.
     """
     This evaluator has been deprecated in favor of the more general CrossEncoderClassificationEvaluator.
     """
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC]
+        # Build an evaluator from InputExample objects: pairs from each example's texts, labels from its label;
+        # extra kwargs forwarded to the constructor. Returns the instance.
         sentence_pairs = []
         labels = []
 
@@ -77,12 +96,17 @@ class CEF1Evaluator(CrossEncoderClassificationEvaluator):
     "evaluation. It accepts approximately the same inputs as this evaluator."
 )
 class CESoftmaxAccuracyEvaluator(CrossEncoderClassificationEvaluator):
+    # [CLASS DOC]
+    # Deprecated alias of the classification evaluator (formerly softmax accuracy). Behavior inherited.
     """
     This evaluator has been deprecated in favor of the more general CrossEncoderClassificationEvaluator.
     """
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC]
+        # Build an evaluator from InputExample objects: pairs from each example's texts, labels from its label;
+        # extra kwargs forwarded to the constructor. Returns the instance.
         sentence_pairs = []
         labels = []
 
@@ -97,6 +121,8 @@ class CESoftmaxAccuracyEvaluator(CrossEncoderClassificationEvaluator):
     "Please use CrossEncoderCorrelationEvaluator instead."
 )
 class CECorrelationEvaluator(CrossEncoderCorrelationEvaluator):
+    # [CLASS DOC]
+    # Deprecated alias of the correlation evaluator; adds nothing.
     pass
 
 
@@ -105,4 +131,8 @@ class CECorrelationEvaluator(CrossEncoderCorrelationEvaluator):
     "Please use CrossEncoderCorrelationEvaluator instead."
 )
 class CERerankingEvaluator(CrossEncoderRerankingEvaluator):
+    # [CLASS DOC]
+    # Deprecated alias of the reranking evaluator; adds nothing.
+    # KNOWN ISSUE: The deprecation message says this was renamed to CrossEncoderCorrelationEvaluator, but the
+    # class actually subclasses (and should point users to) CrossEncoderRerankingEvaluator.
     pass

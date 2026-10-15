@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Margin-MSE distillation loss for MultiVectorEncoder models using late-interaction scores.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -13,6 +15,12 @@ from sentence_transformers.util import similarity_fct_name
 
 
 class MultiVectorMarginMSELoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module. Attributes: the model, a pairwise multi-vector scoring function (default ColBERT
+    # pairwise MaxSim; called with query and document token embeddings plus their masks, returning one score
+    # per row), an optional mini-batch size for the document forward passes, and an inner MSE loss. Flags that
+    # it needs per-sample media counts so vision-language inputs can be sliced into mini-batches. Inputs are
+    # tokenized feature dicts for query, positive and one or more negatives, plus teacher labels.
     """Margin-MSE distillation loss for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` models.
 
     Adapted from the dense :class:`sentence_transformers.sentence_transformer.losses.MarginMSELoss`. Given a query, a positive
@@ -97,6 +105,8 @@ class MultiVectorMarginMSELoss(nn.Module):
         similarity_fct: Callable | None = None,
         mini_batch_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store the model, scoring function (default ColBERT pairwise), mini-batch size, and create an MSE loss.
         super().__init__()
         self.model = model
         self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_scores_pairwise
@@ -104,6 +114,8 @@ class MultiVectorMarginMSELoss(nn.Module):
         self.loss_function = nn.MSELoss()
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the loss config: the scoring function's name and the mini-batch size.
         return {
             "similarity_fct": similarity_fct_name(self.similarity_fct),
             "mini_batch_size": self.mini_batch_size,
@@ -112,6 +124,9 @@ class MultiVectorMarginMSELoss(nn.Module):
     def _score(
         self, query_embeddings: Tensor, document_embeddings: Tensor, query_mask: Tensor, document_mask: Tensor
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Call the scoring function on query and document embeddings with their masks passed as keywords;
+        # returns one score per row.
         return self.similarity_fct(
             query_embeddings, document_embeddings, queries_mask=query_mask, documents_mask=document_mask
         )
@@ -121,6 +136,15 @@ class MultiVectorMarginMSELoss(nn.Module):
         sentence_features: Iterable[dict[str, Tensor]],
         labels: Tensor,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss. Raises ValueError if fewer than three feature dicts are given. Runs the model on the
+        # query features (task taken from the features, default "query"), taking the token embeddings and the
+        # boolean scoring mask from the output. Embeds all document columns with a shared padded helper (optionally
+        # chunked by mini-batch size, default task "document"), giving per-column embeddings and masks. Scores
+        # query-positive. One-dimensional labels are accepted only with exactly one negative (else ValueError) and
+        # become one column; labels with k+1 columns are converted to margins (first minus the rest); any other
+        # shape than batch by k raises ValueError. Student margins are positive score minus each negative score,
+        # stacked to batch by k; returns MSE against detached labels cast to the score dtype.
         sentence_features = list(sentence_features)
         if len(sentence_features) < 3:
             raise ValueError(
@@ -171,6 +195,8 @@ class MultiVectorMarginMSELoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Hofstaetter et al. (Margin-MSE).
         return """
 @misc{hofstaetter2020improving,
     title={Improving Efficient Neural Ranking Models with Cross-Architecture Knowledge Distillation},

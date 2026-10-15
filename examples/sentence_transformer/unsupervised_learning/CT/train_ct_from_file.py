@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Example script: Contrastive Tension training of distilbert-base-uncased (max length 75, mean pooling) on sentences from
+# a text file (first CLI arg; gzip if it ends in .gz; lines shorter than 10 characters after stripping are skipped). An
+# optional second arg is sanitized into the output folder name output/train_ct-<name>-<timestamp>. Without arguments it
+# prints usage and exits. Builds (text1, text2) pairs where text2 equals text1 with probability 1/8, else a random
+# sentence. Trains 1 epoch with ContrastiveTensionLoss (batch 16, lr 5e-5, 10% warmup, AdamW, save every 50% of
+# training, log every 10%), logs the similarity of the first two sentences, saves to <output>/final and tries a Hub push.
+# Side effects: file reading, network, disk, GPU, logging.
+# KNOWN ISSUE: the docstring says checkpoints are stored every 500 steps, but save_steps is 0.5, meaning every 50% of training.
 """
 This file loads sentences from a provided text file. It is expected, that the there is one sentence per line in that text file.
 
@@ -73,6 +82,9 @@ logging.info(f"Train sentences: {len(train_sentences)}")
 
 # Generate sentence pairs for ContrastiveTensionLoss
 def to_ct_pairs(sample, pos_neg_ratio=8):
+    # [FUNCTION DOC]
+    # HELPER: map function. Mutates and returns the row, adding text2 equal to text1 with probability 1/pos_neg_ratio
+    # (default 8), otherwise a random sentence from train_sentences.
     pos_neg_ratio = 1 / pos_neg_ratio
     sample["text2"] = sample["text1"] if random.random() < pos_neg_ratio else random.choice(train_sentences)
     return sample

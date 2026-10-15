@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pytest tests for GroupByLabelBatchSampler, a batch sampler that builds batches (lists of dataset indices) in which
+# every batch contains at least two distinct labels and each label present appears at least twice (useful for in-batch
+# triplet losses). Skips the whole module if the datasets library (the "train" extra) is missing. Datasets are small
+# in-memory Hugging Face Datasets with a "data" column of row indices and an integer "label" column.
 from __future__ import annotations
 
 from collections import Counter
@@ -18,6 +23,8 @@ else:
 
 @pytest.fixture
 def balanced_dataset():
+    # [FUNCTION DOC]
+    # HELPER: Fixture: Dataset of 100 rows where label is row index modulo 5 (5 labels, 20 rows each).
     """100 samples, 5 labels with 20 samples each."""
     data = {"data": list(range(100)), "label": [i % 5 for i in range(100)]}
     return Dataset.from_dict(data)
@@ -25,6 +32,8 @@ def balanced_dataset():
 
 @pytest.fixture
 def two_label_dataset():
+    # [FUNCTION DOC]
+    # HELPER: Fixture: Dataset of 100 rows where label is row index modulo 2 (2 labels, 50 rows each).
     """100 samples, 2 labels with 50 samples each."""
     data = {"data": list(range(100)), "label": [i % 2 for i in range(100)]}
     return Dataset.from_dict(data)
@@ -32,6 +41,8 @@ def two_label_dataset():
 
 @pytest.fixture
 def imbalanced_dataset():
+    # [FUNCTION DOC]
+    # HELPER: Fixture: Dataset of 140 rows with labels 0 (90 rows), then 1 (30 rows), then 2 (20 rows).
     """140 samples: label 0 has 90, label 1 has 30, label 2 has 20."""
     labels = [0] * 90 + [1] * 30 + [2] * 20
     data = {"data": list(range(140)), "label": labels}
@@ -39,6 +50,9 @@ def imbalanced_dataset():
 
 
 def test_every_label_appears_at_least_twice_per_batch(balanced_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # With batch size 16 and drop_last on the balanced dataset, asserts every label present in each yielded batch
+    # occurs at least twice.
     sampler = GroupByLabelBatchSampler(
         dataset=balanced_dataset, batch_size=16, drop_last=True, valid_label_columns=["label"]
     )
@@ -50,6 +64,8 @@ def test_every_label_appears_at_least_twice_per_batch(balanced_dataset: Dataset)
 
 
 def test_drop_last_true_no_short_batches(balanced_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # With batch size 16 and drop_last on the balanced dataset, asserts every batch has exactly 16 indices.
     batch_size = 16
     sampler = GroupByLabelBatchSampler(
         dataset=balanced_dataset, batch_size=batch_size, drop_last=True, valid_label_columns=["label"]
@@ -60,6 +76,9 @@ def test_drop_last_true_no_short_batches(balanced_dataset: Dataset) -> None:
 
 
 def test_drop_last_false_yields_remainder(two_label_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # On the two-label dataset with batch size 32, compares samplers with drop_last on and off: the keep-remainder
+    # sampler must yield at least as many batches and at least as many total indices.
     batch_size = 32
     sampler_drop = GroupByLabelBatchSampler(
         dataset=two_label_dataset, batch_size=batch_size, drop_last=True, valid_label_columns=["label"]
@@ -76,6 +95,9 @@ def test_drop_last_false_yields_remainder(two_label_dataset: Dataset) -> None:
 
 
 def test_sample_coverage(balanced_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # With batch size 16 and no drop_last on the balanced dataset, asserts no index is yielded twice in one epoch and
+    # at least 80 percent of rows are used.
     """Nearly all samples should be used exactly once per epoch."""
     sampler = GroupByLabelBatchSampler(
         dataset=balanced_dataset, batch_size=16, drop_last=False, valid_label_columns=["label"]
@@ -88,6 +110,9 @@ def test_sample_coverage(balanced_dataset: Dataset) -> None:
 
 
 def test_len_matches_iteration(balanced_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # For drop_last true and false, asserts the sampler's length equals the number of batches actually produced by
+    # iterating it.
     for drop_last in [True, False]:
         sampler = GroupByLabelBatchSampler(
             dataset=balanced_dataset, batch_size=16, drop_last=drop_last, valid_label_columns=["label"]
@@ -97,6 +122,9 @@ def test_len_matches_iteration(balanced_dataset: Dataset) -> None:
 
 
 def test_len_matches_iteration_remainder_of_two() -> None:
+    # [FUNCTION DOC]
+    # Regression test: with labels 0 (6 rows) and 1 (4 rows) and batch size 6 (leaving a remainder of two in the
+    # scheduled stream), asserts length and iteration agree.
     """When stream_length % batch_size == 2, __len__ and __iter__ must agree.
 
     2 labels with 6 and 4 samples -> stream_length=8, batch_size=6 -> remainder=2.
@@ -109,6 +137,8 @@ def test_len_matches_iteration_remainder_of_two() -> None:
 
 
 def test_raises_on_single_label() -> None:
+    # [FUNCTION DOC]
+    # Asserts constructing the sampler on a dataset with a single label raises ValueError mentioning "at least 2".
     data = {"data": list(range(20)), "label": [0] * 20}
     ds = Dataset.from_dict(data)
     with pytest.raises(ValueError, match="at least 2"):
@@ -116,6 +146,9 @@ def test_raises_on_single_label() -> None:
 
 
 def test_raises_on_invalid_batch_size(two_label_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # Asserts construction raises ValueError for an odd batch size (7) and for a batch size too small to hold two
+    # labels twice (2).
     with pytest.raises(ValueError):
         GroupByLabelBatchSampler(
             dataset=two_label_dataset, batch_size=7, drop_last=False, valid_label_columns=["label"]
@@ -127,6 +160,9 @@ def test_raises_on_invalid_batch_size(two_label_dataset: Dataset) -> None:
 
 
 def test_imbalanced_dataset_multi_class(imbalanced_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # On the imbalanced dataset with batch size 16 and drop_last, asserts at least one batch is produced and every
+    # batch has at least two distinct labels.
     sampler = GroupByLabelBatchSampler(
         dataset=imbalanced_dataset, batch_size=16, drop_last=True, valid_label_columns=["label"]
     )
@@ -139,6 +175,9 @@ def test_imbalanced_dataset_multi_class(imbalanced_dataset: Dataset) -> None:
 
 
 def test_minority_labels_participate() -> None:
+    # [FUNCTION DOC]
+    # With labels of 1000, 500 and 3 rows and batch size 32, asserts at least two of the three minority-label indices
+    # (1500 to 1502) appear somewhere in the epoch, since odd label counts are trimmed to an even count.
     """Labels with >= 2 samples should have their (even-trimmed) samples appear in the output."""
     labels = [0] * 1000 + [1] * 500 + [2] * 3
     ds = Dataset.from_dict({"data": list(range(len(labels))), "label": labels})
@@ -152,6 +191,9 @@ def test_minority_labels_participate() -> None:
 
 
 def test_two_labels_with_large_batch(two_label_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # On the two-label dataset with batch size 32 and drop_last, asserts every batch has exactly 32 indices and
+    # contains both labels.
     """With 2 labels and batch_size=32, each batch should have exactly 32 samples with both labels."""
     sampler = GroupByLabelBatchSampler(
         dataset=two_label_dataset, batch_size=32, drop_last=True, valid_label_columns=["label"]
@@ -164,6 +206,10 @@ def test_two_labels_with_large_batch(two_label_dataset: Dataset) -> None:
 
 
 def _compute_scheduled_efficiency(label_sizes: list[int], batch_size: int) -> float:
+    # [FUNCTION DOC]
+    # HELPER: Builds a dataset whose label i has the given number of rows (labels assigned in contiguous blocks),
+    # creates a sampler with the given batch size and drop_last on, and returns the fraction of rows that appear in
+    # yielded batches (total batch lengths divided by row count).
     """Helper: return fraction of samples that appear in properly balanced batches (not the remainder)."""
     labels = []
     for i, size in enumerate(label_sizes):
@@ -178,6 +224,9 @@ def _compute_scheduled_efficiency(label_sizes: list[int], batch_size: int) -> fl
 
 
 def test_efficiency_few_imbalanced_labels() -> None:
+    # [FUNCTION DOC]
+    # Asserts that for six imbalanced labels (1250 down to 86 rows) and batch size 32 at least 99 percent of rows are
+    # scheduled.
     """6 imbalanced labels."""
     label_sizes = [1250, 1223, 1162, 896, 835, 86]
     efficiency = _compute_scheduled_efficiency(label_sizes, batch_size=32)
@@ -185,6 +234,9 @@ def test_efficiency_few_imbalanced_labels() -> None:
 
 
 def test_efficiency_many_imbalanced_labels() -> None:
+    # [FUNCTION DOC]
+    # Asserts that for 40 labels with heavily varied sizes (from 962 rows down to 4) and batch size 32 at least 85
+    # percent of rows are scheduled.
     """Many imbalanced labels."""
     label_sizes = [962, 464, 421, 363, 276, 274, 218, 217, 207, 191]
     label_sizes += [80 - i * 3 for i in range(10)]
@@ -196,6 +248,10 @@ def test_efficiency_many_imbalanced_labels() -> None:
 
 @pytest.mark.parametrize("drop_last", [True, False])
 def test_batch_guarantees(drop_last: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over drop_last. For four label-size shapes (balanced, imbalanced, heavy imbalance, ten labels) with
+    # batch size 16, checks every batch: it has exactly the batch size unless it is the last batch with drop_last off
+    # (then at most the batch size), it contains at least two labels, and each label in it appears at least twice.
     """Every batch must satisfy three invariants:
 
     1. Contains >= 2 distinct labels.

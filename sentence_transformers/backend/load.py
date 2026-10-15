@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Loaders that turn a Hugging Face model name or local directory into an Optimum ONNX Runtime or OpenVINO model object for a
+# given task. Both loaders share the same flow: import Optimum lazily and map the task name to a model class, decide via
+# backend_should_export whether a matching exported file already exists (local glob or Hub file listing) or the model
+# must be exported, load or export with from_pretrained, wrap the model's private save method so later saves go into an
+# "onnx" or "openvino" subfolder, and log a warning recommending saving after a fresh export.
 from __future__ import annotations
 
 import json
@@ -12,6 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 def load_onnx_model(model_name_or_path: str, config: PretrainedConfig, task_name: str, **model_kwargs):
+    # [FUNCTION DOC]
+    # Load (or export and load) an ONNX Runtime model.
+    # Inputs: model_name_or_path (Hub id or local path), config (transformers config passed through), task_name (one of
+    # feature-extraction, fill-mask, sequence-classification, text-generation, mapped to the matching ORTModelFor class), and
+    # extra model_kwargs forwarded to from_pretrained (may include export, file_name, subfolder, revision, token, provider).
+    # Behavior: sets "provider" to the given one or else the first (highest priority) available ONNX Runtime provider;
+    # computes whether to export and the adjusted file_name/subfolder; drops file_name when exporting; loads the model; wraps
+    # its _save_pretrained so saving writes into <dir>/onnx; warns to save when exported.
+    # Returns the Optimum ORT model. Raises ValueError for an unsupported task, and a generic Exception with installation
+    # instructions when optimum or onnxruntime is missing. Side effects: may list Hub files, download and export models, log warnings.
     """
     Load and perhaps export an ONNX model using the Optimum library.
 
@@ -90,6 +106,14 @@ def load_onnx_model(model_name_or_path: str, config: PretrainedConfig, task_name
 
 
 def load_openvino_model(model_name_or_path: str, config: PretrainedConfig, task_name: str, **model_kwargs):
+    # [FUNCTION DOC]
+    # Load (or export and load) an OpenVINO model; same inputs and flow as load_onnx_model but with OVModelFor classes, the
+    # "openvino*.xml" file pattern and OV_XML_FILE_NAME default file name, and no provider handling.
+    # Extra handling of model_kwargs["ov_config"]: a dict is used as-is; any other value is treated as a path to a JSON file
+    # that is read into a dict (ValueError if the path does not exist); when absent it defaults to an empty dict.
+    # Wraps saving into <dir>/openvino. Returns the Optimum OV model. Raises ValueError for an unsupported task or bad
+    # ov_config, and a generic Exception with installation instructions when optimum-intel is missing.
+    # Side effects: file reads, possible Hub listing/downloads/export, warnings.
     """
     Load and perhaps export an OpenVINO model using the Optimum library.
 

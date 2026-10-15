@@ -1,3 +1,17 @@
+# [MODULE DOC]
+# HELPER: Shared pytest configuration and sample-data generators for the per-task Transformer module tests
+# (feature extraction, fill mask, sequence classification, text generation, any-to-any).
+# At import time it: optionally imports torchcodec's audio and video decoders (set to None if unavailable) and
+# torchaudio (records availability in a private flag); skips the whole module tree when running in CI (the tests
+# download many Hub models); and loads "transformers_tiny_models.json" (path relative to the repo root, so tests
+# must run from there) into a mapping of architecture key to tiny Hub model id.
+# It defines module-level lists/dicts that tests use to mark expectations per architecture: known-broken
+# architectures to xfail (in general and only on transformers v4), faulty checkpoints, CUDA-only architectures,
+# architectures whose forward pass is expected to fail (None meaning all modalities, else a list of the
+# sample-description strings expected to fail), and architectures with expected multimodal success/failure,
+# image+video failure, image-only failure and audio failure.
+# It also keeps a module-level list of temporary media file paths created by the generators, deleted at session end.
+# Each generator returns a dict mapping an input-format name to a list of n samples.
 """Shared fixtures, constants, and sample generators for Transformer task tests."""
 
 from __future__ import annotations
@@ -188,6 +202,9 @@ _temp_media_files: list[str] = []
 
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_temp_media_files():
+    # [FUNCTION DOC]
+    # HELPER: Session-scoped autouse generator fixture. Yields immediately; at session teardown deletes every file path
+    # recorded in the temporary media list if it exists, printing (not raising) any error encountered.
     """Cleanup temporary media files after all tests."""
     yield
     for file_path in _temp_media_files:
@@ -200,6 +217,12 @@ def cleanup_temp_media_files():
 
 @pytest.fixture(scope="session", autouse=True)
 def patch_torchcodec_int64_indices():
+    # [FUNCTION DOC]
+    # HELPER: Session-scoped autouse generator fixture that works around a Windows int32 issue in torchcodec. If the
+    # video decoder class is unavailable it just yields. Otherwise it replaces the decoder class's "get frames at
+    # indices" method with a wrapper that converts NumPy index arrays to 64-bit integer tensors before delegating to
+    # the original method, yields for the session, and always restores the original method afterwards. Mutates global
+    # class state.
     """Coerce numpy frame indices to int64 for torchcodec on Windows.
 
     transformers' video samplers return numpy int arrays, which are int32 on Windows
@@ -214,6 +237,10 @@ def patch_torchcodec_int64_indices():
     original_get_frames_at = VideoDecoder.get_frames_at
 
     def get_frames_at(self, indices):
+        # [FUNCTION DOC]
+        # HELPER: Replacement method installed on the video decoder. Inputs: the decoder instance and frame indices. If
+        # the indices are a NumPy array they are converted to an int64 torch tensor; then calls the original method and
+        # returns its result.
         if isinstance(indices, np.ndarray):
             indices = torch.as_tensor(indices).to(torch.int64)
         return original_get_frames_at(self, indices)
@@ -229,6 +256,10 @@ def patch_torchcodec_int64_indices():
 # Each returns a dict mapping format names to lists of samples
 @lru_cache(maxsize=4)
 def get_sample_text(n: int = 2) -> dict[str, list[str]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns sample text inputs. Input n (default 2). Returns a dict with the single key "text" mapping to n
+    # strings of the form "This is sentence i for testing." (i from 0). Results are memoised per n (LRU cache of 4),
+    # so callers share the same list objects.
     """Generate sample text data.
 
     Returns:
@@ -242,6 +273,12 @@ def get_sample_text(n: int = 2) -> dict[str, list[str]]:
 
 @lru_cache(maxsize=4)
 def get_sample_images(n: int = 2) -> dict[str, list[Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns n sample images (default 2) in several formats, memoised per n (LRU cache of 4). Keys: "url"
+    # (up to two fixed Hub dataset PNG URLs, truncated to n, so fewer than n if n exceeds 2), "array" (random 32x32x3
+    # uint8 arrays from the global NumPy RNG), "tensor" (the same arrays as float tensors scaled to 0..1, in HWC
+    # layout), "pil" (PIL images from the same arrays) and "path" (paths of newly written temporary PNG files holding
+    # different random images). Side effects: writes temp files and records them for session cleanup.
     """Generate sample image data in multiple formats.
 
     Returns:
@@ -289,6 +326,14 @@ def get_sample_images(n: int = 2) -> dict[str, list[Any]]:
 
 @lru_cache(maxsize=4)
 def get_sample_audio(n: int = 2) -> dict[str, list[Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns n sample audio inputs (default 2), memoised per n. Creates n random float32 mono waveforms of
+    # 1000 to 2000 samples at 16 kHz (global NumPy and Python RNGs). If torchaudio is available, writes each to a
+    # temporary WAV file (recorded for cleanup); otherwise uses the fixed URLs as stand-in paths. Returns a dict with
+    # "array" (the raw arrays) and "dict" (dicts with array and sampling-rate keys), plus "audio_decoder" (torchcodec
+    # audio decoders over the WAV paths) when both torchcodec and torchaudio are available.
+    # KNOWN ISSUE: The docstring promises "url" and "path" keys, but those entries are commented out and never returned;
+    # the computed URLs and paths are only used for the optional audio decoders.
     """Generate sample audio data in multiple formats.
 
     Returns:
@@ -343,6 +388,14 @@ def get_sample_audio(n: int = 2) -> dict[str, list[Any]]:
 
 @lru_cache(maxsize=4)
 def get_sample_video(n: int = 2) -> dict[str, list[Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns n sample videos (default 2), memoised per n. Downloads up to two fixed Hub MP4 URLs into
+    # temporary files (network I/O; recorded for cleanup). Returns a dict with "url" and "path". When torchcodec's
+    # video decoder is available it additionally decodes all frames of each video and adds "tensor" (dicts holding the
+    # frame tensor and video metadata: fps, total frame count, duration, and frame indices 0..N-1), "array" (same but
+    # with a NumPy frame array), and "video_decoder" (a fresh decoder per path).
+    # KNOWN ISSUE: The docstring does not mention the returned "video_decoder" key, and n above 2 silently yields only
+    # two samples.
     """Generate sample video data in multiple formats.
 
     Returns:
@@ -399,6 +452,11 @@ def get_sample_video(n: int = 2) -> dict[str, list[Any]]:
 def get_sample_messages(
     n: int = 2, text_format: str = "text", message_format: str = "structured"
 ) -> list[list[dict[str, Any]]]:
+    # [FUNCTION DOC]
+    # HELPER: Builds n chat-format samples, each a one-message conversation with role "user". Inputs: n, the text
+    # format key to pull from the sample text generator (falls back to "text" if missing), and the message format.
+    # "structured" makes content a list with one dict of type "text" holding the text; "flat" makes content the raw
+    # string. Raises ValueError for any other message format. Returns the list of conversations.
     """Generate sample message data (chat format with text).
 
     Args:
@@ -426,6 +484,9 @@ def get_sample_messages(
 
 
 def get_sample_text_pairs(n: int = 2) -> dict[str, list[tuple[str, str]]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a dict with key "text_pair" mapping to n (query, document) tuples of the form "Query i",
+    # "Document i".
     """Generate sample text pair data for cross-encoder style testing."""
     return {
         "text_pair": [(f"Query {i}", f"Document {i}") for i in range(n)],
@@ -433,6 +494,13 @@ def get_sample_text_pairs(n: int = 2) -> dict[str, list[tuple[str, str]]]:
 
 
 def create_modality_pair_samples(model: Transformer, modalities: list[str], n: int = 2) -> dict[str, list[tuple]]:
+    # [FUNCTION DOC]
+    # HELPER: Builds pair inputs (for cross-encoder style models) for every supported modality combination. Inputs:
+    # the model (unused), the list of supported modalities (strings; non-string entries and "message" are excluded
+    # from the per-modality list), and n. If "text" is supported, adds key "text+text pair" with the text pairs. If
+    # "message" is supported, takes the first format variant of each modality that has a generator and, for every
+    # ordered pair of those modalities (including same-modality pairs, but skipping text with text), zips the two
+    # sample lists into pairs under the key "A+B pair (formatA, formatB)". Returns the dict of description to pairs.
     """Create test pair samples for all supported modality combinations.
 
     Generates pairs for:
@@ -505,6 +573,20 @@ MODALITY_SAMPLE_GENERATORS = {
 def create_modality_samples(
     model: Transformer, modalities: list[str], n: int = 2, message_format: str = "structured"
 ) -> dict[str, list[Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Builds single-input samples for every supported modality and combination. Inputs: the model (unused),
+    # the modality list (strings are single modalities except "message"; tuples/lists denote explicit multimodal
+    # combinations), n, and the message format. Produces keys:
+    # 1. "modality (format)" for every format variant of every single modality with a generator.
+    # 2. For every combination of two or more single modalities, "a+b (fmtA, fmtB)" mapping to n dicts keyed by
+    # modality, using each modality's first format variant.
+    # 3. For each explicit multimodal tuple, the same kind of entry, added only if that key is not already present.
+    # 4. If "message" is supported: text messages ("message (text, structured)" and/or "message (text, flat)"
+    # depending on the message format; both for any value other than structured/flat); for each non-text modality,
+    # a structured message whose content item has that modality as type and the first format sample as value,
+    # under "modality as message (structured, fmt)"; and for every pair of single modalities, a structured
+    # message with one content item per modality under "a+b as message (structured, fmtA, fmtB)".
+    # Returns the dict. Raises KeyError if a combined modality has no generator.
     """Create test samples for all supported modalities and their combinations.
 
     Generates samples for:
@@ -650,6 +732,12 @@ def create_modality_samples(
 
 
 def get_arch_kwargs(arch: str, transformer_task: str) -> tuple[dict, dict, dict, dict]:
+    # [FUNCTION DOC]
+    # HELPER: Returns per-architecture overrides needed for tiny checkpoints to run, as four dicts: model kwargs
+    # (always ignoring mismatched sizes), config kwargs, processor kwargs, and processing kwargs (per-modality
+    # preprocessing options). Inputs: architecture key and transformer task. Applies a fixed set of hard-coded tweaks
+    # (e.g. image token id for blip-2, image sizes for flava, decoder mode for reformer text generation, video frame
+    # count for gemma4, padding to max length for mra).
     """Get model_kwargs, config_kwargs, processor_kwargs, processing_kwargs for a given architecture.
 
     Returns:
@@ -696,6 +784,14 @@ def get_arch_kwargs(arch: str, transformer_task: str) -> tuple[dict, dict, dict,
 
 
 def load_transformer(arch: str, transformer_task: str = "feature-extraction", **extra_kwargs) -> Transformer:
+    # [FUNCTION DOC]
+    # HELPER: Loads a Sentence Transformers Transformer module for an architecture. Inputs: architecture key (looked
+    # up in the tiny model mapping; KeyError if absent), the transformer task (default feature extraction), and extra
+    # keyword arguments forwarded to the Transformer constructor. First tries loading with local-files-only set on
+    # model, config and processor kwargs (cache only); on any exception retries allowing downloads. Then, if the module
+    # has a tokenizer, sets missing tokenizer pad/eos token ids to 0 and missing pad/eos token ids on the model config
+    # and its text sub-config to 0. For text-generation and any-to-any tasks, replaces a generation-config pad token id
+    # of -1 with the eos token id. Returns the module.
     """Load a Transformer model for the given architecture and task.
 
     Args:
@@ -754,6 +850,11 @@ def load_transformer(arch: str, transformer_task: str = "feature-extraction", **
 
 
 def modify_processor_for_pairs(model: Transformer):
+    # [FUNCTION DOC]
+    # HELPER: Mutates the processor's chat template string in place so it accepts "query" and "document" roles
+    # wherever it compared against "user", and removes several hard-coded role-alternation exception statements
+    # (for gemma3, ministral3, llama and cohere2 templates). Input: the Transformer module; returns nothing. Raises
+    # AttributeError if the processor has no chat template string.
     model.processor.chat_template = (
         model.processor.chat_template.replace('== "user"', 'in ["user", "query", "document"]')
         .replace("== 'user'", "in ['user', 'query', 'document']")

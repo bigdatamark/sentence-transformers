@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: evaluate a SentenceTransformer (name or path from the first CLI arg, required) on the AskUbuntu reranking task.
+# Loads the dev and test splits, drops rows without positives, and runs a RerankingEvaluator on each, logging results.
+# Side effects: network downloads, logging, evaluator result files.
 """
 This scripts runs the evaluation (dev & test) for the AskUbuntu dataset
 

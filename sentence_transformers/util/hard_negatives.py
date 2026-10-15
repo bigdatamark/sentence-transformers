@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Hard negative mining for (anchor, positive) datasets. A bi-encoder embeds de-duplicated queries
+# and a de-duplicated corpus (positives plus an optional extra corpus), retrieves the top
+# candidates per query (exact torch top-k in chunks, or a faiss inner-product index, possibly on
+# GPUs), optionally rescores with a cross-encoder, filters candidates by positives, margins and
+# score bounds, selects negatives by rank window and strategy, and builds a Hugging Face Dataset
+# in one of several output layouts. Prints statistics to stdout when verbose; logs warnings.
 from __future__ import annotations
 
 import hashlib
@@ -53,6 +60,45 @@ def mine_hard_negatives(
     as_triplets: bool | None = None,
     margin: float | None = None,
 ) -> Dataset:
+    # [FUNCTION DOC]
+    # Mines hard negatives and returns a new datasets.Dataset.
+    # Validation: raises ImportError if datasets (or faiss when use_faiss) is missing; ValueError for an
+    # empty dataset, non-positive faiss_batch_size, invalid output_format, num_negatives below 1,
+    # negative range_min, range_min not below range_max, or a window too small for num_negatives.
+    # Column choice: anchor/positive column names default to the first/second dataset column when
+    # missing or not present. Deprecations: as_triplets maps to "triplet"/"n-tuple"; margin maps to
+    # absolute_margin; "n-tuple-scores" maps to "n-tuple" with output_scores. include_positives forces
+    # "n-tuple" (with warnings).
+    # range_max default: range_min + num_negatives + max positives per query, or with 10 times
+    # num_negatives when any margin or max_score is set; with faiss on GPU capped so range_max plus
+    # max positives is at most 2048.
+    # Embedding: queries and corpus are de-duplicated preserving order; embeddings are L2-normalized
+    # numpy arrays from encode_query / encode_document with the respective prompts, optionally in a
+    # multi-process pool. With cache_folder, embeddings are loaded from / saved to .npy files named by
+    # a SHA-256 of (model base name, prompt, prompt name, texts).
+    # Retrieval: k = range_max + max positives candidates per query; the torch path uses
+    # model.similarity in query chunks and pads missing columns with index -1 and score -infinity.
+    # Positive scores are computed pairwise for each (unique query, unique positive) in grouped order.
+    # If a cross-encoder is given and a margin or max_score is set, all candidate scores and positive
+    # scores are replaced by cross-encoder predictions.
+    # Filtering (setting scores to -infinity and counting skips): padded candidates; positives of the
+    # query unless include_positives; absolute margin (candidate + margin greater than the query's
+    # smallest positive score); relative margin (candidate greater than smallest positive minus its
+    # absolute value times the margin); max_score; min_score.
+    # Selection: top range_max by score, drop the first range_min, then either the first num_negatives
+    # ("top") or a random sample among the finite-scored options (at least num_negatives), re-sorted
+    # descending.
+    # Output: "triplet" one row per (anchor, positive, finite negative), optional [pos, neg] scores;
+    # "labeled-pair" rows for each positive (label 1 / score) and each finite negative (label 0 /
+    # score); "n-tuple" one row per (anchor, positive) having all negatives finite, columns negative_1..n,
+    # optional scores list; "labeled-list" anchor, a list of positive then finite negatives, and labels
+    # or scores. Verbose mode prints count/mean/median/std/min/quartiles/max of positive, negative and
+    # difference scores, skip counts, and how many samples lacked enough negatives.
+    # KNOWN ISSUE: the "Dataset must contain exactly two columns" check can never trigger, because both column names were already filled in from the first two columns just before it.
+    # KNOWN ISSUE: the cache hash uses model_card_data.base_model, which is often empty for local or unnamed models, so embeddings cached for one such model can be reused for a different model.
+    # KNOWN ISSUE: the cross-encoder is only used when a margin or max_score is set; with only min_score (or no filters) it is silently ignored.
+    # KNOWN ISSUE: the "average positives per query" message is printed even when verbose is False.
+    # KNOWN ISSUE: with include_positives, absolute_margin, relative_margin and min_score filters can still remove the positives, yet the warning only mentions range_min, range_max, max_score, margin and sampling_strategy.
     """
     Add hard negatives to a dataset of (anchor, positive) pairs to create (anchor, positive, negative) triplets or
     (anchor, positive, negative_1, ..., negative_n) tuples.

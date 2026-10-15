@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for sentence_transformers.util.misc: import_module_class (forwarding of auth token, revisions and cache
+# options to transformers' dynamic module loader, the trust_remote_code gate, and the direct-import fallback),
+# append_to_last_row for CSV result files, and similarity_fct_name rendering of scoring callables.
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -8,6 +12,10 @@ from sentence_transformers.util.misc import append_to_last_row, import_module_cl
 
 
 def test_import_module_class_forwards_token_to_dynamic_module():
+    # [FUNCTION DOC]
+    # Patches the dynamic module loader to return a fake class, imports a custom class ref with trust enabled,
+    # revision, code revision, token, cache folder and local-files-only, and asserts the loader was called once with
+    # token, cache_dir, local_files_only, revision and code_revision forwarded.
     """Custom remote modules in private repos require the auth token to be forwarded to
     `get_class_from_dynamic_module`. Without it, the modeling file fetch 401s, the OSError
     is silently swallowed, and the user gets a confusing ImportError instead of an auth
@@ -40,6 +48,9 @@ def test_import_module_class_forwards_token_to_dynamic_module():
 
 
 def test_import_module_class_sentence_transformers_namespace_skips_dynamic_loading():
+    # [FUNCTION DOC]
+    # Patches the dynamic loader and asserts importing a built-in sentence_transformers class never calls it and
+    # returns the real Pooling class.
     """Built-in `sentence_transformers.*` classes should never trigger the dynamic-module
     code path, even when token/trust_remote_code are passed.
     """
@@ -59,12 +70,17 @@ def test_import_module_class_sentence_transformers_namespace_skips_dynamic_loadi
 
 @pytest.mark.parametrize("trust_remote_code", [False, None])
 def test_import_module_class_local_path_without_trust_raises(tmp_path, monkeypatch, trust_remote_code):
+    # [FUNCTION DOC]
+    # Parametrized over trust False/None; replaces the dynamic loader with one that fails the test, and asserts
+    # importing a custom class for a local directory without trust raises a ValueError mentioning trust_remote_code.
     """A local model directory is no longer implicitly trusted (#3801): a non-ST custom class requires
     `trust_remote_code=True` regardless of where the model lives, and dynamic loading is never attempted
     without it. A forwarded None stays falsy rather than triggering transformers' interactive prompt.
     """
 
     def fail_get_class(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Always raises AssertionError saying dynamic loading must not be attempted.
         raise AssertionError("dynamic loading must not be attempted without trust_remote_code=True")
 
     monkeypatch.setattr("transformers.dynamic_module_utils.get_class_from_dynamic_module", fail_get_class)
@@ -77,12 +93,17 @@ def test_import_module_class_local_path_without_trust_raises(tmp_path, monkeypat
 
 
 def test_import_module_class_untrusted_hub_ref_raises(monkeypatch):
+    # [FUNCTION DOC]
+    # Asserts an arbitrary dotted class ref for a Hub repo without trust raises a ValueError mentioning
+    # trust_remote_code and never reaches the dynamic loader.
     """A non-ST class ref without `trust_remote_code=True` is refused outright: no dynamic loading, and
     no direct-import fallback that would resolve an arbitrary dotted path from a model's `modules.json`
     `type`. The refusal also keeps the test hermetic (no Hub request).
     """
 
     def fail_get_class(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Always raises AssertionError saying dynamic loading must not be attempted.
         raise AssertionError("dynamic loading must not be attempted without trust_remote_code=True")
 
     monkeypatch.setattr("transformers.dynamic_module_utils.get_class_from_dynamic_module", fail_get_class)
@@ -96,11 +117,16 @@ def test_import_module_class_untrusted_hub_ref_raises(monkeypatch):
 
 @pytest.mark.parametrize("use_local_path", [True, False])
 def test_import_module_class_trusted_fallback_imports_directly(tmp_path, monkeypatch, use_local_path):
+    # [FUNCTION DOC]
+    # Parametrized over local path vs Hub id; makes the dynamic loader raise OSError and asserts a trusted ref
+    # falls back to a direct import resolving to the standard ordered dict class.
     """A trusted ref whose dynamic load fails falls through to the direct import, for local directories
     and Hub repos alike.
     """
 
     def raise_oserror(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Always raises OSError for a missing modeling file.
         raise OSError("no modeling file in repo")
 
     monkeypatch.setattr("transformers.dynamic_module_utils.get_class_from_dynamic_module", raise_oserror)
@@ -117,6 +143,8 @@ def test_import_module_class_trusted_fallback_imports_directly(tmp_path, monkeyp
 
 
 def test_import_module_class_without_model_name_needs_no_trust():
+    # [FUNCTION DOC]
+    # Asserts that with no model path a dotted class ref is imported directly without requiring trust.
     """The trust gate only applies when a model is involved: a bare programmatic import
     (`model_name_or_path=None`) is the caller's own code choosing a class, so it needs no flag.
     """
@@ -128,6 +156,8 @@ def test_import_module_class_without_model_name_needs_no_trust():
 
 
 def test_import_module_class_local_path_with_trust_loads(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # Patches the dynamic loader to return a fake class and asserts a trusted local-path import returns it.
     """Passing `trust_remote_code=True` is the explicit opt-in that v6.0 requires, so the dynamic
     load runs and its class is returned.
     """
@@ -169,6 +199,10 @@ def test_import_module_class_local_path_with_trust_loads(tmp_path, monkeypatch):
     ],
 )
 def test_append_to_last_row(tmp_path, content, additional_data, expected_return, expected_content):
+    # [FUNCTION DOC]
+    # Parametrized over CSV byte contents and values; writes the content to a temp file, asserts the return value
+    # (True only when there is a header plus at least one data row) and that the file now equals the expected
+    # bytes (values appended comma-separated to the last data row, CRLF endings preserved, or unchanged).
     """Only writes when there's a header plus at least one data row, and then appends every value
     to that row. Otherwise it no-ops and leaves the file untouched.
     """
@@ -180,10 +214,16 @@ def test_append_to_last_row(tmp_path, content, additional_data, expected_return,
 
 
 class TestSimilarityFctName:
+    # [CLASS DOC]
+    # Groups tests for similarity_fct_name, which renders a loss's similarity callable as a string for model cards.
     """``similarity_fct_name`` is what puts a loss's scoring callable into the model card. Every
     other test reaches it through a loss's ``get_config_dict``, so the fallbacks are unpinned."""
 
     def test_renders_plain_functions_configured_objects_and_partials(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a plain function renders as its name, an object with a config dict renders as its class name with
+        # keyword settings, a keyword-bound partial renders as a call with its keywords, and a bare partial as the
+        # function name.
         from functools import partial
 
         from sentence_transformers.multi_vector_encoder.scoring import XTRScores, colbert_scores
@@ -199,6 +239,8 @@ class TestSimilarityFctName:
         assert similarity_fct_name(partial(colbert_scores)) == "colbert_scores"
 
     def test_positionally_bound_partials_lose_their_settings(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a partial with only a positional binding renders as just the function name (settings dropped).
         """Known limitation: only ``keywords`` are rendered, so a positional binding is invisible in
         the model card. Harmless for the scoring signature, where the leading positionals are the
         embeddings, but pinned so a change is deliberate."""
@@ -209,9 +251,16 @@ class TestSimilarityFctName:
         assert similarity_fct_name(partial(maxsim, "queries")) == "maxsim"
 
     def test_falls_back_to_the_type_name(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a callable object without a config dict renders as its type name, using a locally defined scorer
+        # class.
         from sentence_transformers.util import similarity_fct_name
 
         class _Scorer:
+            # [CLASS DOC]
+            # HELPER: Minimal callable scorer class with a no-op call method taking two arguments.
             def __call__(self, a, b): ...
+                # [FUNCTION DOC]
+                # HELPER: Accepts two arguments and does nothing, returning None.
 
         assert similarity_fct_name(_Scorer()) == "_Scorer"

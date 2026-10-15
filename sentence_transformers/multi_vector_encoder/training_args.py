@@ -1,3 +1,4 @@
+# [MODULE DOC] Training arguments dataclass for MultiVectorEncoder training.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,6 +9,10 @@ from sentence_transformers.base.training_args import BaseTrainingArguments
 
 @dataclass
 class MultiVectorEncoderTrainingArguments(BaseTrainingArguments):
+    # [CLASS DOC] Dataclass extending BaseTrainingArguments with one field, max_length: either None (use model settings),
+    # an int applied to every column, or a dict mapping task names (e.g. "query", "document") to maximum token
+    # lengths. It only affects tokenization of training and evaluation-loss batches. "max_length" is added to
+    # the list of fields that may be given as dicts (so dict values are parsed from strings/CLI as in the base).
     """Training arguments for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` training.
 
     Inherits all fields from :class:`~sentence_transformers.base.training_args.BaseTrainingArguments`, and adds:

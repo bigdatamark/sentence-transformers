@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Sparse multiple negatives ranking (InfoNCE) loss, reusing the dense MultipleNegativesRankingLoss
+# computation on sparse embeddings. Must be wrapped in SpladeLoss or CSRLoss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -11,6 +14,12 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
+    # [CLASS DOC]
+    # MultipleNegativesRankingLoss subclass for SparseEncoder models. The inherited
+    # compute_loss_from_embeddings treats the first column as queries and the remaining columns as
+    # documents (positive then hard negatives), scores them with the scaled similarity function (dot
+    # product by default) in the chosen directions, and applies cross-entropy with the paired positive
+    # as target.
     def __init__(
         self,
         model: SparseEncoder,
@@ -25,6 +34,13 @@ class SparseMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         hardness_mode: Literal["in_batch_negatives", "hard_negatives", "all_negatives"] | None = None,
         hardness_strength: float = 0.0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initializes the parent with the model, scale (default 1.0), similarity function, cross-device
+        # gathering flag, interaction directions, partition mode (joint or per-direction softmax) and the
+        # hardness weighting mode and strength.
+        # KNOWN ISSUE: The docstring refers to SparseCachedMultipleNegativesRankingLoss and
+        # SparseGISTEmbedLoss, which this package does not provide, and does not document hardness_mode or
+        # hardness_strength.
         """
         Given a dataset of (anchor, positive) pairs, (anchor, positive, negative) triplets, or (anchor, positive, negative_1, ..., negative_n)
         n-tuples, this loss implements a contrastive learning objective that encourages the model to produce similar
@@ -139,6 +155,8 @@ class SparseMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         )
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError(
             "SparseMultipleNegativesRankingLoss should not be used alone. Use it with SpladeLoss or CSRLoss."
         )

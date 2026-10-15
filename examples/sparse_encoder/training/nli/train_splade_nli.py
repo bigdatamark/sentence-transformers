@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Example script: finetune the naver/splade-cocondenser-ensembledistil sparse encoder on AllNLI pair-score data with
+# SpladeLoss wrapping SparseMultipleNegativesRankingLoss (dot similarity, scale 1) and only a document FLOPS regularizer
+# (weight 3e-3). Running as a script calls main().
 """
 This example trains a SparseEncoder for the SNLI + MultiNLI (AllNLI) dataset.
 The training script fine-tunes a SparseEncoder using the Splade loss function for retrieval.
@@ -31,6 +35,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads the model (fp32, dot similarity, max length 256), 10k train and 1k
+    # dev rows of AllNLI pair-score, evaluates STSb validation with SparseEmbeddingSimilarityEvaluator (cosine) before and
+    # during training, and trains 1 epoch (batch 16, lr 4e-6, bf16, NO_DUPLICATES, eval/save every 120 steps, seed 42, best
+    # model by STS dev Spearman cosine loaded at the end). Evaluates STSb test, saves to models/<model>-nli/final and tries a
+    # Hub push. Side effects: network, disk, GPU, logging.
+    # KNOWN ISSUE: the upload-failure message tells the user to load the model with CrossEncoder instead of SparseEncoder.
     model_name = "naver/splade-cocondenser-ensembledistil"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests CachedMultipleNegativesRankingLoss (GradCache variant of MultipleNegativesRankingLoss) and the shared gradcache helpers: gradient
+# and loss parity with the plain loss, RandContext RNG replay (CPU and MPS), mini-batch slicing of mixed-modality vision features,
+# backward-compatible attributes/config and assignable hyperparameters, Matryoshka composition, legacy import paths, token-budget
+# mini-batching, and the cross-device gather offset.
 from __future__ import annotations
 
 from contextlib import nullcontext
@@ -94,6 +99,12 @@ def test_cmnrl_same_grad(
     scaler: float,
     precision: float,
 ):
+    # [FUNCTION DOC]
+    # Parametrized over three cases: identical samples (expect same loss and gradients), different samples (expect different loss and not all
+    # gradients close), and identical samples with the loss scaled by 1000 (looser precision). Loads distilbert-base-uncased (network) on CPU,
+    # seeds, computes MultipleNegativesRankingLoss times the scaler on (query, positive, negative) columns with zero labels and records gradients,
+    # then repeats with the cached loss (mini-batch 2). Asserts loss equality or inequality within precision, and counts parameters whose
+    # gradients are close: all must be close for same_grad, otherwise not all. Uses a tqdm progress bar over parameter names.
     # Given:
     model = SentenceTransformer("distilbert/distilbert-base-uncased")
     model.to("cpu")
@@ -139,6 +150,9 @@ def test_cmnrl_same_grad(
 
 @pytest.mark.parametrize("use_rand_context", [True, False])
 def test_rand_context_working(use_rand_context: bool):
+    # [FUNCTION DOC]
+    # Parametrized over using RandContext or a null context. Captures the RNG state via RandContext over two tensors, draws 1000 random numbers,
+    # then inside the context draws again: with RandContext the draws must match (state replayed), without it they must differ.
     # Given:
     from sentence_transformers.base.losses.gradcache import RandContext
 
@@ -174,6 +188,10 @@ def test_rand_context_working(use_rand_context: bool):
     not torch.backends.mps.is_available(), reason="MPS must be available to test the MPS RandContext path."
 )
 def test_rand_context_mps(rand_context_path: str):
+    # [FUNCTION DOC]
+    # Skipped unless MPS is available. Parametrized over the RandContext re-exported by the cached MNRL and cached GIST modules (imported by
+    # dotted path). Constructs it over MPS tensors (must not raise), asserts entering the context replays the same MPS random draws, and that
+    # after a second entry and exit the outer MPS RNG state is restored unchanged.
     # Regression test for #3564: RandContext raised
     # "AttributeError: module 'torch.mps' has no attribute 'device'" for MPS tensors,
     # because torch.utils.checkpoint.get_device_states() does not support MPS.
@@ -201,6 +219,11 @@ def test_rand_context_mps(rand_context_path: str):
 
 
 class TestCreateMinibatchMixedModality:
+    # [CLASS DOC]
+    # Tests _create_minibatch and _get_batch_size on Qwen2-VL-style mixed-modality features: per-sample input ids and attention mask, one
+    # image_grid_thw row per image, pixel_values flattened over all visual tokens, and num_images_per_sample. Batch: sample 0 has two images
+    # (16 and 64 tokens, rows 0-80), sample 1 one image (24 tokens, rows 80-104), samples 2 and 3 are text only.
+    # KNOWN ISSUE: The class docstring says sample 1's tokens span 80-96, but its 4x6 grid gives 24 tokens, i.e. rows 80-104 as the tests assert.
     """Test _create_minibatch with mixed-modality batches (some samples have images, some don't).
 
     Simulates Qwen2-VL-style tensors where:
@@ -217,6 +240,9 @@ class TestCreateMinibatchMixedModality:
 
     @pytest.fixture
     def mixed_modality_features(self):
+        # [FUNCTION DOC]
+        # HELPER: Fixture building the 4-sample mixed-modality feature dict described above (sequence length 46, hidden size 16, arange-valued
+        # tensors so slices are identifiable), asserting the total visual token count is 104.
         batch_size = 4
         seq_len = 46
         hidden_dim = 16
@@ -246,9 +272,13 @@ class TestCreateMinibatchMixedModality:
         }
 
     def test_get_batch_size(self, mixed_modality_features):
+        # [FUNCTION DOC]
+        # Asserts the batch size is inferred as 4 (from per-sample tensors, not image rows).
         assert _get_batch_size(mixed_modality_features) == 4
 
     def test_minibatch_text_only_samples(self, mixed_modality_features):
+        # [FUNCTION DOC]
+        # Asserts slicing samples 2 to 4 gives their input ids and empty pixel_values and image_grid_thw (zero rows).
         """Slicing samples 2-3 (text only) should produce empty pixel_values and grid."""
         mb = _create_minibatch(mixed_modality_features, 2, 4)
         assert mb["input_ids"].shape == (2, 46)
@@ -257,6 +287,8 @@ class TestCreateMinibatchMixedModality:
         assert mb["image_grid_thw"].shape == (0, 3)
 
     def test_minibatch_single_image_sample(self, mixed_modality_features):
+        # [FUNCTION DOC]
+        # Asserts slicing sample 1 gives its input ids, its single grid row, and pixel rows 80 to 104.
         """Slicing sample 1 (1 image, 24 tokens) should get the correct pixel_values slice."""
         mb = _create_minibatch(mixed_modality_features, 1, 2)
         assert mb["input_ids"].shape == (1, 46)
@@ -268,6 +300,8 @@ class TestCreateMinibatchMixedModality:
         assert torch.equal(mb["pixel_values"], mixed_modality_features["pixel_values"][80:104])
 
     def test_minibatch_multi_image_sample(self, mixed_modality_features):
+        # [FUNCTION DOC]
+        # Asserts slicing sample 0 gives both of its grid rows and pixel rows 0 to 80.
         """Slicing sample 0 (2 images, 80 tokens) should get both images' pixel_values."""
         mb = _create_minibatch(mixed_modality_features, 0, 1)
         assert mb["input_ids"].shape == (1, 46)
@@ -279,6 +313,8 @@ class TestCreateMinibatchMixedModality:
         assert torch.equal(mb["pixel_values"], mixed_modality_features["pixel_values"][0:80])
 
     def test_minibatch_mixed_slice(self, mixed_modality_features):
+        # [FUNCTION DOC]
+        # Asserts slicing samples 1 to 3 gives two input rows but only sample 1's grid row and pixels.
         """Slicing samples 1-2 (one with image, one without) should get only sample 1's pixels."""
         mb = _create_minibatch(mixed_modality_features, 1, 3)
         assert mb["input_ids"].shape == (2, 46)
@@ -288,6 +324,8 @@ class TestCreateMinibatchMixedModality:
         assert torch.equal(mb["pixel_values"], mixed_modality_features["pixel_values"][80:104])
 
     def test_minibatch_full_batch(self, mixed_modality_features):
+        # [FUNCTION DOC]
+        # Asserts slicing the full batch returns all grid rows and pixel values unchanged.
         """Slicing the full batch should return everything unchanged."""
         mb = _create_minibatch(mixed_modality_features, 0, 4)
         assert mb["input_ids"].shape == (4, 46)
@@ -297,6 +335,9 @@ class TestCreateMinibatchMixedModality:
         assert torch.equal(mb["pixel_values"], mixed_modality_features["pixel_values"])
 
     def test_minibatch_grid_rows_coincides_with_batch_size(self):
+        # [FUNCTION DOC]
+        # Builds a 3-sample batch with three images distributed 2, 1, 0 (so image count equals batch size by coincidence) and asserts slicing uses
+        # num_images_per_sample: sample 0 gets two grid rows and 32 pixel rows, sample 1 one row and pixels 32 to 48, sample 2 nothing.
         """When num_images == batch_size by coincidence (e.g. 3 samples with [2,1,0] images),
         num_images_per_sample must be used instead of assuming one image per sample."""
         batch_size = 3
@@ -347,6 +388,10 @@ class TestCreateMinibatchMixedModality:
 
 
 def test_cmnrl_attributes_and_config_back_compat(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Constructs the cached loss with explicit scale, mini-batch size, directions, partition mode and hardness settings, and asserts each
+    # attribute (temperature equals one over scale, gathering off) and the exact config dict. Asserts a negative scale raises ValueError,
+    # and that a similarity function without a name (a functools partial) still yields a config entry containing "cos_sim".
     """CachedMultipleNegativesRankingLoss composes an inner MultipleNegativesRankingLoss, but
     the documented attributes and ``get_config_dict`` keys must keep working as before the rebase."""
     from functools import partial
@@ -395,6 +440,9 @@ def test_cmnrl_attributes_and_config_back_compat(stsb_bert_tiny_model: SentenceT
 
 @pytest.mark.parametrize("mini_batch_size", [2, 3])
 def test_cmnrl_matryoshka(stsb_bert_tiny_model: SentenceTransformer, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mini-batch sizes. Wraps cached and plain MNRL in MatryoshkaLoss (dims 128, 64, 32) and asserts non-trivial, matching
+    # losses and gradients (looser absolute tolerance).
     """``MatryoshkaLoss(CachedMultipleNegativesRankingLoss(...))``, the combination the visual document
     retrieval example ships with, must match ``MatryoshkaLoss(MultipleNegativesRankingLoss(...))``.
 
@@ -414,6 +462,8 @@ def test_cmnrl_matryoshka(stsb_bert_tiny_model: SentenceTransformer, mini_batch_
     dims = [128, 64, 32]
 
     def loss_and_grads(inner: torch.nn.Module) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, runs MatryoshkaLoss around the inner loss on fresh features, backpropagates, and returns loss and gradients.
         model.zero_grad()
         features = [model.preprocess(anchors), model.preprocess(positives)]
         loss_value = MatryoshkaLoss(model, inner, matryoshka_dims=dims)(features, labels)
@@ -433,6 +483,9 @@ def test_cmnrl_matryoshka(stsb_bert_tiny_model: SentenceTransformer, mini_batch_
 
 
 def test_cmnrl_hyperparameters_stay_assignable(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts assigning scale on the wrapper updates the inner loss and temperature, and assigning an nn.Module similarity propagates to the
+    # inner loss without being registered as a submodule of the wrapper, and that get_config_dict still works.
     """The delegating properties must keep supporting assignment, as the plain attributes did before
     the rebase. That includes assigning an ``nn.Module`` similarity, which ``nn.Module.__setattr__``
     would otherwise capture into ``_modules`` without ever reaching the wrapped loss."""
@@ -453,6 +506,9 @@ def test_cmnrl_hyperparameters_stay_assignable(stsb_bert_tiny_model: SentenceTra
 
 
 def test_rand_context_stays_importable_from_this_module() -> None:
+    # [FUNCTION DOC]
+    # Asserts RandContext, _create_minibatch and _get_batch_size are still importable from the cached MNRL module and that RandContext is the
+    # same object as the canonical one in gradcache.
     """RandContext (and the mini-batching helpers) historically lived in this module and are copied
     around the ecosystem, so the extraction to gradcache.py must not break those imports."""
     from sentence_transformers.base.losses.gradcache import RandContext as CanonicalRandContext
@@ -466,6 +522,8 @@ def test_rand_context_stays_importable_from_this_module() -> None:
 
 
 def test_cmnrl_token_budget_matches_mnrl(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With varied-length texts and dropout disabled, asserts a 16-token budget yields the same loss and gradients as plain MNRL.
     """With ``mini_batch_num_tokens``, the embedding passes pack by token count, but the loss and gradient
     must still exactly match MultipleNegativesRankingLoss."""
     from tests.sentence_transformer.losses.utils import assert_trained, disable_dropout, gradients
@@ -479,6 +537,8 @@ def test_cmnrl_token_budget_matches_mnrl(stsb_bert_tiny_model: SentenceTransform
     labels = torch.zeros(6, dtype=torch.long)
 
     def loss_and_grads(loss_fn: torch.nn.Module) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, runs and backpropagates the loss on the texts, and returns loss and gradients.
         model.zero_grad()
         loss_value = loss_fn([model.preprocess(anchors), model.preprocess(positives)], labels)
         loss_value.backward()
@@ -494,6 +554,10 @@ def test_cmnrl_token_budget_matches_mnrl(stsb_bert_tiny_model: SentenceTransform
 
 
 def test_cmnrl_gather_across_devices_offset(stsb_bert_tiny_model: SentenceTransformer, monkeypatch) -> None:
+    # [FUNCTION DOC]
+    # Using all four directions with all-negatives hardness, computes a reference loss on a doubled batch without gathering, then monkeypatches
+    # the module's gather to duplicate the local block and rank to 1, computes the gathered loss on the local batch, and asserts it is finite
+    # and equal to the reference (exercising the offset-aware own-columns mask).
     """The ``gather_across_devices`` path has no other test. Simulate world=2/rank=1 by having
     ``all_gather_with_grad`` return ``[local; local]``: the gathered batch is the local block
     duplicated and ``offset = batch_size``, so the rank-1 loss (a mean over the local rows) equals

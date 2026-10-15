@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Reranking evaluator for MultiVectorEncoder models, adapting the generic RerankingEvaluator (which ranks
+# each query's positive and negative candidates and reports MAP, MRR@k, NDCG@k) to late-interaction
+# scoring and asymmetric query/document encoding.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -14,6 +18,10 @@ if TYPE_CHECKING:
 
 
 class MultiVectorRerankingEvaluator(RerankingEvaluator):
+    # [CLASS DOC]
+    # Subclass of RerankingEvaluator. Samples are dicts with a query, positive documents and negative documents.
+    # Remembers whether the user supplied a similarity function; if not, the scoring is derived from the model
+    # at call time using the model's own similarity.
     """Reranking evaluator for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` models.
 
     Scores each query's candidate documents with the model's multi-vector similarity (MaxSim by
@@ -73,6 +81,9 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
         show_progress_bar: bool = False,
         use_batched_encoding: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Record the user-provided similarity function (possibly None) and pass all arguments (samples, cutoff k,
+        # name, CSV flag, similarity function, batch size, progress bar, batched-encoding flag) to the parent.
         self._user_similarity_fct = similarity_fct
         super().__init__(
             samples=samples,
@@ -86,11 +97,19 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
         )
 
     def __call__(self, model: MultiVectorEncoder, *args, **kwargs) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Evaluate the model. When no user similarity was given, installs (mutating the evaluator) a scoring
+        # function that wraps the query embedding into a one-element list if it is not already a list and returns
+        # the model's all-pairs similarity between that query and the candidate documents (shape 1 by number of
+        # documents). Then delegates to the parent evaluation and returns its metrics dict.
         if self._user_similarity_fct is None:
             # The parent calls similarity_fct(query_emb, docs_emb) with the query as a single token
             # matrix (batched path) or a length-1 list (per-sample path): normalise to a one-query
             # batch for the model's all-pairs similarity.
             def one_to_many(query_embeddings: Tensor | list[Tensor], document_embeddings: list[Tensor]) -> Tensor:
+                # [FUNCTION DOC]
+                # HELPER: Score one query against many documents with the model's similarity, normalizing a bare query
+                # token matrix into a single-item list first. Returns a 1 by documents score tensor.
                 queries = query_embeddings if isinstance(query_embeddings, list) else [query_embeddings]
                 return model.similarity(queries, document_embeddings)
 
@@ -105,6 +124,10 @@ class MultiVectorRerankingEvaluator(RerankingEvaluator):
         show_progress_bar: bool | None = None,
         **kwargs,
     ) -> list[Tensor]:
+        # [FUNCTION DOC]
+        # Encode inputs: discards any truncation-dimension kwarg (unsupported), picks the query encoder, document
+        # encoder, or generic encoder by the encode function name, and calls it with the evaluator's batch size,
+        # the given progress-bar flag and remaining kwargs. Returns a list of per-input token embedding tensors.
         # MultiVectorEncoder.encode returns a ragged list[Tensor] and does not accept truncate_dim.
         kwargs.pop("truncate_dim", None)
         if encode_fn_name == "query":

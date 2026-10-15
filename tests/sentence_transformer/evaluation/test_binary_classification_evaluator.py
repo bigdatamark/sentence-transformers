@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests BinaryClassificationEvaluator: its static threshold search helpers for best F1 and best accuracy (checked against sklearn),
+# correct direction for distance metrics, max_* aggregation across several similarity functions, and CSV output column alignment.
 """
 Tests the correct computation of evaluation scores from BinaryClassificationEvaluator
 """
@@ -15,6 +18,9 @@ from sentence_transformers.sentence_transformer import evaluation
 
 
 def test_BinaryClassificationEvaluator_find_best_f1_and_threshold() -> None:
+    # [FUNCTION DOC]
+    # Generates 1000 random binary labels and random scores, finds the best-F1 threshold (higher score means similar), thresholds the
+    # scores at greater-or-equal, and asserts sklearn's F1 matches the returned best F1 within 1e-6. Non-seeded randomness.
     """Tests that the F1 score for the computed threshold is correct"""
     y_true = np.random.randint(0, 2, 1000)
     y_pred_cosine = np.random.randn(1000)
@@ -32,6 +38,8 @@ def test_BinaryClassificationEvaluator_find_best_f1_and_threshold() -> None:
 
 
 def test_BinaryClassificationEvaluator_find_best_accuracy_and_threshold() -> None:
+    # [FUNCTION DOC]
+    # Same as the F1 test but for the best-accuracy threshold search, comparing with sklearn's accuracy within 1e-6.
     """Tests that the Acc score for the computed threshold is correct"""
     y_true = np.random.randint(0, 2, 1000)
     y_pred_cosine = np.random.randn(1000)
@@ -48,6 +56,10 @@ def test_BinaryClassificationEvaluator_find_best_accuracy_and_threshold() -> Non
 
 @pytest.mark.parametrize("similarity_fn_name", ["euclidean", "manhattan"])
 def test_BinaryClassificationEvaluator_distance_metrics_direction(similarity_fn_name: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over euclidean and manhattan. Uses a mock encoder mapping fixed string keys to 2-D points forming two close pairs
+    # (distances 1 and 2, label 1) and two far pairs (distances 10 and 20, label 0). Asserts accuracy, F1, precision, recall, AP and MCC
+    # are all 1.0 and that the accuracy and F1 thresholds are the positive distance 6 (midpoint of 2 and 10).
     """The euclidean/manhattan metrics must treat smaller distances as more similar.
 
     ``pairwise_euclidean_sim``/``pairwise_manhattan_sim`` return negative distances (i.e.
@@ -68,7 +80,11 @@ def test_BinaryClassificationEvaluator_distance_metrics_direction(similarity_fn_
     }
 
     class MockEncoder:
+        # [CLASS DOC]
+        # HELPER: Minimal encoder exposing only an encode method.
         def encode(self, sentences, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Returns a float32 array of the predefined embeddings for the given sentence keys, ignoring extra keyword arguments.
             return np.array([embeddings[sentence] for sentence in sentences], dtype=np.float32)
 
     evaluator = evaluation.BinaryClassificationEvaluator(
@@ -97,6 +113,9 @@ def test_BinaryClassificationEvaluator_distance_metrics_direction(similarity_fn_
 def test_BinaryClassificationEvaluator_multiple_similarity_fn_names(
     stsb_bert_tiny_model: SentenceTransformer, similarity_fn_names: list[str]
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over similarity function lists that may omit cosine. Evaluates three labelled sentence pairs with the tiny model and
+    # asserts the primary metric is "max_ap" and each max_ metric equals the maximum of that metric across the requested functions.
     """Tests that the max_* aggregation does not assume that cosine was requested"""
     model = stsb_bert_tiny_model
     evaluator = evaluation.BinaryClassificationEvaluator(
@@ -116,6 +135,9 @@ def test_BinaryClassificationEvaluator_multiple_similarity_fn_names(
 def test_BinaryClassificationEvaluator_csv_columns_are_aligned(
     stsb_bert_tiny_model: SentenceTransformer, tmp_path, similarity_fn_names: list[str]
 ) -> None:
+    # [FUNCTION DOC]
+    # Evaluates with output to tmp_path, reads the written CSV, and asserts it has a header plus one data row with equal column counts
+    # (threshold metrics with extra underscores must not be dropped from the data row). Writes and reads a file.
     """The results CSV data row must have as many columns as the header row.
 
     The ``*_accuracy_threshold`` and ``*_f1_threshold`` metrics contain a second underscore, so a

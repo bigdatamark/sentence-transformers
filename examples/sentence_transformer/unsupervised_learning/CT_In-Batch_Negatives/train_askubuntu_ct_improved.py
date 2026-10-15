@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: Contrastive Tension with in-batch negatives (ContrastiveTensionLossInBatchNegatives) on AskUbuntu
+# questions, excluding those in the dev/test reranking sets. Model: distilbert-base-uncased, max length 75, mean pooling.
+# Trains on single-text rows, batch 128, 1 epoch, lr 5e-5, 10% warmup, fp16, eval every 10%, no checkpoints, evaluating
+# RerankingEvaluators on dev and test before training and test after. Saves to output/train_askubuntu_ct-improved-...-latest
+# and tries a Hub push. Side effects: network, disk, GPU, logging.
 import logging
 from datetime import datetime
 

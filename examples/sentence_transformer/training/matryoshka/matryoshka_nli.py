@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilroberta-base, or first CLI arg) on AllNLI triplets with
+# MatryoshkaLoss wrapping MultipleNegativesRankingLoss at dims 768/512/256/128/64. Batch size 128, 1 epoch, fp16,
+# NO_DUPLICATES sampler. During training a SequentialEvaluator runs one STSb-validation EmbeddingSimilarityEvaluator
+# per dim (truncate_dim set, named sts-dev-<dim>) and uses the first (largest dim) score as main score; eval/save
+# every 100 steps. Afterwards evaluates on STSb test per dim, saves to output/matryoshka_nli_<model>-<timestamp>/final
+# and tries to push "<model>-nli-matryoshka" to the Hub, logging manual instructions on failure.
+# Side effects: network, disk writes, INFO logging.
+# KNOWN ISSUE: the docstring says evaluation happens every 10% of training steps, but the code evaluates every 100 steps.
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with MatryoshkaLoss using MultipleNegativesRankingLoss. This trains a model at output dimensions [768, 512, 256, 128, 64].

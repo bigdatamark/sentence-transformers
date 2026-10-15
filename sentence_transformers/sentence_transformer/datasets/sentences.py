@@ -1,3 +1,4 @@
+# [MODULE DOC] Deprecated legacy dataset that simply wraps a list of InputExamples.
 """
 This file contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.
@@ -19,16 +20,20 @@ if TYPE_CHECKING:
 
 
 class SentencesDataset(Dataset):
+    # [CLASS DOC] HELPER: Thin map-style dataset over a list of examples. Attribute: examples.
     """
     DEPRECATED: This class is no longer used. Instead of wrapping your List of InputExamples in a SentencesDataset
     and then passing it to the DataLoader, you can pass the list of InputExamples directly to the dataset loader.
     """
 
     def __init__(self, examples: list[InputExample], model: SentenceTransformer):
+        # [FUNCTION DOC] Store the examples; the model argument is accepted for backwards compatibility and ignored.
         self.examples = examples
 
     def __getitem__(self, item):
+        # [FUNCTION DOC] Return the example at the given index.
         return self.examples[item]
 
     def __len__(self):
+        # [FUNCTION DOC] Return the number of examples.
         return len(self.examples)

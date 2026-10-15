@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Model card support for CrossEncoder: a training callback alias and a dataclass that fills in
+# cross-encoder-specific metadata, example pairs and the usage code snippet for the generated README.
+# Optionally imports the datasets library and its Image/Audio/Video feature types (each None if missing).
 from __future__ import annotations
 
 import logging
@@ -31,11 +35,18 @@ if TYPE_CHECKING:
 
 
 class CrossEncoderModelCardCallback(BaseModelCardCallback):
+    # [CLASS DOC]
+    # Model card training callback; identical to the base callback, existing only as a dedicated type.
     pass
 
 
 @dataclass
 class CrossEncoderModelCardData(BaseModelCardData):
+    # [CLASS DOC]
+    # Dataclass of model card data extending BaseModelCardData. Fields: task name (defaulted at registration
+    # from the label count), tags (sentence-transformers, cross-encoder, reranker), non-init usage examples
+    # (list of input pairs), IR-model flag fixed true, pipeline tag, template path (model_card_template.md next to
+    # this module) and the registered model.
     """A dataclass storing data used in the model card.
 
     Args:
@@ -98,6 +109,13 @@ class CrossEncoderModelCardData(BaseModelCardData):
     model: CrossEncoder | None = field(default=None, init=False, repr=False)
 
     def set_widget_examples(self, dataset: Dataset | DatasetDict) -> None:
+        # [FUNCTION DOC]
+        # Collect example pairs from a training/eval dataset (no Hub widget is produced, only usage examples). Uses
+        # the first split of a DatasetDict; returns without changes for iterable or empty datasets. Scans the first
+        # row's columns (skipping "dataset_name" and "label") for the first two that are text (a string or a list
+        # of strings) or have an image/audio/video feature type; returns if fewer than two. Takes the first five
+        # values of both columns; if the second column holds lists, instead pairs the first query with up to five
+        # items of its list. Stores the pairs as usage examples (mutation).
         """
         We don't set widget examples, but only load the prediction example.
         This is because the Hugging Face Hub doesn't currently have a Sentence Ranking
@@ -152,6 +170,10 @@ class CrossEncoderModelCardData(BaseModelCardData):
         self.usage_examples = [[query, answer] for query, answer in zip(queries, answers)]
 
     def register_model(self, model) -> None:
+        # [FUNCTION DOC]
+        # Register the model with the base class, then default the task name ("text reranking and semantic search"
+        # for one label, else "text pair classification") and pipeline tag ("text-ranking" or
+        # "text-classification").
         super().register_model(model)
 
         if self.task_name is None:
@@ -162,6 +184,11 @@ class CrossEncoderModelCardData(BaseModelCardData):
             self.pipeline_tag = "text-ranking" if model.num_labels == 1 else "text-classification"
 
     def run_usage_snippet(self) -> None:
+        # [FUNCTION DOC]
+        # Run the usage example. Defaults the usage examples to three egg-calorie query/passage pairs if unset.
+        # Returns early if widget generation is disabled. Otherwise prepares each pair element for inference (e.g.
+        # video decoders to dicts), predicts scores as numpy (model forward pass), and stores the printed scores
+        # at four decimals as comment-prefixed lines. Mutates the dataclass.
         if self.usage_examples is None:
             self.usage_examples = [
                 [
@@ -190,6 +217,12 @@ class CrossEncoderModelCardData(BaseModelCardData):
             self.similarities = "\n".join(f"# {line}" for line in str(scores).splitlines())
 
     def generate_usage_snippet(self) -> str:
+        # [FUNCTION DOC]
+        # Build the markdown usage snippet: a fenced Python block that loads the CrossEncoder (model id or a
+        # placeholder), lists the example pairs (display examples, usage examples, or the egg defaults), predicts
+        # scores and prints either the recorded scores or the expected shape (pairs by labels, or just pairs for a
+        # single label). For single-label models whose examples are all text, appends a rank call example using the
+        # first pair's query and every pair's second element as documents. Returns the snippet string.
         display = self.usage_examples_display or self.usage_examples
         examples = display or [
             [
@@ -267,6 +300,8 @@ class CrossEncoderModelCardData(BaseModelCardData):
         return "```python\n" + "\n".join(lines) + "\n```"
 
     def get_model_specific_metadata(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the base model-specific metadata plus the model's number of labels.
         metadata = super().get_model_specific_metadata()
         metadata.update(
             {

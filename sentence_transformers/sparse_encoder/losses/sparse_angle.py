@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Sparse AnglE loss: the CoSENT ranking objective using the angle-based pairwise similarity
+# instead of cosine similarity, for sparse encoders.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -10,7 +13,14 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseAnglELoss(SparseCoSENTLoss):
+    # [CLASS DOC]
+    # SparseCoSENTLoss subclass that uses pairwise_angle_sim as the similarity function. Must be
+    # wrapped in SpladeLoss or CSRLoss, which call compute_loss_from_embeddings.
     def __init__(self, model: SparseEncoder, scale: float = 20.0) -> None:
+        # [FUNCTION DOC]
+        # Initializes the CoSENT parent with the model, scale (inverse temperature, default 20) and the
+        # angle similarity function. Through the parent this also sets the model's similarity_fn_name to
+        # "cosine" (mutating the model).
         """
         This class implements AnglE (Angle Optimized).
         This is a modification of :class:`SparseCoSENTLoss`, designed to address the following issue:
@@ -83,4 +93,6 @@ class SparseAnglELoss(SparseCoSENTLoss):
         super().__init__(model, scale, similarity_fct=util.pairwise_angle_sim)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError("SparseAnglELoss should not be used alone. Use it with SpladeLoss or CSRLoss.")

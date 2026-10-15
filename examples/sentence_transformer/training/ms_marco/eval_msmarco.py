@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Script: evaluate a SentenceTransformer (name from first CLI arg, required) on MS MARCO dev retrieval.
+# Optional second arg N limits the corpus to roughly N*1000 passages, always keeping passages relevant to dev
+# queries (0/absent means full corpus). Builds qid->set(pid) relevance from mteb/msmarco dev qrels, dev query texts
+# from the queries split, and pid->passage from sentence-transformers/msmarco corpus (read in 10k batches, stripped),
+# then runs InformationRetrievalEvaluator (corpus chunk 100k, precision/recall at 10 and 100, name "msmarco dev").
+# Side effects: large dataset downloads, INFO logging, evaluator writes results.
 """
 This script runs the evaluation of an SBERT msmarco model on the
 MS MARCO dev dataset and reports different performance metrics for cosine similarity & dot-product.

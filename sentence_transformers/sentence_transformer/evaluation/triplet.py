@@ -1,3 +1,6 @@
+# [MODULE DOC] Triplet evaluator: for (anchor, positive, negative) triplets, measures the fraction where the anchor is more
+# similar to the positive than to the negative by more than a margin, for one or more similarity functions.
+# Anchors use the model's query encoder and positives/negatives its document encoder. Optionally writes CSV.
 from __future__ import annotations
 
 import csv
@@ -26,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 
 class TripletEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator state: anchors, positives, negatives (equal length), name, truncate_dim, main_similarity_function
+    # (optional SimilarityFunction selecting the primary metric), similarity_fn_names (subset of cosine, dot,
+    # manhattan, euclidean; empty means use the model's function at call time), margin (dict from function name
+    # to margin, defaults 0), batch_size, show_progress_bar, write_csv, CSV file name and headers.
+    # KNOWN ISSUE: The docstring says that without main_similarity_function all four similarity functions are used; the code uses similarity_fn_names, defaulting to the model's single similarity function.
     """
     Evaluate a model based on a triplet: (sentence, positive_example, negative_example).
     Checks if ``similarity(sentence, positive_example) > similarity(sentence, negative_example) + margin``.
@@ -105,6 +113,11 @@ class TripletEvaluator(BaseEvaluator):
         similarity_fn_names: list[Literal["cosine", "dot", "euclidean", "manhattan"]] | None = None,
         main_distance_function: str | SimilarityFunction | None = "deprecated",
     ):
+        # [FUNCTION DOC] Store inputs and assert equal lengths. The deprecated main_distance_function is used as the main similarity
+        # (with a warning) when given and no main similarity is set. Convert the main similarity to a SimilarityFunction
+        # (ValueError if invalid). Raise ValueError for unknown similarity names, unknown margin keys or a margin that
+        # is neither number, dict nor None. Build the margin dict (a number applies to all functions; a dict overrides
+        # the zero defaults). If show_progress_bar is None, enable it at INFO/DEBUG logging. Build CSV name and headers.
         super().__init__()
         self.anchors = anchors
         self.positives = positives
@@ -157,11 +170,13 @@ class TripletEvaluator(BaseEvaluator):
         self._append_csv_headers(self.similarity_fn_names)
 
     def _append_csv_headers(self, similarity_fn_names):
+        # [FUNCTION DOC] HELPER: Append an "accuracy_<fn>" CSV header for each given function name.
         for fn_name in similarity_fn_names:
             self.csv_headers.append(f"accuracy_{fn_name}")
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC] Alternate constructor from InputExamples using texts[0], texts[1], texts[2] as anchor, positive, negative.
         anchors = []
         positives = []
         negatives = []
@@ -175,6 +190,13 @@ class TripletEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Log a header; embed anchors with the query encoder and positives/negatives with the document encoder.
+        # Adopt the model's similarity function if none configured. For each known function compute pairwise
+        # anchor-positive and anchor-negative scores (distances as negative similarities) and accuracy as the mean of
+        # positive score greater than negative score plus the margin; store as "<fn>_accuracy" and log. Optionally
+        # write/append a CSV row of values. With several functions add max_accuracy. Primary metric: main function's
+        # accuracy if set, else max_accuracy for several functions, else the single function's accuracy. Returns
+        # name-prefixed metrics after storing them in model card data.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -243,6 +265,8 @@ class TripletEvaluator(BaseEvaluator):
         encode_fn_name: str | None = None,
         **kwargs,
     ) -> np.ndarray:
+        # [FUNCTION DOC] HELPER: Encode inputs to numpy with the query encoder ("query"), document encoder ("document") or generic
+        # encoder otherwise, using batch size, progress bar and truncation settings.
         if encode_fn_name == "query":
             encode_fn = model.encode_query
         elif encode_fn_name == "document":
@@ -259,6 +283,8 @@ class TripletEvaluator(BaseEvaluator):
         )
 
     def _get_similarity_functions(self) -> dict:
+        # [FUNCTION DOC] HELPER: Return a dict mapping "cosine", "dot", "manhattan", "euclidean" to functions that take anchor,
+        # positive and negative embeddings and return the pair of pairwise anchor-positive and anchor-negative scores.
         return {
             "cosine": lambda a, p, n: (pairwise_cos_sim(a, p), pairwise_cos_sim(a, n)),
             "dot": lambda a, p, n: (pairwise_dot_score(a, p), pairwise_dot_score(a, n)),
@@ -267,6 +293,7 @@ class TripletEvaluator(BaseEvaluator):
         }
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict with margin (only when any margin is non-zero) and truncate_dim when set.
         config_dict = {}
         if self.margin != {key: 0 for key in self._get_similarity_functions()}:
             config_dict["margin"] = self.margin

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Script, step 1 of the query-generation pipeline: synthesize training queries for Wikipedia programming paragraphs.
+# Downloads wiki-programmming-20210101.jsonl.gz (if missing), collects the unique paragraphs longer than 100 characters
+# (unordered set, then list), and uses the BeIR/query-gen-msmarco-t5-large-v1 T5 model (CUDA if available) to sample 5
+# queries per paragraph (nucleus sampling top_p 0.95, input truncated to 300 tokens, outputs up to 64) in batches of 8.
+# Writes generated_queries.tsv with one "query<TAB>paragraph" line per query (tabs replaced by spaces). Prints counts.
+# Side effects: network, disk writes, GPU.
+# KNOWN ISSUE: tokenizer.prepare_seq2seq_batch is deprecated and removed in recent transformers versions, and generation runs without disabling gradient tracking.
 """
 In this example we train a semantic search model to search through Wikipedia
 articles about programming articles & technologies.

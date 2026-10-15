@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Slow tests for SparseEncoder multi-process encoding (passing a list of devices, or an explicit pool from
+# start_multi_process_pool), comparing outputs to single-process encoding and checking output types and shapes
+# for empty input, single strings, chunk sizes and more workers than texts. Note: these can fail when the
+# OpenVINO backend has been imported in the same session, because it breaks pickling of a torch function.
 from __future__ import annotations
 
 import numpy as np
@@ -15,6 +20,9 @@ from .utils import sparse_allclose
 
 @pytest.mark.slow
 def test_multi_process_encode_same_as_standard_encode(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Encodes 15 texts normally (moved to CPU) and with two CPU worker processes, and asserts the sparse results
+    # match within 1e-5.
     model = splade_bert_tiny_model
     # Test that multi-process encoding gives the same result as standard encoding
     texts = ["First sentence.", "Second sentence.", "Third sentence."] * 5
@@ -31,6 +39,9 @@ def test_multi_process_encode_same_as_standard_encode(splade_bert_tiny_model: Sp
 
 @pytest.mark.slow
 def test_multi_process_pool(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Starts a two-CPU process pool, encodes 15 texts with it (always stopping the pool afterwards), and asserts a
+    # sparse tensor of shape texts by embedding dimension matching the standard encoding.
     # Test the start_multi_process_pool and stop_multi_process_pool functions
     model = splade_bert_tiny_model
     texts = ["First sentence.", "Second sentence.", "Third sentence."] * 5
@@ -55,6 +66,13 @@ def test_multi_process_pool(splade_bert_tiny_model: SparseEncoder):
 
 @pytest.mark.slow
 def test_multi_process_with_args(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # With a two-CPU pool (stopped in a finally block), encodes two texts with max 16 active dims and asserts a
+    # sparse tensor whose nonzero rows are exactly 16 entries of row 0 and 16 of row 1; then encodes without
+    # sparse conversion and asserts a dense tensor of the full shape.
+    # KNOWN ISSUE: The dense-output check asserts the type of the max-active-dims result instead of the
+    # non-sparse result (copy-paste error), so the second result's tensor type is never verified. Comments also
+    # mention normalization and precision options that are not exercised.
     # Test multi-process encoding with various arguments
     model = splade_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]
@@ -82,6 +100,8 @@ def test_multi_process_with_args(splade_bert_tiny_model: SparseEncoder):
 
 @pytest.mark.slow
 def test_multi_process_chunk_size(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Encodes 30 texts on two CPU workers with chunk size 5 and asserts a sparse tensor of the right shape.
     # Test explicit chunk_size parameter
     model = splade_bert_tiny_model
     texts = ["First sentence.", "Second sentence.", "Third sentence."] * 10
@@ -101,6 +121,9 @@ def test_multi_process_chunk_size(splade_bert_tiny_model: SparseEncoder):
 def test_multi_process_with_empty_texts(
     splade_bert_tiny_model: SparseEncoder, convert_to_tensor: bool, convert_to_sparse_tensor: bool
 ):
+    # [FUNCTION DOC]
+    # Parametrized over tensor and sparse-tensor conversion flags; asserts encoding an empty list with and without
+    # multi-processing returns the same type and both are empty.
     # Test encoding with empty texts
     model = splade_bert_tiny_model
     texts = []
@@ -128,6 +151,10 @@ def test_multi_process_with_empty_texts(
 def test_multi_process_with_single_string(
     splade_bert_tiny_model: SparseEncoder, convert_to_tensor: bool, convert_to_sparse_tensor: bool
 ):
+    # [FUNCTION DOC]
+    # Parametrized over the conversion flags; encodes a single string with and without two workers and asserts the
+    # same type, and the same shape for arrays/tensors, or for other containers the same length and, for dicts or
+    # lists of dicts, matching keys and close values.
     # Test encoding with a single text
     model = splade_bert_tiny_model
     texts = "This is a single sentence."
@@ -173,6 +200,8 @@ def test_multi_process_with_single_string(
 
 @pytest.mark.slow
 def test_multi_process_more_workers_than_texts(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Encodes two texts with three CPU workers and asserts a tensor of shape two by embedding dimension.
     # Test with more workers than texts
     model = splade_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]
@@ -186,6 +215,8 @@ def test_multi_process_more_workers_than_texts(splade_bert_tiny_model: SparseEnc
 
 @pytest.mark.slow
 def test_multi_process_with_large_chunk_size(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Encodes 20 texts with two workers and chunk size 30 (larger than the input) and asserts the output shape.
     # Test with a large chunk size
     model = splade_bert_tiny_model
     texts = ["First sentence.", "Second sentence."] * 10  # 20 sentences
@@ -203,6 +234,9 @@ def test_multi_process_with_large_chunk_size(splade_bert_tiny_model: SparseEncod
     not torch.cuda.is_available(), reason="CUDA must be available to experiment with 2 separate devices"
 )
 def test_multi_process_output_tensors_two_devices(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Encodes on a CPU and a CUDA worker and asserts a sparse CPU tensor of the right shape
+    # when converting to a tensor, or a list of per-text tensors otherwise.
     # Test with two separate devices
     model = splade_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]

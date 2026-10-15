@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# LambdaLoss framework for CrossEncoder listwise ranking, with pluggable pairwise weighting schemes
+# (none / RankNet, NDCG-Loss1, NDCG-Loss2, LambdaRank, NDCG-Loss2++). Shapes below: gain and discount are
+# queries by positions (positions ordered by predicted score), weights are queries by positions by positions
+# or broadcastable to it.
 from __future__ import annotations
 
 from typing import Literal
@@ -10,13 +15,20 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class BaseWeightingScheme(nn.Module):
+    # [CLASS DOC]
+    # Abstract weighting scheme module; subclasses map (gain, discount, labels sorted by prediction) to pairwise
+    # weights.
     """Base class for implementing weighting schemes in LambdaLoss."""
 
     def __init__(self, *args, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Pass any arguments to the torch module constructor.
         """"""
         super().__init__(*args, **kwargs)
 
     def forward(self, gain: Tensor, discount: Tensor, true_sorted: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Abstract; always raises NotImplementedError.
         """
         Calculate weights for the loss function.
 
@@ -32,13 +44,19 @@ class BaseWeightingScheme(nn.Module):
 
 
 class NoWeightingScheme(BaseWeightingScheme):
+    # [CLASS DOC]
+    # Weighting scheme that gives every pair weight 1 (yields the RankNet loss).
     """Implementation of no weighting scheme (weights = 1.0)."""
 
     def forward(self, gain: Tensor, discount: Tensor, true_sorted: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Return a scalar tensor 1.0 on the gain's device.
         return torch.tensor(1.0, device=gain.device)
 
 
 class NDCGLoss1Scheme(BaseWeightingScheme):
+    # [CLASS DOC]
+    # NDCG-Loss1 weighting: per-item gain divided by its position discount.
     """Implementation of NDCG Loss1 weighting scheme.
 
     It is used to optimize for the NDCG metric, but this weighting scheme is not recommended as the
@@ -47,10 +65,15 @@ class NDCGLoss1Scheme(BaseWeightingScheme):
     """
 
     def forward(self, gain: Tensor, discount: Tensor, true_sorted: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Return gain over discount with a trailing singleton axis (queries by positions by 1).
         return (gain / discount)[:, :, None]
 
 
 class NDCGLoss2Scheme(BaseWeightingScheme):
+    # [CLASS DOC]
+    # NDCG-Loss2 weighting: weight for positions i and j is the absolute difference of reciprocal discounts at
+    # offsets |i-j| and |i-j|+1 (the "delta" term), times the absolute gain difference.
     """Implementation of NDCG Loss2 weighting scheme.
 
     This scheme uses a tighter bound than NDCGLoss1Scheme and was shown to reach
@@ -59,6 +82,10 @@ class NDCGLoss2Scheme(BaseWeightingScheme):
     """
 
     def forward(self, gain: Tensor, discount: Tensor, true_sorted: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute 1-based position offsets |i-j|, look up reciprocal discounts at offsets minus one and at the offset
+        # from the first discount row, take their absolute difference (diagonal zeroed), and multiply by the absolute
+        # pairwise gain difference. Returns queries by positions by positions.
         pos_idxs = torch.arange(1, gain.shape[1] + 1, device=gain.device)
         delta_idxs = torch.abs(pos_idxs[:, None] - pos_idxs[None, :])
         deltas = torch.abs(
@@ -70,18 +97,25 @@ class NDCGLoss2Scheme(BaseWeightingScheme):
 
 
 class LambdaRankScheme(BaseWeightingScheme):
+    # [CLASS DOC]
+    # LambdaRank weighting: absolute difference of reciprocal discounts of the two positions times the absolute
+    # gain difference.
     """Implementation of LambdaRank weighting scheme.
 
     This weighting optimizes a coarse upper bound of NDCG.
     """
 
     def forward(self, gain: Tensor, discount: Tensor, true_sorted: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Return the pairwise absolute reciprocal-discount difference times the pairwise absolute gain difference.
         return torch.abs(torch.pow(discount[:, :, None], -1.0) - torch.pow(discount[:, None, :], -1.0)) * torch.abs(
             gain[:, :, None] - gain[:, None, :]
         )
 
 
 class NDCGLoss2PPScheme(BaseWeightingScheme):
+    # [CLASS DOC]
+    # NDCG-Loss2++ weighting: mu times NDCG-Loss2 weights plus LambdaRank weights. Attribute mu (default 10).
     """Implementation of NDCG Loss2++ weighting scheme.
 
     It is a hybrid weighting scheme that combines the NDCGLoss2 and LambdaRank schemes. It
@@ -89,18 +123,27 @@ class NDCGLoss2PPScheme(BaseWeightingScheme):
     """
 
     def __init__(self, mu: float = 10.0):
+        # [FUNCTION DOC]
+        # Store mu and create the NDCG-Loss2 and LambdaRank sub-schemes.
         super().__init__()
         self.mu = mu
         self.ndcg_loss2 = NDCGLoss2Scheme()
         self.lambda_rank = LambdaRankScheme()
 
     def forward(self, gain: Tensor, discount: Tensor, true_sorted: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Return mu times the NDCG-Loss2 weights plus the LambdaRank weights.
         ndcg_weights = self.ndcg_loss2(gain, discount, true_sorted)
         lambda_weights = self.lambda_rank(gain, discount, true_sorted)
         return self.mu * ndcg_weights + lambda_weights
 
 
 class LambdaLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: model, weighting scheme (default
+    # NDCG-Loss2++; None becomes no weighting), optional NDCG cutoff k, sigmoid scale sigma, epsilon, log base
+    # for the loss ("natural" or "binary"), activation (identity when None), and mini-batch size. Inputs: a
+    # query column, a column of per-query document lists, and per-query label tensors.
     def __init__(
         self,
         model: CrossEncoder,
@@ -112,6 +155,8 @@ class LambdaLoss(nn.Module):
         activation_fn: nn.Module | None = nn.Identity(),
         mini_batch_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store settings. Raises ValueError unless the model has exactly one output label.
         """
         The LambdaLoss Framework for Ranking Metric Optimization. This loss function implements the LambdaLoss framework for ranking metric optimization,
         which provides various weighting schemes including LambdaRank and NDCG variations.
@@ -222,6 +267,19 @@ class LambdaLoss(nn.Module):
         prompt: str | None = None,
         task: str | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss. Raises ValueError if labels are a single tensor, there are not exactly two columns, or
+        # per-query counts differ. Scores all pairs in chunks (mini-batch size, default number of queries;
+        # non-positive means all), applies the activation, and scatters into a padded logits matrix (padding a very
+        # large negative) and a label matrix (padding negative infinity). Sorts logits descending, gathers labels in
+        # predicted order, and also sorts labels descending. Valid pairs (i, j) are those with finite label
+        # difference, and additionally a strictly positive difference (label i above label j) unless the scheme is
+        # NDCG-Loss1. Restricts pairs to positions both within the top k (all positions when k is unset). Clamps
+        # labels at zero, discount is log2(1 + position), the ideal DCG at k is the sum of (2 to the label, minus 1)
+        # over discount for ideally sorted labels (clamped at epsilon), and gain is (2 to the label, minus 1) over
+        # ideal DCG. Computes scheme weights, pairwise score differences of sorted logits (clamped, NaN set to 0),
+        # then sigmoid(sigma times difference) clamped at epsilon raised to the weight power and clamped again.
+        # Takes natural or base-2 log, and returns the negative mean over the valid, in-cutoff pairs.
         """
         Compute LambdaLoss for a batch of queries and their documents.
 
@@ -328,6 +386,8 @@ class LambdaLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, float | int | str | None]:
+        # [FUNCTION DOC]
+        # Return the loss config: scheme qualified name, k, sigma, eps, log base, activation name, mini-batch size.
         """
         Get configuration parameters for this loss function.
 
@@ -346,6 +406,8 @@ class LambdaLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Wang et al. 2018 (LambdaLoss).
         return """
 @inproceedings{wang2018lambdaloss,
   title={The LambdaLoss Framework for Ranking Metric Optimization},

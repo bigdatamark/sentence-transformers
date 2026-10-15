@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines the Normalize module, which L2-normalises one tensor in the feature dict along its last dimension and stores
+# the result under a configurable key.
 from __future__ import annotations
 
 try:
@@ -12,6 +15,9 @@ from sentence_transformers.base.modules.module import Module
 
 
 class Normalize(Module):
+    # [CLASS DOC]
+    # L2 normalisation module. Attributes: module_input_name (feature key to read, default "sentence_embedding") and
+    # module_output_name (key to write, defaulting to the input key). Both are saved in the config.
     """L2-normalizes the embeddings under one of the feature keys to have unit length.
 
     By default operates on the pooled ``sentence_embedding`` produced by a
@@ -32,17 +38,24 @@ class Normalize(Module):
         module_input_name: str = "sentence_embedding",
         module_output_name: str | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the input key and the output key (input key when None).
         super().__init__()
         self.module_input_name = module_input_name
         self.module_output_name = module_output_name if module_output_name is not None else module_input_name
 
     def forward(self, features: dict[str, Tensor]) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # If the input key is present, writes the L2-normalised tensor (unit norm along the last dimension) under the output
+        # key; otherwise leaves the features untouched. Mutates and returns the feature dict.
         x = features.get(self.module_input_name)
         if x is not None:
             features[self.module_output_name] = F.normalize(x, p=2, dim=-1)
         return features
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Writes only the config file (there are no weights).
         self.save_config(output_path)
 
     @classmethod
@@ -56,6 +69,9 @@ class Normalize(Module):
         local_files_only: bool = False,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method: without a model path (legacy no-argument call) returns a default instance; otherwise loads the saved
+        # config from the path/subfolder and constructs the module from it.
         if not model_name_or_path:
             # Backward compatibility with the old no-arg signature: returns the default Normalize.
             return cls()

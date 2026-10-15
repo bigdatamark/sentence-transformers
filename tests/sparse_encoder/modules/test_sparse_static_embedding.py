@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for the SparseStaticEmbedding module used on the query side of inference-free SPLADE models:
+# padding invariance and save/load round-tripping.
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +13,9 @@ from tests.sparse_encoder.utils import sparse_allclose
 
 
 def test_sparse_static_embedding_padding_ignored(inference_free_splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Encodes two queries of different lengths as a batch and individually (stacked), both moved to CPU, and
+    # asserts the sparse results match within 1e-6, showing padding tokens do not contribute.
     model = inference_free_splade_bert_tiny_model
 
     input_texts = ["This is a test input", "This is a considerably longer test input to check padding behavior."]
@@ -29,6 +35,12 @@ def test_sparse_static_embedding_padding_ignored(inference_free_splade_bert_tiny
 def test_sparse_static_embedding_save_load(
     inference_free_splade_bert_tiny_model: SparseEncoder, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts the model's router query sub-module starts with a SparseStaticEmbedding, encodes two queries, saves
+    # the model to a temporary directory (file I/O), reloads it, and asserts the query embeddings match within
+    # 1e-6, the loaded model still has a SparseStaticEmbedding, and its weights equal the original weights.
+    # KNOWN ISSUE: The step meant to randomize the weights uses an equality comparison instead of an assignment,
+    # so it is a no-op and the weights are never randomized before saving.
     model = inference_free_splade_bert_tiny_model
 
     assert isinstance(model[0].sub_modules.query[0], SparseStaticEmbedding), "SparseStaticEmbedding component missing"

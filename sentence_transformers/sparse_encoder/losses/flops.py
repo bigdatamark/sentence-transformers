@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FLOPS regularization loss that pushes sparse embeddings toward sparsity by penalizing the squared
+# L2 norm of the batch-mean embedding, optionally ignoring embeddings with too few active elements.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -9,7 +12,12 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class FlopsLoss(nn.Module):
+    # [CLASS DOC]
+    # Regularizer module holding the model and an optional threshold on the number of non-zero
+    # elements. Only usable via compute_loss_from_embeddings, e.g. inside SpladeLoss.
     def __init__(self, model: SparseEncoder, threshold: float | None = None) -> None:
+        # [FUNCTION DOC]
+        # Stores the model and threshold.
         """
         FlopsLoss implements a regularization technique to promote sparsity in sparse encoder models.
         It calculates the squared L2 norm of the mean embedding vector, which helps reduce the number of floating-point
@@ -40,11 +48,17 @@ class FlopsLoss(nn.Module):
         self.threshold = threshold
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises NotImplementedError: use the loss as a regularizer within SpladeLoss.
         raise NotImplementedError(
             "FlopsLoss is not intended to be used directly. Use it as a regularizer within the SpladeLoss class."
         )
 
     def compute_loss_from_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Given a (batch, dim) embedding tensor, returns the sum over dimensions of the squared mean
+        # activation across the batch. If a threshold is set, rows whose count of non-zero values is not
+        # above it are zeroed first (but still count toward the mean).
         if self.threshold is not None:
             l0_norm = (embeddings != 0).sum(dim=1)
             mask = (l0_norm > self.threshold).float()
@@ -53,10 +67,14 @@ class FlopsLoss(nn.Module):
         return torch.sum(torch.mean(embeddings, dim=0) ** 2)
 
     def get_config_dict(self) -> dict:
+        # [FUNCTION DOC]
+        # Returns the config dict with threshold.
         return {"threshold": self.threshold}
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Property returning the BibTeX citation for the FLOPS paper.
         return """
 @article{paria2020minimizing,
     title={Minimizing flops to learn efficient sparse representations},

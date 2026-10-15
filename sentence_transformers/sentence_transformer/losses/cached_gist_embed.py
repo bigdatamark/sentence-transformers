@@ -1,3 +1,7 @@
+# [MODULE DOC] Cached GISTEmbed loss: the GISTEmbed guided in-batch-negatives contrastive loss combined with Gradient Cache,
+# so very large batches fit in memory. Embeddings are first computed without gradients in mini-batches, the
+# loss and its gradients with respect to the embeddings are computed and cached, and a backward hook later
+# re-embeds each mini-batch with gradients and injects the cached gradients.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
@@ -23,6 +27,13 @@ from sentence_transformers.util import all_gather_with_grad, get_rank
 
 
 class CachedGISTEmbedLoss(nn.Module):
+    # [CLASS DOC] Loss module. Class flags: requires_media_counts (lets the Transformer preprocess count media per sample for
+    # VLM mini-batching) and uses_gradient_cache (marks that it back-propagates from a hook). Attributes: model,
+    # guide (frozen guide model used to detect false negatives), temperature, similarity_fct (cosine along the last
+    # dim), mini_batch_size, mini_batch_num_tokens (optional token budget for packing mini-batches),
+    # show_progress_bar, must_retokenize (true when the tokenizer vocabularies differ or the guide's max sequence
+    # length is shorter) and tokenizer (the model tokenizer, only when retokenizing), margin_strategy, margin,
+    # contrast_anchors, contrast_positives, gather_across_devices, cross_entropy_loss.
     # Enables per-sample media counting in Transformer.preprocess for VLM minibatching
     requires_media_counts = True
 
@@ -43,6 +54,9 @@ class CachedGISTEmbedLoss(nn.Module):
         contrast_positives: bool = True,
         gather_across_devices: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Validate and store settings. Raises ValueError if the model starts with a static embedding module, if either
+        # model lacks a tokenizer or a transformers tokenizer, if mini_batch_num_tokens is invalid (via helper), or if
+        # margin_strategy is not "absolute" or "relative".
         """
         This loss is a combination of :class:`GISTEmbedLoss` and :class:`CachedMultipleNegativesRankingLoss`.
         Typically, :class:`MultipleNegativesRankingLoss` requires a larger batch size for better performance.
@@ -176,6 +190,8 @@ class CachedGISTEmbedLoss(nn.Module):
         self.cross_entropy_loss = nn.CrossEntropyLoss()
 
     def sim_matrix(self, embed1: Tensor, embed2: Tensor) -> Tensor:
+        # [FUNCTION DOC] HELPER: Return the matrix of cosine similarities between every row of the first and every row of the second
+        # embedding tensor.
         return self.similarity_fct(embed1.unsqueeze(1), embed2.unsqueeze(0))
 
     def embed_minibatch(
@@ -187,6 +203,12 @@ class CachedGISTEmbedLoss(nn.Module):
         copy_random_state: bool,
         random_state: RandContext | None = None,
     ) -> tuple[Tensor, Tensor | None, RandContext | None]:
+        # [FUNCTION DOC] Embed one mini-batch (rows begin to end) of a feature dict. Optionally runs inside a saved random state (so
+        # dropout is replayed) and, when copy_random_state is set, captures a new random state before the forward.
+        # Runs the model with or without gradients to get sentence embeddings. Without gradients it also computes
+        # guide embeddings with no gradients, first decoding token ids back to text and re-preprocessing with the
+        # guide (moved to the guide's device) when retokenization is needed. With gradients the guide embeddings are
+        # None. Returns (model embeddings, guide embeddings or None, random state or None).
         """Do forward pass on a minibatch of the input features and return corresponding embeddings."""
         grad_context = nullcontext if with_grad else torch.no_grad
         random_state_context = nullcontext() if random_state is None else random_state
@@ -221,6 +243,9 @@ class CachedGISTEmbedLoss(nn.Module):
         random_states: list[RandContext] | None = None,
         ranges: list[tuple[int, int]] | None = None,
     ) -> Iterator[tuple[Tensor, Tensor, RandContext | None]]:
+        # [FUNCTION DOC] Yield the result of embedding each mini-batch of a feature dict, using the given row ranges or computing
+        # them from mini_batch_size / mini_batch_num_tokens, passing the matching saved random state when provided.
+        # Shows an optional progress bar.
         """Do forward pass on all the minibatches of the input features and yield corresponding embeddings."""
         if ranges is None:
             ranges = _minibatch_ranges(sentence_feature, self.mini_batch_size, self.mini_batch_num_tokens)
@@ -244,6 +269,8 @@ class CachedGISTEmbedLoss(nn.Module):
     def calculate_loss_and_cache_gradients(
         self, reps: list[list[Tensor]], reps_guided: list[list[Tensor]]
     ) -> tuple[Tensor, list[list[Tensor]]]:
+        # [FUNCTION DOC] Compute the loss with backward passes per loss mini-batch, then return the detached loss (re-marked as
+        # requiring gradients so a hook can be attached) and the cached gradients of every embedding chunk.
         """Calculate the cross-entropy loss and return it alongside the gradients wrt. the embeddings."""
         loss = self.calculate_loss(reps, reps_guided, with_backward=True)
         loss = loss.detach().requires_grad_()
@@ -253,6 +280,17 @@ class CachedGISTEmbedLoss(nn.Module):
     def calculate_loss(
         self, reps: list[list[Tensor]], reps_guided: list[list[Tensor]], *, with_backward: bool = False
     ) -> Tensor:
+        # [FUNCTION DOC] Compute the GIST loss. Raises ValueError if the two lists differ in length. Concatenates model and guide
+        # chunks per column: column 0 are anchors, the rest are candidates (positive then negatives). If gathering
+        # across devices, candidates (model and guide) are gathered with gradient support and the label offset becomes
+        # rank times local batch size. Labels for anchor i are offset plus i. For each slice of anchors of size
+        # mini_batch_size: compute anchor-positive similarities with the model and with the guide; the guide's own
+        # positive similarity is the threshold. Candidate entries whose guide similarity exceeds the threshold minus
+        # margin ("absolute") or minus absolute threshold times margin ("relative") are set to negative infinity, except
+        # the true positive. Optionally adds masked anchor-anchor and positive-positive similarity blocks, and masked
+        # anchor-negative blocks for each negative column. Concatenates along columns, divides by temperature, applies
+        # cross-entropy against the labels, scaled by the slice size over the batch size. With with_backward each slice
+        # loss is back-propagated immediately and detached. Returns the summed loss.
         """Generalized function to calculate the cross-entropy loss without caching gradients."""
         if len(reps) != len(reps_guided):
             raise ValueError("reps and reps_guided must have the same length")
@@ -300,6 +338,9 @@ class CachedGISTEmbedLoss(nn.Module):
 
             # This uses guided (teacher) similarity as a dynamic threshold to identify and suppress false negatives
             def mask_false_negatives(guided_sim_mat, sim_mat, positive_mask: Tensor | None = None):
+                # [FUNCTION DOC] HELPER: Mask false negatives in a similarity matrix in place: positions where the guide similarity is above
+                # the current slice's positive threshold (adjusted by the margin per the strategy) get negative infinity,
+                # excluding positions in the optional positive mask. Returns the mutated matrix.
                 if self.margin_strategy == "absolute":
                     # Remove samples whose guided similarity is higher than (positive_sim - margin)
                     mask = guided_sim_mat > (guided_sim - self.margin)
@@ -364,6 +405,12 @@ class CachedGISTEmbedLoss(nn.Module):
         return loss
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Run the cached loss. Converts features to a list, computes mini-batch row ranges per column up front (reused
+        # for the replay). Embeds every mini-batch without gradients, storing detached model embeddings marked as
+        # requiring gradients, detached guide embeddings, and random states (only when gradients are enabled). If
+        # gradients are disabled, returns the plain loss. Otherwise computes the loss and cached gradients, registers
+        # a backward hook on the loss that re-embeds with gradients and back-propagates the cached gradients, and
+        # returns the loss.
         # Step (1): A quick embedding step without gradients/computation graphs to get all the embeddings
         sentence_features = list(sentence_features)
         grad_enabled = torch.is_grad_enabled()
@@ -419,6 +466,8 @@ class CachedGISTEmbedLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: guide model object, temperature, mini-batch settings, margin strategy and value, contrast
+        # flags and gather flag.
         return {
             "guide": self.guide,
             "temperature": self.temperature,

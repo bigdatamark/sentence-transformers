@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: download OPUS parallel corpora with OpusTools and write moses-format "src<TAB>trg" gzip TSV files to
+# parallel-sentences/<corpus>-<src>-<trg>.tsv.gz for every combination of corpora (JW300), source languages (en) and
+# target languages (de, es, it, fr, ar, tr). Skips files that already exist; raw OPUS downloads go to ./opus.
+# Any exception during creation is caught and a message is printed. Side effects: network, disk, stdout.
 """
 OPUS (http://opus.nlpl.eu/) is a great collection of different parallel datasets for more than 400 languages.
 On the website, you can download parallel datasets for many languages in different formats. I found that

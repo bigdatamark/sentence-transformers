@@ -1,3 +1,6 @@
+# [MODULE DOC] Deprecated cached symmetric multiple negatives ranking loss, now a thin preset of the cached MNRL loss with
+# query-to-doc and doc-to-query directions and per-direction normalization. Instantiating it emits a
+# deprecation warning (via the class decorator).
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -18,6 +21,9 @@ from sentence_transformers.sentence_transformer.model import SentenceTransformer
     "`partition_mode='per_direction'` instead."
 )
 class CachedMultipleNegativesSymmetricRankingLoss(CachedMultipleNegativesRankingLoss):
+    # [CLASS DOC] Deprecated subclass of CachedMultipleNegativesRankingLoss fixing the directions and partition mode; all
+    # behavior is inherited.
+    # KNOWN ISSUE: The docstring says the two directional losses are summed and that negatives in triplets are ignored; the inherited per-direction mode averages the two normalizers (i.e. averages the two losses), and extra negative columns are included as query-to-doc candidates.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -28,6 +34,8 @@ class CachedMultipleNegativesSymmetricRankingLoss(CachedMultipleNegativesRanking
         gather_across_devices: bool = False,
         show_progress_bar: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Forward the model, scale, similarity function, mini-batch settings, gather flag and progress bar to the parent
+        # with directions query_to_doc plus doc_to_query and partition mode per_direction.
         """
         .. warning::
 

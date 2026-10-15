@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for ReciprocalRankFusionEvaluator, which fuses dense and sparse retrieval rankings with reciprocal
+# rank fusion: primary metric naming and fusion scoring.
 from __future__ import annotations
 
 import json
@@ -6,6 +9,10 @@ from sentence_transformers.sparse_encoder.evaluation import ReciprocalRankFusion
 
 
 def _make_samples():
+    # [FUNCTION DOC]
+    # HELPER: Returns a pair of lists (dense samples, sparse samples) for two queries, each sample a dict with a
+    # query id, query text, positive document ids and a ranked document id list; the rankings differ between the
+    # dense and sparse lists.
     dense_samples = [
         {"query_id": "q1", "query": "a", "positive": ["d1"], "documents": ["d1", "d2", "d3"]},
         {"query_id": "q2", "query": "b", "positive": ["e1"], "documents": ["e2", "e1", "e3"]},
@@ -18,6 +25,9 @@ def _make_samples():
 
 
 def test_primary_metric_is_prefixed_and_present_with_name():
+    # [FUNCTION DOC]
+    # Builds the evaluator with name "my_eval", at_k 10 and no CSV, runs it, and asserts the primary metric is
+    # "my_eval_ndcg@10" and is a key in the returned results.
     """With a name, the returned metric keys are prefixed with it, so
     primary_metric must be updated to the prefixed key; otherwise the documented
     ``results[evaluator.primary_metric]`` access raises KeyError."""
@@ -35,6 +45,8 @@ def test_primary_metric_is_prefixed_and_present_with_name():
 
 
 def test_primary_metric_is_present_without_name():
+    # [FUNCTION DOC]
+    # Builds the evaluator without a name and asserts the primary metric is "ndcg@10" and is in the results.
     """Without a name the metric keys are unprefixed, and primary_metric stays
     ``ndcg@10`` and is still present in the results."""
     dense_samples, sparse_samples = _make_samples()
@@ -50,6 +62,10 @@ def test_primary_metric_is_present_without_name():
 
 
 def test_rrf_only_scores_retrievers_that_returned_a_document(tmp_path):
+    # [FUNCTION DOC]
+    # With one query where only "shared" appears in both retrievers' rankings (at rank 3), runs the evaluator with
+    # predictions writing enabled into a temp directory, reads the first JSON line of the predictions file, and
+    # asserts "shared" is ranked first and mrr@3 is 1.0.
     """A document returned by both retrievers must outrank documents returned by only one."""
     dense_samples = [
         {"query_id": "q1", "query": "query", "positive": ["shared"], "documents": ["dense", "a", "shared"]}

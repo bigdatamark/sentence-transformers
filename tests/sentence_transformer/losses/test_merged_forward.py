@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Integration tests for merged forward passes in SentenceTransformer losses: homogeneous input columns are concatenated (padded to a common
+# width) and embedded in one model call, then split back per column. Checks equivalence of loss values and gradients with per-column
+# embedding (forced via a context manager that disables merging), that anchor-based and pair losses keep the anchor column on its own
+# forward, that wrapper losses (Matryoshka, AdaptiveLayer, GISTEmbed) stay correct, and that merge_feature_batches refuses to merge columns
+# differing in prompt length, router task, modality, or using flattened token streams. Uses three fixed text columns of two rows each.
 """SentenceTransformer losses embed homogeneous input columns in one merged forward pass.
 
 The merge machinery itself is covered in tests/multi_vector_encoder/losses/test_misc.py. This file
@@ -42,6 +48,8 @@ _COLUMNS = (
 def _columns(
     model: SentenceTransformer, columns: Sequence[Sequence[str]], prompt: str | None = None
 ) -> list[dict[str, Tensor]]:
+    # [FUNCTION DOC]
+    # HELPER: Preprocesses each text column (optionally with a prompt) and returns one feature dict per column with tensors on the model device.
     return [
         {
             key: value.to(model.device) if isinstance(value, Tensor) else value
@@ -52,6 +60,8 @@ def _columns(
 
 
 def _text_column(width: int, seed: int, batch: int = 2) -> dict[str, Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a synthetic tokenized column: seeded random input ids of shape batch by width (values 1 to 29) and an all-ones attention mask.
     generator = torch.Generator().manual_seed(seed)
     return {
         "input_ids": torch.randint(1, 30, (batch, width), generator=generator),
@@ -62,11 +72,16 @@ def _text_column(width: int, seed: int, batch: int = 2) -> dict[str, Tensor]:
 def test_embed_columns_shares_one_forward_pass(
     stsb_bert_tiny_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches the model's forward to record batch sizes, embeds the three columns with embed_columns without separating the first, and
+    # asserts a single forward of batch 6 produced three 2-row embeddings that match per-column embeddings within tolerance.
     model = stsb_bert_tiny_model
     batch_sizes = []
     original_forward = model.forward
 
     def counting_forward(features: dict[str, Tensor], **kwargs) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Records the batch size of the input ids, then calls the original forward.
         batch_sizes.append(features["input_ids"].shape[0])
         return original_forward(features, **kwargs)
 
@@ -85,6 +100,9 @@ def test_embed_columns_shares_one_forward_pass(
 
 @pytest.mark.parametrize("build_loss", [MultipleNegativesRankingLoss, TripletLoss], ids=["mnrl", "triplet"])
 def test_losses_merged_forward_matches_per_column(stsb_bert_tiny_model: SentenceTransformer, build_loss) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over MultipleNegativesRankingLoss and TripletLoss. Asserts the candidate columns are mergeable, then asserts the loss value
+    # with merging equals the value with merging disabled (no gradients).
     """Anchor-based losses keep column 0 on its own forward, so only columns 1+ merge."""
     model = stsb_bert_tiny_model
     assert merge_feature_batches(_columns(model, _COLUMNS)[1:]) is not None
@@ -99,6 +117,9 @@ def test_losses_merged_forward_matches_per_column(stsb_bert_tiny_model: Sentence
 def test_anchor_losses_keep_the_anchor_on_its_own_forward(
     stsb_bert_tiny_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Records forward batch sizes while running MultipleNegativesRankingLoss and asserts two calls: the 2-row anchor batch alone, then the two
+    # candidate columns merged into a batch of 4.
     """Anchors (queries) are typically much narrower than the candidate columns, and merging them
     in would pad every anchor row to candidate width. Expected calls: the anchor batch alone, then
     the two candidate columns in one merged forward."""
@@ -107,6 +128,8 @@ def test_anchor_losses_keep_the_anchor_on_its_own_forward(
     original_forward = model.forward
 
     def counting_forward(features: dict[str, Tensor], **kwargs) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Records the batch size, then calls the original forward.
         batch_sizes.append(features["input_ids"].shape[0])
         return original_forward(features, **kwargs)
 
@@ -118,6 +141,9 @@ def test_anchor_losses_keep_the_anchor_on_its_own_forward(
 
 
 def test_mnrl_merged_gradients_match_per_column(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Backpropagates MultipleNegativesRankingLoss with and without merging and asserts the word-embedding gradient is non-zero and equal in both.
+    # Mutates model gradients.
     model = stsb_bert_tiny_model
     assert merge_feature_batches(_columns(model, _COLUMNS)[1:]) is not None
     loss = MultipleNegativesRankingLoss(model)
@@ -135,6 +161,9 @@ def test_mnrl_merged_gradients_match_per_column(stsb_bert_tiny_model: SentenceTr
 
 
 def test_matryoshka_replays_merged_forwards_from_cache(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts MatryoshkaLoss over MultipleNegativesRankingLoss (dims 128, 64), which replays cached model outputs by call order, gives the same
+    # value with and without merging.
     """MatryoshkaLoss caches model outputs by call order and replays them for the smaller
     dimensions. With merging, each dimension pass makes fewer calls than one per column, and the
     merge decision is deterministic across passes, so the cache stays aligned."""
@@ -149,6 +178,9 @@ def test_matryoshka_replays_merged_forwards_from_cache(stsb_bert_tiny_model: Sen
 
 
 def test_adaptive_layer_disables_merging_for_the_dict_replay(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts AdaptiveLayerLoss over all prior layers produces a finite value on mergeable columns (it must force per-column forwards so its
+    # per-column layer embeddings hand-off works).
     """AdaptiveLayerLoss deposits ``all_layer_embeddings`` in the per-column feature dicts on the
     final-layer pass and reads it back on every prior-layer pass. An inner loss embedding these
     mergeable columns through a fresh merged dict would strand that hand-off, so the wrapper must
@@ -163,6 +195,9 @@ def test_adaptive_layer_disables_merging_for_the_dict_replay(stsb_bert_tiny_mode
 
 
 def test_gist_embed_guide_embeds_the_original_features(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With prompt inclusion disabled and "query: " prompts (asserted to produce prompt_length and mergeable columns), asserts GISTEmbedLoss using
+    # the model as its own guide gives the same value with and without merging. Mutates the per-test model's pooling setting.
     """The guide must embed the columns as collated, not as the training model left them. With
     ``include_prompt`` disabled the model swaps a prompt-excluded attention mask into its input
     dicts, and a guide reading that mask back would exclude the prompt twice. Snapshotting the
@@ -182,6 +217,8 @@ def test_gist_embed_guide_embeds_the_original_features(stsb_bert_tiny_model: Sen
 
 
 def test_gist_embed_repeated_calls_with_the_same_dicts_match(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With prompt inclusion disabled, calls GISTEmbedLoss twice on the same feature dicts and asserts identical values (masks are restored).
     """Wrapper losses like MatryoshkaLoss call the inner loss repeatedly with the same feature
     dicts. Pooling's prompt-excluded mask replacement is not idempotent, so the loss restores the
     masks it started from: a second call must reproduce the first call's value."""
@@ -196,6 +233,9 @@ def test_gist_embed_repeated_calls_with_the_same_dicts_match(stsb_bert_tiny_mode
 
 
 def test_losses_match_in_train_mode_with_dropout_zeroed(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Puts the model in train mode with all dropout rates set to zero, and asserts merged and per-column MultipleNegativesRankingLoss values match.
+    # Mutates the model.
     """One merged forward draws a different dropout mask sequence than per-column forwards, so the
     equivalence is exact only up to dropout sampling. With dropout zeroed the contract must hold in
     training mode too, pinning that dropout is the only train-mode divergence."""
@@ -214,6 +254,9 @@ def test_losses_match_in_train_mode_with_dropout_zeroed(stsb_bert_tiny_model: Se
 
 
 def test_merge_carries_a_shared_prompt_and_refuses_per_column_prompts() -> None:
+    # [FUNCTION DOC]
+    # Asserts columns sharing an integer prompt length merge and carry that prompt length, while differing prompt lengths or a prompt length on
+    # only one column prevent merging (merge returns None).
     """Pooling with ``include_prompt`` disabled applies one prompt length to the whole batch, so
     only columns sharing the prompt length may share a forward."""
     shared = [{**_text_column(5, seed=1), "prompt_length": 3}, {**_text_column(7, seed=2), "prompt_length": 3}]
@@ -229,6 +272,9 @@ def test_merge_carries_a_shared_prompt_and_refuses_per_column_prompts() -> None:
 
 
 def test_merge_treats_tensor_prompt_lengths_as_metadata() -> None:
+    # [FUNCTION DOC]
+    # Asserts tensor prompt lengths are treated as metadata: differing per-row tensors refuse to merge, while equal per-row tensors or equal
+    # shape-1 tensors merge and carry the value 3.
     """Pooling also supports tensor-valued prompt lengths and reads one value for the whole batch,
     so concatenating per-column tensors would silently apply column 0's prompt length everywhere.
     Equal tensors carry over as metadata instead, in the per-row shape an IterableDataset yields as
@@ -267,6 +313,9 @@ def test_merge_treats_tensor_prompt_lengths_as_metadata() -> None:
 def test_pair_losses_embed_each_column_separately(
     stsb_bert_tiny_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch, build_loss, build_labels
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over CoSENTLoss (float labels) and ContrastiveLoss (binary labels). Asserts the two columns would be mergeable, then records
+    # forward batch sizes and asserts the loss used two separate forwards of batch 2.
     """A two-column loss splits its anchor off and has no second candidate left to merge it with,
     which is deliberate: these losses are trained on a query and a document as often as on two
     sentences of the same kind, and merging the narrow column into the wide one costs more padding
@@ -279,6 +328,8 @@ def test_pair_losses_embed_each_column_separately(
     original_forward = model.forward
 
     def counting_forward(features: dict[str, Tensor], **kwargs) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Records the batch size, then calls the original forward.
         batch_sizes.append(features["input_ids"].shape[0])
         return original_forward(features, **kwargs)
 
@@ -289,6 +340,8 @@ def test_pair_losses_embed_each_column_separately(
 
 
 def test_merge_refuses_mixed_router_tasks_and_carries_a_shared_task() -> None:
+    # [FUNCTION DOC]
+    # Asserts columns with different router task values refuse to merge, while columns with the same task merge and carry that task.
     """Columns stamped with different router tasks route through different modules, which is a
     genuinely different forward pass per column."""
     mixed = [{**_text_column(5, seed=1), "task": "query"}, {**_text_column(5, seed=2), "task": "document"}]
@@ -301,6 +354,8 @@ def test_merge_refuses_mixed_router_tasks_and_carries_a_shared_task() -> None:
 
 
 def test_merge_refuses_mixed_modalities() -> None:
+    # [FUNCTION DOC]
+    # Asserts columns with identical tensor keys but different modality values refuse to merge.
     """Same tensor keys isolate the metadata guard: real image and text columns usually differ in
     their tensor keys as well."""
     mixed = [{**_text_column(5, seed=1), "modality": "text"}, {**_text_column(5, seed=2), "modality": "image"}]
@@ -308,11 +363,15 @@ def test_merge_refuses_mixed_modalities() -> None:
 
 
 def test_merge_refuses_flattened_token_streams() -> None:
+    # [FUNCTION DOC]
+    # Asserts two StaticEmbedding-style columns (flat 1-D input ids with per-row offsets) refuse to merge.
     """StaticEmbedding preprocesses to a flattened 1D token stream with per-row offsets. With one
     token per row every tensor is coincidentally batch-length, yet each column's offsets stay local
     to its own stream, so concatenating would score the second column on the first column's tokens."""
 
     def flattened_column(seed: int, batch: int = 3) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a flattened column with seeded random 1-D input ids of length batch and offsets 0 to batch minus one (one token per row).
         generator = torch.Generator().manual_seed(seed)
         return {
             "input_ids": torch.randint(0, 30, (batch,), generator=generator),

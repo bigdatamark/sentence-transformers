@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pytest tests for RoundRobinBatchSampler, which takes a ConcatDataset and one batch sampler per sub-dataset and
+# alternates yielding batches from each sub-dataset (offsetting indices into the concatenated index space), stopping
+# as soon as any sub-sampler is exhausted. Skips the module if the datasets library is missing. Defines a module
+# constant for the base sub-dataset length (25).
 from __future__ import annotations
 
 import pytest
@@ -19,6 +24,12 @@ DATASET_LENGTH = 25
 
 @pytest.fixture
 def dummy_concat_dataset() -> ConcatDataset:
+    # [FUNCTION DOC]
+    # HELPER: Fixture building a ConcatDataset of two Datasets: the first has data 0 to 24 with alternating labels
+    # 0/1; the second has 50 rows with data 100 to 124 followed by 200 to 224 and the same alternating labels
+    # repeated.
+    # KNOWN ISSUE: The docstring describes the second part as only 100 to 124, omitting the 200 to 224 rows (it is
+    # twice as long).
     """
     Dummy dataset for testing purposes. The dataset looks as follows:
     {
@@ -37,6 +48,11 @@ def dummy_concat_dataset() -> ConcatDataset:
 
 
 def test_round_robin_batch_sampler(dummy_concat_dataset: ConcatDataset) -> None:
+    # [FUNCTION DOC]
+    # Creates sequential batch samplers of size 4 with drop_last for each sub-dataset, wraps them in the round-robin
+    # sampler, and asserts: the total number of batches is 12 (6 from each, as sampling stops when the shorter first
+    # sub-dataset runs out), the sampler length equals that count, and batches alternate, even positions holding only
+    # first-dataset rows (data below 100) and odd positions only second-dataset rows (data at least 100).
     batch_size = 4
     batch_sampler_1 = BatchSampler(
         SequentialSampler(range(len(dummy_concat_dataset.datasets[0]))), batch_size=batch_size, drop_last=True
@@ -69,6 +85,9 @@ def test_round_robin_batch_sampler(dummy_concat_dataset: ConcatDataset) -> None:
 
 
 def test_round_robin_batch_sampler_value_error(dummy_concat_dataset: ConcatDataset) -> None:
+    # [FUNCTION DOC]
+    # Asserts that passing three batch samplers for a two-part ConcatDataset raises ValueError stating that the number
+    # of batch samplers must match the number of datasets.
     batch_size = 4
     batch_sampler_1 = BatchSampler(SequentialSampler(range(DATASET_LENGTH)), batch_size=batch_size, drop_last=True)
     batch_sampler_2 = BatchSampler(SequentialSampler(range(DATASET_LENGTH)), batch_size=batch_size, drop_last=True)

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the embedding similarity evaluator: computes Pearson and Spearman correlations
+# between gold similarity scores and the similarities of sparse embeddings, and adds sparsity
+# statistics.
 from __future__ import annotations
 
 import logging
@@ -20,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class SparseEmbeddingSimilarityEvaluator(EmbeddingSimilarityEvaluator):
+    # [CLASS DOC]
+    # Subclass of EmbeddingSimilarityEvaluator for SparseEncoder models. Adds max_active_dims and
+    # sparsity_stats (averaged after each run). Metric computation is inherited.
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.EmbeddingSimilarityEvaluator` but is specifically designed for sparse encoder models.
 
@@ -96,6 +103,10 @@ class SparseEmbeddingSimilarityEvaluator(EmbeddingSimilarityEvaluator):
         write_csv: bool = True,
         max_active_dims: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores max_active_dims, initializes empty sparsity statistics, and delegates the sentence pairs,
+        # gold scores, batch size, main similarity, similarity function names, name, progress bar and CSV
+        # flag to the parent constructor, with embedding precision fixed to None (no quantization).
         self.max_active_dims = max_active_dims
         self.sparsity_stats = defaultdict(list)
         return super().__init__(
@@ -112,12 +123,21 @@ class SparseEmbeddingSimilarityEvaluator(EmbeddingSimilarityEvaluator):
         )
 
     def _append_csv_headers(self, similarity_fn_names: list[str]) -> None:
+        # [FUNCTION DOC]
+        # Extends the parent's CSV header setup by appending the columns active_dims and sparsity_ratio.
         super()._append_csv_headers(similarity_fn_names)
         self.csv_headers.extend(["active_dims", "sparsity_ratio"])
 
     def __call__(
         self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation. Resets the per-call sparsity statistics, runs the parent evaluation (which
+        # encodes through embed_inputs, computes metrics, logs and writes the CSV row), then replaces each
+        # collected sparsity statistic with its mean across the encode calls. Adds those means (prefixed
+        # with name) to the metrics, stores the metrics in the model card data, logs the average active
+        # dimensions and sparsity ratio, and, if output_path is given and write_csv is set, appends both
+        # values to the last CSV row. Returns the metrics dict.
         self.sparsity_stats = defaultdict(list)
         metrics = super().__call__(model=model, output_path=output_path, epoch=epoch, steps=steps)
         for key, value in self.sparsity_stats.items():
@@ -142,6 +162,11 @@ class SparseEmbeddingSimilarityEvaluator(EmbeddingSimilarityEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Encodes the given texts with the sparse model as sparse tensors moved to CPU, using the
+        # evaluator's batch size, progress bar setting and max_active_dims plus any extra kwargs. Records
+        # the model's sparsity statistics for this batch (active_dims, sparsity_ratio) and returns the
+        # embeddings.
         embeddings = model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -159,9 +184,14 @@ class SparseEmbeddingSimilarityEvaluator(EmbeddingSimilarityEvaluator):
     def store_metrics_in_model_card_data(
         self, model: SparseEncoder, metrics: dict[str, Any], epoch: int = 0, step: int = 0
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the metrics in the model's model card data as evaluation metrics for this evaluator at
+        # the given epoch and step (mutates model.model_card_data).
         model.model_card_data.set_evaluation_metrics(self, metrics, epoch=epoch, step=step)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims

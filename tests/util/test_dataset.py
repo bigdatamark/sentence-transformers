@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for sentence_transformers.util.resolve_ids, which builds a dataset transform that replaces ID columns
+# with texts looked up from separate lookup datasets: single IDs become one output column (with the "_id" style
+# suffix stripped), ID lists are exploded into numbered columns or kept as nested lists, string-encoded lists
+# are parsed, list labels are truncated with max_list_length, unmapped columns are dropped except label-like
+# columns, and build-time and transform-time errors are raised for invalid specs, missing IDs or name
+# collisions. Also tests the private sorted-array ID index used for the lookups, with its dict fallback.
 from __future__ import annotations
 
 import logging
@@ -12,16 +19,25 @@ from sentence_transformers.util.dataset import _SortedIdIndex
 
 @pytest.fixture
 def queries() -> Dataset:
+    # [FUNCTION DOC]
+    # Fixture returning a lookup dataset of two queries with ids q1, q2 and texts "Q one", "Q two".
     return Dataset.from_dict({"query_id": ["q1", "q2"], "text": ["Q one", "Q two"]})
 
 
 @pytest.fixture
 def documents() -> Dataset:
+    # [FUNCTION DOC]
+    # Fixture returning a lookup dataset of three documents with ids d1 to d3 and texts "A", "B", "C".
     return Dataset.from_dict({"document_id": ["d1", "d2", "d3"], "text": ["A", "B", "C"]})
 
 
 class TestShapes:
+    # [CLASS DOC]
+    # Groups tests for the default "columns" output shape.
     def test_kd_shape_explodes_lists_into_numbered_columns(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a knowledge-distillation row (query id, list of document ids, score list) resolves to the query text,
+        # document_1 to document_3 texts and the untouched scores.
         train = Dataset.from_dict(
             {"query_id": ["q1"], "document_ids": [["d1", "d2", "d3"]], "scores": [[1.0, 0.5, 0.2]]}
         )
@@ -35,27 +51,37 @@ class TestShapes:
         }
 
     def test_explode_positions_align_across_rows(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts numbered column j holds the j-th candidate of every row.
         # Column j holds the j-th candidate of every row.
         transform = resolve_ids({"document_ids": documents})
         out = transform({"document_ids": [["d1", "d2"], ["d3", "d1"]]})
         assert out == {"document_1": ["A", "C"], "document_2": ["B", "A"]}
 
     def test_ragged_lists_raise(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts rows with ID lists of differing lengths raise a ValueError mentioning differing lengths.
         transform = resolve_ids({"document_ids": documents})
         with pytest.raises(ValueError, match="differing lengths"):
             transform({"document_ids": [["d1", "d2"], ["d3"]]})
 
     def test_ragged_lists_unified_by_max_list_length(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts max_list_length 1 truncates ragged lists to a common length, avoiding the error.
         transform = resolve_ids({"document_ids": documents}, max_list_length=1)
         out = transform({"document_ids": [["d1", "d2"], ["d3"]]})
         assert out == {"document_1": ["A", "C"]}
 
     def test_triplet_shape_shares_one_lookup(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a triplet row resolves query, positive and negative, sharing one document lookup.
         train = Dataset.from_dict({"query_id": ["q1"], "positive_id": ["d1"], "negative_id": ["d3"]})
         train.set_transform(resolve_ids({"query_id": queries, "positive_id": documents, "negative_id": documents}))
         assert train[0] == {"query": "Q one", "positive": "A", "negative": "C"}
 
     def test_output_order_follows_lookups_insertion(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts output column order follows the lookup mapping's insertion order, followed by kept label columns.
         # The losses read columns positionally, so the first lookups key must come out first.
         train = Dataset.from_dict({"document_ids": [["d1"]], "query_id": ["q1"], "scores": [[1.0]]})
         transform = resolve_ids({"query_id": queries, "document_ids": documents})
@@ -63,10 +89,14 @@ class TestShapes:
         assert list(out.keys()) == ["query", "document_1", "scores"]
 
     def test_empty_batch(self, queries: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts an empty batch yields an empty output column.
         transform = resolve_ids({"query_id": queries})
         assert transform({"query_id": []}) == {"query": []}
 
     def test_integer_ids(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts integer IDs resolve correctly.
         # MS MARCO-style integer IDs are the most common variant after strings.
         queries = Dataset.from_dict({"query_id": [7, 8], "text": ["Q7", "Q8"]})
         documents = Dataset.from_dict({"document_id": [100, 200], "text": ["A", "B"]})
@@ -75,6 +105,8 @@ class TestShapes:
         assert out == {"query": ["Q8"], "document_1": ["B"], "document_2": ["A"]}
 
     def test_set_transform_and_batched_map_agree(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts lazily transformed rows equal rows produced by an eager batched map with original columns removed.
         rows = {"query_id": ["q1", "q2"], "document_ids": [["d1", "d2"], ["d2", "d3"]]}
         transform = resolve_ids({"query_id": queries, "document_ids": documents})
 
@@ -85,7 +117,11 @@ class TestShapes:
 
 
 class TestListsOutputFormat:
+    # [CLASS DOC]
+    # Groups tests for the "lists" output format, which keeps ID lists as one plural nested column.
     def test_nested_kd_shape(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a knowledge-distillation row yields the query, a "documents" list and the scores.
         # The CrossEncoder listwise shape: one query with a nested candidate list + score list.
         train = Dataset.from_dict(
             {"query_id": ["q1"], "document_ids": [["d1", "d2", "d3"]], "scores": [[1.0, 0.5, 0.2]]}
@@ -94,11 +130,15 @@ class TestListsOutputFormat:
         assert train[0] == {"query": "Q one", "documents": ["A", "B", "C"], "scores": [1.0, 0.5, 0.2]}
 
     def test_ragged_rows_allowed(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts ragged rows are allowed in lists mode.
         transform = resolve_ids({"document_ids": documents}, output_format="lists")
         out = transform({"document_ids": [["d1", "d2"], ["d3"]]})
         assert out == {"documents": [["A", "B"], ["C"]]}
 
     def test_truncation_applies(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts max_list_length truncates both the nested documents and the list labels.
         transform = resolve_ids({"document_ids": documents}, output_format="lists", max_list_length=1)
         out = transform({"document_ids": [["d1", "d2"], ["d3"]], "scores": [[0.9, 0.5], [0.7]]})
         assert out["documents"] == [["A"], ["C"]]
@@ -113,18 +153,26 @@ class TestListsOutputFormat:
         ],
     )
     def test_plural_naming(self, documents: Dataset, input_col: str, output_col: str) -> None:
+        # [FUNCTION DOC]
+        # Parametrized over input names; asserts the plural output name derived from the input column.
         transform = resolve_ids({input_col: documents}, output_format="lists")
         out = transform({input_col: [["d1"]]})
         assert list(out.keys()) == [output_col]
 
     def test_single_columns_unaffected(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts single-ID columns are unaffected by lists mode.
         transform = resolve_ids({"query_id": queries, "positive_id": documents}, output_format="lists")
         out = transform({"query_id": ["q1"], "positive_id": ["d1"]})
         assert out == {"query": ["Q one"], "positive": ["A"]}
 
 
 class TestStringEncodedLists:
+    # [CLASS DOC]
+    # Groups tests for ID lists and labels stored as Python-literal strings.
     def test_kd_shape_with_string_encoded_ids_and_scores(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts string-encoded document id and score lists are parsed and resolved like real lists.
         # The lightonai/ms-marco-en-bge-gemma layout: document_ids and scores stored as strings.
         train = Dataset.from_dict(
             {"query_id": ["q1"], "document_ids": ["['d1', 'd2', 'd3']"], "scores": ["[1.0, 0.5, 0.2]"]}
@@ -139,24 +187,34 @@ class TestStringEncodedLists:
         }
 
     def test_string_encoded_integer_ids(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a string-encoded list of integer IDs is parsed and resolved.
         documents = Dataset.from_dict({"document_id": [100, 200], "text": ["A", "B"]})
         transform = resolve_ids({"document_ids": documents})
         out = transform({"document_ids": ["[200, 100]"]})
         assert out == {"document_1": ["B"], "document_2": ["A"]}
 
     def test_truncation_applies_to_parsed_columns(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts truncation applies to parsed string-encoded IDs and scores.
         transform = resolve_ids({"document_ids": documents}, max_list_length=1)
         out = transform({"document_ids": ["['d1', 'd2']"], "scores": ["[0.9, 0.5]"]})
         assert out == {"document_1": ["A"], "scores": [[0.9]]}
 
     def test_malformed_string_raises(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts an unparseable string-encoded list raises a ValueError mentioning string-encoded lists.
         transform = resolve_ids({"document_ids": documents})
         with pytest.raises(ValueError, match="string-encoded lists"):
             transform({"document_ids": ["[not valid python"]})
 
 
 class TestMaxListLength:
+    # [CLASS DOC]
+    # Groups tests for max_list_length truncation.
     def test_truncates_ids_and_list_labels_in_parallel(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts IDs and list labels are truncated in parallel to two entries.
         train = Dataset.from_dict(
             {"query_id": ["q1"], "document_ids": [["d1", "d2", "d3"]], "scores": [[1.0, 0.5, 0.2]]}
         )
@@ -168,6 +226,8 @@ class TestMaxListLength:
         assert row["scores"] == [1.0, 0.5]
 
     def test_tuple_rows_count_as_lists(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts tuple rows count as lists and are truncated (labels stay tuples).
         transform = resolve_ids({"document_ids": documents}, max_list_length=2)
         out = transform({"document_ids": [("d1", "d2", "d3")], "scores": [(0.9, 0.5, 0.1)]})
         assert out["document_1"] == ["A"]
@@ -175,13 +235,19 @@ class TestMaxListLength:
         assert out["scores"] == [(0.9, 0.5)]
 
     def test_scalar_label_not_truncated(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts scalar labels are not truncated.
         transform = resolve_ids({"query_id": queries, "positive_id": documents}, max_list_length=1)
         out = transform({"query_id": ["q1"], "positive_id": ["d1"], "label": [1.0]})
         assert out["label"] == [1.0]
 
 
 class TestColumnSelection:
+    # [CLASS DOC]
+    # Groups tests for which non-ID columns are kept.
     def test_unmapped_columns_dropped_and_default_labels_kept(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts unmapped columns are dropped and the default label column "scores" is kept.
         transform = resolve_ids({"query_id": queries, "document_ids": documents})
         out = transform(
             {
@@ -195,6 +261,8 @@ class TestColumnSelection:
         assert out["scores"] == [[1.0]]
 
     def test_custom_keep_columns(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts custom keep_columns replaces the defaults (my_score kept and truncated, scores dropped).
         transform = resolve_ids(
             {"query_id": queries, "document_ids": documents}, keep_columns=["my_score"], max_list_length=1
         )
@@ -206,11 +274,15 @@ class TestColumnSelection:
         assert "scores" not in out
 
     def test_absent_keep_columns_ignored(self, queries: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts keep columns absent from the batch are ignored.
         transform = resolve_ids({"query_id": queries}, keep_columns=["label", "scores"])
         assert transform({"query_id": ["q1"]}) == {"query": ["Q one"]}
 
 
 class TestOutputNaming:
+    # [CLASS DOC]
+    # Groups tests for output column naming.
     @pytest.mark.parametrize(
         ("input_col", "output_col"),
         [
@@ -221,6 +293,8 @@ class TestOutputNaming:
         ],
     )
     def test_suffix_stripping_single_columns(self, documents: Dataset, input_col: str, output_col: str) -> None:
+        # [FUNCTION DOC]
+        # Parametrized; asserts single-ID columns strip their id/idx suffix (or keep the name when there is none).
         transform = resolve_ids({input_col: documents})
         out = transform({input_col: ["d1"]})
         assert list(out.keys()) == [output_col]
@@ -234,22 +308,32 @@ class TestOutputNaming:
         ],
     )
     def test_numbering_from_singular_base(self, documents: Dataset, input_col: str, output_base: str) -> None:
+        # [FUNCTION DOC]
+        # Parametrized; asserts list columns are numbered from the singular base name.
         transform = resolve_ids({input_col: documents})
         out = transform({input_col: [["d1", "d2"]]})
         assert list(out.keys()) == [f"{output_base}_1", f"{output_base}_2"]
 
 
 class TestLookupSpecs:
+    # [CLASS DOC]
+    # Groups tests for lookup specifications given as a dataset or as tuples naming the id and value columns.
     def test_two_tuple_explicit_id_col(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a two-tuple with an explicit id column works.
         transform = resolve_ids({"document_ids": (documents, "document_id")})
         assert transform({"document_ids": [["d2"]]}) == {"document_1": ["B"]}
 
     def test_three_tuple_for_wide_lookup(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a three-tuple with explicit id and value columns works on a wide lookup.
         wide = Dataset.from_dict({"document_id": ["d1"], "title": ["T"], "text": ["A"]})
         transform = resolve_ids({"document_ids": (wide, "document_id", "text")})
         assert transform({"document_ids": [["d1"]]}) == {"document_1": ["A"]}
 
     def test_generic_id_column_in_both_lookups(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a generic "id" column is inferred in both lookups.
         qs = Dataset.from_dict({"id": ["q1"], "text": ["Q one"]})
         docs = Dataset.from_dict({"id": ["d1"], "text": ["A"]})
         transform = resolve_ids({"query_id": qs, "positive_id": docs})
@@ -257,62 +341,92 @@ class TestLookupSpecs:
 
 
 class TestBuildTimeErrors:
+    # [CLASS DOC]
+    # Groups tests for errors raised when building the transform.
     def test_dataset_dict_rejected(self, queries: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a DatasetDict lookup raises TypeError.
         with pytest.raises(TypeError, match="expected a `Dataset`"):
             resolve_ids({"query_id": DatasetDict({"train": queries})})
 
     def test_non_dataset_rejected(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a non-dataset lookup raises TypeError.
         with pytest.raises(TypeError, match="must hold a `Dataset`"):
             resolve_ids({"query_id": {"query_id": ["q1"]}})
 
     def test_wrong_tuple_length(self, queries: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a one-element tuple raises ValueError.
         with pytest.raises(ValueError, match="tuple of length 1"):
             resolve_ids({"query_id": (queries,)})
 
     def test_unknown_explicit_id_col(self, queries: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts an unknown explicit id column raises ValueError.
         with pytest.raises(ValueError, match="not a column of the lookup dataset"):
             resolve_ids({"query_id": (queries, "nope")})
 
     def test_unknown_explicit_value_col(self, queries: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts an unknown explicit value column raises ValueError.
         with pytest.raises(ValueError, match="value column 'nope'"):
             resolve_ids({"query_id": (queries, "query_id", "nope")})
 
     def test_ambiguous_id_inference(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts two candidate id columns make id inference fail with ValueError.
         two_ids = Dataset.from_dict({"document_id": ["d1"], "source_id": ["s1"], "text": ["A"]})
         with pytest.raises(ValueError, match="Cannot infer the ID column"):
             resolve_ids({"document_ids": two_ids})
 
     def test_no_id_column(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a lookup without any id-like column fails with ValueError.
         no_id = Dataset.from_dict({"name": ["d1"], "text": ["A"]})
         with pytest.raises(ValueError, match="Cannot infer the ID column"):
             resolve_ids({"document_ids": no_id})
 
     def test_ambiguous_value_inference(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts two candidate text columns make value inference fail with ValueError.
         wide = Dataset.from_dict({"document_id": ["d1"], "title": ["T"], "text": ["A"]})
         with pytest.raises(ValueError, match="Cannot infer the value column"):
             resolve_ids({"document_ids": wide})
 
     @pytest.mark.parametrize("bad", [0, -1])
     def test_non_positive_max_list_length(self, documents: Dataset, bad: int) -> None:
+        # [FUNCTION DOC]
+        # Parametrized over 0 and -1; asserts a non-positive max_list_length raises ValueError.
         with pytest.raises(ValueError, match="max_list_length must be a positive integer"):
             resolve_ids({"document_ids": documents}, max_list_length=bad)
 
     def test_string_keep_columns_rejected(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a string keep_columns raises TypeError.
         with pytest.raises(TypeError, match="keep_columns must be a list or tuple"):
             resolve_ids({"document_ids": documents}, keep_columns="scores")
 
     def test_invalid_output_format_rejected(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts an unknown output format raises ValueError.
         with pytest.raises(ValueError, match='output_format must be "columns" or "lists"'):
             resolve_ids({"document_ids": documents}, output_format="rows")
 
 
 class TestTransformTimeBehaviour:
+    # [CLASS DOC]
+    # Groups tests for errors and behaviour when the transform runs.
     def test_missing_id_raises_keyerror(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a missing ID raises KeyError naming the ID and input column.
         transform = resolve_ids({"document_ids": documents})
         with pytest.raises(KeyError, match="'d999' from input column 'document_ids'"):
             transform({"document_ids": [["d1", "d999"]]})
 
     def test_string_encoded_list_gets_a_hint(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a mixed column containing a string-encoded list raises a KeyError hinting at string-encoded lists.
         # Uniform string-encoded columns are parsed (TestStringEncodedLists). A mixed column slips
         # past the row-0 detection, so the KeyError should still point at the real cause.
         transform = resolve_ids({"document_ids": documents})
@@ -320,6 +434,8 @@ class TestTransformTimeBehaviour:
             transform({"document_ids": ["d1", "['d1', 'd2']"]})
 
     def test_duplicate_lookup_ids_warn_and_resolve_to_last(self, caplog) -> None:
+        # [FUNCTION DOC]
+        # Asserts duplicate lookup IDs log a warning at build time and resolve to the last occurrence.
         duplicated = Dataset.from_dict({"document_id": ["d1", "d1"], "text": ["first", "SECOND"]})
         with caplog.at_level(logging.WARNING):
             transform = resolve_ids({"document_id": duplicated})
@@ -327,11 +443,15 @@ class TestTransformTimeBehaviour:
         assert transform({"document_id": ["d1"]}) == {"document": ["SECOND"]}
 
     def test_same_output_name_collision_raises(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts two input columns mapping to the same output name raise ValueError at transform time.
         transform = resolve_ids({"doc_id": documents, "doc_idx": documents})
         with pytest.raises(ValueError, match="produced more than once"):
             transform({"doc_id": ["d1"], "doc_idx": ["d2"]})
 
     def test_single_and_list_with_same_base_coexist(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a single-ID column and an ID-list column with the same base produce distinct outputs.
         # doc_id -> "doc" and doc_ids -> "doc_1", ...: distinct output names, no collision.
         transform = resolve_ids({"doc_id": documents, "doc_ids": documents})
         assert transform({"doc_id": ["d1"], "doc_ids": [["d2", "d3"]]}) == {
@@ -341,6 +461,8 @@ class TestTransformTimeBehaviour:
         }
 
     def test_expanded_position_collision_raises_at_transform(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a single column colliding with an exploded numbered column raises ValueError.
         # "document_1" resolves to "document_1", colliding with the first expanded position of
         # "document_ids".
         transform = resolve_ids({"document_ids": documents, "document_1": documents})
@@ -348,12 +470,16 @@ class TestTransformTimeBehaviour:
             transform({"document_ids": [["d1", "d2"]], "document_1": ["d3"]})
 
     def test_nested_plural_collision_raises_at_transform(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts two inputs emitting the same plural in lists mode raise ValueError.
         # In nested mode, "documents" (no ID suffix) and "document_ids" both emit the plural "documents".
         transform = resolve_ids({"document_ids": documents, "documents": documents}, output_format="lists")
         with pytest.raises(ValueError, match="produced more than once"):
             transform({"document_ids": [["d1"]], "documents": ["d2"]})
 
     def test_kept_column_collision_raises(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a kept column colliding with a resolved output name raises ValueError.
         # A kept column landing on a resolved output name must raise instead of silently replacing
         # the resolved values with the raw ones.
         transform = resolve_ids({"scores_id": documents}, keep_columns=["scores"])
@@ -361,13 +487,19 @@ class TestTransformTimeBehaviour:
             transform({"scores_id": ["d1"], "scores": [[1.0]]})
 
     def test_empty_id_lists_raise_in_columns_mode(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts all-empty ID lists in columns mode raise ValueError.
         transform = resolve_ids({"document_ids": documents})
         with pytest.raises(ValueError, match="empty ID lists"):
             transform({"document_ids": [[], []]})
 
 
 class TestRobustness:
+    # [CLASS DOC]
+    # Groups robustness tests (pickling, formatted lookups, formatted training datasets).
     def test_transform_is_picklable(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a dataset with the transform survives a pickle round trip with identical rows.
         # DataLoader workers pickle the dataset (including its transform) on spawn-start platforms,
         # so dataloader_num_workers > 0 requires this.
         import pickle
@@ -378,12 +510,17 @@ class TestRobustness:
         assert restored[0] == train[0]
 
     def test_torch_formatted_lookup_resolves(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a torch-formatted lookup dataset still resolves.
         # A torch-formatted lookup would otherwise produce unhashable 0-d tensor index keys.
         formatted = Dataset.from_dict({"document_id": [1, 2], "text": ["A", "B"]}).with_format("torch")
         transform = resolve_ids({"document_ids": formatted})
         assert transform({"document_ids": [[2, 1]]}) == {"document_1": ["B"], "document_2": ["A"]}
 
     def test_shared_index_survives_format_normalization(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts two entries sharing one lookup dataset share the same index object in the transform's partial
+        # keywords.
         # Two entries sharing one lookup dataset still share one ID index (keyed on the original
         # object, not the format-normalized copy).
         transform = resolve_ids({"positive_id": documents, "negative_id": documents})
@@ -394,6 +531,9 @@ class TestRobustness:
     def test_formatted_train_dataset_raises_clear_error(
         self, queries: Dataset, documents: Dataset, dataset_format: str
     ) -> None:
+        # [FUNCTION DOC]
+        # Parametrized over pandas and numpy formats; asserts mapping over a formatted training dataset raises a
+        # TypeError recommending with_format.
         # map hands the transform batches in the dataset's current format, which resolve_ids does
         # not support: fail loud with the with_format(None) remedy
         train = Dataset.from_dict({"query_id": ["q1"], "document_ids": [["d1", "d2"]], "scores": [[0.9, 0.1]]})
@@ -402,6 +542,8 @@ class TestRobustness:
             train.with_format(dataset_format).map(transform, batched=True)
 
     def test_set_transform_ignores_prior_format(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts set_transform on a numpy-formatted dataset works because it replaces the format.
         # set_transform replaces any prior format, so this path never sees formatted batches.
         train = Dataset.from_dict({"query_id": ["q1"], "document_ids": [["d1", "d2"]], "scores": [[0.9, 0.1]]})
         train = train.with_format("numpy")
@@ -409,6 +551,8 @@ class TestRobustness:
         assert train[0] == {"query": "Q one", "document_1": "A", "document_2": "B", "scores": [0.9, 0.1]}
 
     def test_formatted_train_dataset_raises_without_list_ids(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a numpy-formatted map raises TypeError even with only single-ID columns.
         # Single-ID columns used to slip through: numpy strings hash like str, so the lookups
         # succeeded and the format was only rejected when an ID list turned up.
         train = Dataset.from_dict({"query_id": ["q1"], "positive_id": ["d1"]})
@@ -417,6 +561,8 @@ class TestRobustness:
             train.with_format("numpy").map(transform, batched=True)
 
     def test_max_list_length_truncates_tensor_labels_in_step(self, queries: Dataset, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts a torch-formatted label column is truncated to max_list_length in a batched map.
         # A torch-formatted label column arrives as a tensor, which resolves fine but must still be
         # capped, else the scores outnumber the expanded document columns.
         train = Dataset.from_dict(
@@ -429,31 +575,44 @@ class TestRobustness:
 
 
 class TestSortedIdIndex:
+    # [CLASS DOC]
+    # Groups tests for the private sorted-array ID index (deduplicating, binary-search lookups) and the
+    # conditions under which resolve_ids falls back to a plain dict.
     """The sorted-array index behind resolve_ids lookups (dict fallback for exotic id types)."""
 
     def test_dedup_keeps_last_occurrence(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts duplicates are removed keeping the last position, and lookups return original positions.
         index = _SortedIdIndex(np.asarray([5, 3, 5, 7]))
         assert len(index) == 3  # the duplicate-warning trigger, matching dict semantics
         assert index.lookup(np.asarray([5])).tolist() == [2]
         assert index.lookup(np.asarray([3, 7, 5])).tolist() == [1, 3, 2]
 
     def test_missing_id_raises(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts looking up an absent ID raises KeyError.
         index = _SortedIdIndex(np.asarray(["d1", "d2"]))
         with pytest.raises(KeyError):
             index.lookup(np.asarray(["d1", "nope"]))
 
     def test_empty_index_raises_keyerror(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts an empty index raises KeyError rather than IndexError.
         # An empty lookup dataset must still report a missing ID, not an out-of-bounds IndexError.
         index = _SortedIdIndex(np.asarray([], dtype="<U4"))
         with pytest.raises(KeyError):
             index.lookup(np.asarray(["d1"]))
 
     def test_string_ids_use_the_sorted_index(self, documents: Dataset) -> None:
+        # [FUNCTION DOC]
+        # Asserts ordinary string IDs use the sorted index.
         # The mirror of test_long_string_ids_fall_back_to_dict: ordinary ids take the fast path.
         transform = resolve_ids({"document_id": documents})
         assert isinstance(next(iter(transform.keywords["resolutions"].values()))[1], _SortedIdIndex)
 
     def test_variable_width_string_ids(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts IDs of different string widths resolve correctly.
         # numpy pads to the longest ID, so lookups compare arrays of differing itemsize in both
         # directions depending on which IDs a batch happens to hold.
         lookup = Dataset.from_dict({"document_id": ["d1", "a_much_longer_document_id", "d2"], "text": ["A", "B", "C"]})
@@ -462,6 +621,8 @@ class TestSortedIdIndex:
         assert [train[i]["document"] for i in range(3)] == ["B", "C", "A"]
 
     def test_width_cutoff_sits_at_32_characters(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts IDs up to 32 characters use the sorted index and 33 characters fall back to a dict.
         # The cutoff is the measured memory crossover: past it the fixed-width array costs more than
         # the dict it replaces, so widening it regresses the very thing this index exists for.
         for width, expected in ((32, _SortedIdIndex), (33, dict)):
@@ -471,6 +632,8 @@ class TestSortedIdIndex:
             assert isinstance(index, expected), f"{width} characters"
 
     def test_long_string_ids_fall_back_to_dict(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a very long ID makes resolve_ids fall back to a dict that still resolves correctly.
         # A fixed-width array is sized by the longest ID, so a single long one would cost several
         # times the dict it replaces.
         lookup = Dataset.from_dict({"document_id": ["d1", "x" * 300], "text": ["A", "B"]})
@@ -482,6 +645,8 @@ class TestSortedIdIndex:
         assert train[1]["document"] == "A"
 
     def test_empty_lookup_dataset_reports_missing_id(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts an empty lookup reports a missing ID with a KeyError.
         lookup = Dataset.from_dict({"document_id": [], "text": []})
         train = Dataset.from_dict({"document_id": ["d1"]})
         train.set_transform(resolve_ids({"document_id": lookup}))
@@ -489,6 +654,8 @@ class TestSortedIdIndex:
             train[0]
 
     def test_int_ids_resolve_end_to_end(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts integer IDs resolve end to end.
         lookup = Dataset.from_dict({"document_id": [10, 20, 30], "text": ["A", "B", "C"]})
         train = Dataset.from_dict({"document_id": [30, 10]})
         train.set_transform(resolve_ids({"document_id": lookup}))
@@ -496,6 +663,8 @@ class TestSortedIdIndex:
         assert train[1]["document"] == "A"
 
     def test_missing_int_id_message_matches_dict_path(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts the missing integer ID message matches the dict path's wording.
         lookup = Dataset.from_dict({"document_id": [10, 20], "text": ["A", "B"]})
         train = Dataset.from_dict({"document_id": [99]})
         train.set_transform(resolve_ids({"document_id": lookup}))
@@ -503,6 +672,8 @@ class TestSortedIdIndex:
             train[0]
 
     def test_wrong_id_type_reports_not_found(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts string IDs against an integer index are reported as not found.
         # String ids against an integer index cannot match: the first id is reported missing.
         lookup = Dataset.from_dict({"document_id": [10, 20], "text": ["A", "B"]})
         train = Dataset.from_dict({"document_id": ["10"]})
@@ -511,6 +682,8 @@ class TestSortedIdIndex:
             train[0]
 
     def test_nullable_ids_fall_back_to_dict(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts nullable IDs (object dtype) fall back to a dict index and still resolve.
         # Arrow columns are homogeneously typed, so the realistic non-sortable case is a nullable
         # id column: None among the ids gives an object-dtype array, which keeps the dict index.
         lookup = Dataset.from_dict({"document_id": ["d1", None, "d3"], "text": ["A", "B", "C"]})

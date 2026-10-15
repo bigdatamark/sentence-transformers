@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Quantization exports: dynamic int8 quantization for ONNX-backed models (Optimum ORTQuantizer) and post-training static
+# quantization with a calibration dataset for OpenVINO-backed models (Optimum-Intel OVQuantizer). Both delegate saving or
+# uploading to save_or_push_to_hub_model.
 from __future__ import annotations
 
 import logging
@@ -29,6 +33,14 @@ def export_dynamic_quantized_onnx_model(
     create_pr: bool = False,
     file_suffix: str | None = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # Dynamically quantize the ONNX model of a model loaded with backend "onnx" and save/upload it as onnx/model_<suffix>.onnx.
+    # Inputs: model (transformers_model must be an ORTModel), quantization_config (a QuantizationConfig or one of "arm64",
+    # "avx2", "avx512", "avx512_vnni", turned into the matching AutoQuantizationConfig preset with is_static False),
+    # model_name_or_path, push_to_hub, create_pr, file_suffix. Default suffix: "<weights dtype lowercased>_<preset name>" for
+    # string presets, else "<weights dtype lowercased>_quantized". Returns None.
+    # Raises ImportError if Optimum/ONNX Runtime are missing, ValueError for a non-ONNX model or unknown preset.
+    # Side effects: temporary files, local writes or Hub upload.
     """
     Export a quantized ONNX model from a SentenceTransformer, SparseEncoder, CrossEncoder,
     or MultiVectorEncoder model.
@@ -118,6 +130,17 @@ def export_static_quantized_openvino_model(
     create_pr: bool = False,
     file_suffix: str = "qint8_quantized",
 ) -> None:
+    # [FUNCTION DOC]
+    # Statically quantize the OpenVINO model of a model loaded with backend "openvino" using a calibration dataset, and
+    # save/upload it as openvino/openvino_model_<suffix>.xml plus the matching .bin.
+    # Inputs: model (transformers_model must be an OVModel), quantization_config (OVQuantizationConfig, dict, or None meaning a
+    # default OVQuantizationConfig), model_name_or_path, dataset_name/dataset_config_name/dataset_split/column_name (all four
+    # given or all omitted; defaults nyu-mll/glue, sst2, train, sentence), push_to_hub, create_pr, file_suffix (default
+    # "qint8_quantized"). Builds an OVConfig and OVQuantizer, loads the calibration dataset with datasets caching disabled,
+    # tokenizing the chosen column to padded length 384, with num_samples taken from the config. Returns None.
+    # Raises ImportError if optimum-intel/openvino or datasets are missing, ValueError for a non-OpenVINO model or a partial set
+    # of dataset arguments. Side effects: dataset download, temporary files, local writes or Hub upload.
+    # KNOWN ISSUE: the docstring allows a dict quantization_config, but the code reads its num_samples attribute, which fails for a dict; the fallback of 300 samples is dead code because the config is never None at that point.
     """
     Export a quantized OpenVINO model from a SentenceTransformer, SparseEncoder, CrossEncoder,
     or MultiVectorEncoder model.
@@ -192,6 +215,8 @@ def export_static_quantized_openvino_model(
         )
 
     def preprocess_function(examples):
+        # [FUNCTION DOC]
+        # HELPER: tokenize a list of calibration texts with the model's tokenizer, padding to max length 384 and truncating.
         return model.tokenizer(examples, padding="max_length", max_length=384, truncation=True)
 
     dataset_name = dataset_name if dataset_name is not None else "nyu-mll/glue"

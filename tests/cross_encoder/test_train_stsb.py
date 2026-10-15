@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Pytest tests evaluating and training CrossEncoder models on the STS benchmark (sentence-transformers/stsb dataset
+# fixture with sentence1, sentence2 and a 0 to 1 score column), measuring Spearman correlation via
+# CrossEncoderCorrelationEvaluator. Skips the module without the training extra. Downloads models and data from the
+# Hub.
+# KNOWN ISSUE: The datasets library is imported unconditionally before the training-extra check, so a missing datasets
+# install causes an ImportError at collection instead of a clean module skip.
 from __future__ import annotations
 
 import os
@@ -23,6 +30,12 @@ if not is_training_available():
 def evaluate_stsb_test(
     model: CrossEncoder, expected_score: float, test_dataset: Dataset, num_test_samples: int = -1
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Evaluates a model on STSB test data. Inputs: model, expected score (percentage), test dataset, and
+    # optional sample limit (positive values select that many leading rows; default -1 means all). Builds sentence
+    # pairs from the two sentence columns, runs a correlation evaluator named "sts-test" with the gold scores, takes
+    # its primary metric times 100, prints it beside the expectation, and asserts it is above the expectation or
+    # within 0.1 of it.
     if num_test_samples > 0:
         test_dataset = test_dataset.select(range(num_test_samples))
     sentence_pairs = list(zip(test_dataset["sentence1"], test_dataset["sentence2"]))
@@ -39,6 +52,9 @@ def evaluate_stsb_test(
 
 @pytest.mark.skipif("CI" in os.environ, reason="This test triggers rate limits too often in the CI")
 def test_pretrained_stsb(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Skipped when the CI environment variable exists. Asserts the pretrained "cross-encoder/stsb-distilroberta-base"
+    # scores at least about 87.92 on the full STSB test split.
     test_dataset = stsb_dataset_dict["test"]
     model = CrossEncoder("cross-encoder/stsb-distilroberta-base")
     evaluate_stsb_test(model, 87.92, test_dataset)
@@ -46,6 +62,10 @@ def test_pretrained_stsb(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_train_stsb_slow(distilroberta_base_ce_model: CrossEncoder, stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow test. Trains the fresh distilroberta CrossEncoder fixture for one epoch on the full STSB train split with
+    # BinaryCrossEntropyLoss (batch size 16, warmup ratio 0.1, outputs in a temporary directory), then asserts a test
+    # score of at least about 75.
     model = distilroberta_base_ce_model
     train_dataset = stsb_dataset_dict["train"]
     test_dataset = stsb_dataset_dict["test"]
@@ -69,6 +89,9 @@ def test_train_stsb_slow(distilroberta_base_ce_model: CrossEncoder, stsb_dataset
 
 @pytest.mark.skipif("CI" in os.environ, reason="This test triggers rate limits too often in the CI")
 def test_train_stsb(distilroberta_base_ce_model: CrossEncoder, stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Skipped in CI. Same training setup on only the first 500 training rows, then asserts a score of at least about
+    # 50 on the first 100 test rows.
     model = distilroberta_base_ce_model
     train_dataset = stsb_dataset_dict["train"].select(range(500))
     test_dataset = stsb_dataset_dict["test"]

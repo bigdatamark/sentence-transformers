@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# GradCache variant of SpladeLoss. Embeds the batch in mini-batches without gradients, computes the
+# full loss (base loss plus FLOPS-style regularizers) on all embeddings, caches the gradients with
+# respect to the embeddings, then re-embeds mini-batches with gradients and backpropagates the
+# cached gradients. This allows large effective batch sizes with bounded memory.
 from __future__ import annotations
 
 import logging
@@ -18,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 def _reconstruct_loss_components(total: Tensor, components: dict[str, Tensor]) -> dict[str, Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a copy of the components dict whose values sum exactly to total, with only the
+    # first entry carrying total's gradient: the first entry is replaced by total minus the sum of the
+    # other (detached) entries. Used so the trainer can sum the dict for backward while still logging
+    # each component. Assumes components is non-empty.
     """Rebuild a per-component loss dict around a single gradient-carrying total.
 
     The trainer sums a dict-valued loss for its backward pass, but after gradient caching only
@@ -33,6 +43,12 @@ def _reconstruct_loss_components(total: Tensor, components: dict[str, Tensor]) -
 
 
 class CachedSpladeLoss(CachedLossMixin, SpladeLoss):
+    # [CLASS DOC]
+    # Cached SPLADE loss combining CachedLossMixin (which drives the mini-batch embed / cache / re-embed
+    # cycle via forward_cached and calls calculate_loss) with SpladeLoss (base loss, document and query
+    # regularizers, their weights and thresholds). Extra attributes: mini_batch_size,
+    # mini_batch_num_tokens, show_progress_bar, and _component_values (last computed per-component
+    # loss values, for logging).
     def __init__(
         self,
         model: SparseEncoder,
@@ -48,6 +64,10 @@ class CachedSpladeLoss(CachedLossMixin, SpladeLoss):
         mini_batch_num_tokens: int | None = None,
         show_progress_bar: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Initializes the SpladeLoss part with the model, base loss, regularizer weights, optional custom
+        # regularizers, thresholds and the document-only flag; validates mini_batch_num_tokens (raising
+        # on invalid values); stores the mini-batching options and an empty component-values dict.
         """
         Cached version of :class:`SpladeLoss` that uses the GradCache technique to allow for much larger
         effective batch sizes without additional GPU memory usage.
@@ -158,6 +178,16 @@ class CachedSpladeLoss(CachedLossMixin, SpladeLoss):
     def calculate_loss(
         self, reps: list[list[Tensor]], labels: Tensor | None = None, *, with_backward: bool = False
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Computes the total loss from cached mini-batch embeddings. Concatenates each input column's
+        # mini-batches into one tensor per column. Calls the base loss's compute_loss_from_embeddings with
+        # the columns and labels; a dict result keeps its keys as components and is summed, otherwise it is
+        # recorded as "base_loss". Adds the document regularizer loss (on all columns if
+        # use_document_regularizer_only, else on all columns except the first) times its weight, and, if a
+        # query weight is set, the query regularizer loss on the first column times its weight, recording
+        # each weighted value. Stores the detached component floats in _component_values. If
+        # with_backward, backpropagates the total (to fill the embedding gradient cache) and returns it
+        # detached; otherwise returns the total with its graph.
         """Compute the total loss (base loss + regularizers) from the per-mini-batch embeddings."""
         embeddings = [torch.cat(r) for r in reps]
 
@@ -197,6 +227,10 @@ class CachedSpladeLoss(CachedLossMixin, SpladeLoss):
     def forward(
         self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor | None = None
     ) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Runs the cached forward/backward procedure through forward_cached, then returns a dict of the
+        # recorded component values as tensors on the total's device, rebuilt so that it sums exactly to
+        # the gradient-carrying total.
         total = self.forward_cached(sentence_features, labels)
 
         # Rebuild the per-component dict for the trainer's logging, around the single gradient-carrying
@@ -205,6 +239,8 @@ class CachedSpladeLoss(CachedLossMixin, SpladeLoss):
         return _reconstruct_loss_components(total, components)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the SpladeLoss config dict plus mini_batch_size and mini_batch_num_tokens.
         config = super().get_config_dict()
         config["mini_batch_size"] = self.mini_batch_size
         config["mini_batch_num_tokens"] = self.mini_batch_num_tokens
@@ -212,6 +248,8 @@ class CachedSpladeLoss(CachedLossMixin, SpladeLoss):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Property returning the BibTeX citations for GradCache and SPLADE (hard negative distillation).
         return """
 @misc{gao2021scaling,
     title={Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup},

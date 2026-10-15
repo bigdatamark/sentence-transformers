@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER: Shared test utilities used across the test suite.
+# Defines a pytest skip marker that skips bfloat16 CPU tests on Windows runners without CUDA when torch is
+# version 2.13 or newer (where bfloat16 CPU matmul hard-crashes), two Jinja chat-template strings (a generic
+# instruct template that renders only "user" role messages, and a reranker template that renders the first
+# "query" and first "document" role messages), and a CI-detection helper.
 from __future__ import annotations
 
 import os
@@ -30,6 +36,9 @@ RERANKER_TEMPLATE = (
 
 
 def is_ci() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True when the GITHUB_ACTIONS environment variable is present in the process environment,
+    # otherwise False. Reads global environment state only; no side effects.
     """
     Check if the code is running in a Continuous Integration (CI) environment.
     This is determined by checking for the presence of certain environment variables.

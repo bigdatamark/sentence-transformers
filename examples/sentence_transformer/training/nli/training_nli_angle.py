@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilroberta-base, or first CLI arg) with AnglELoss on 10k AllNLI
+# triplet rows (anchor, positive, negative), batch 128, 1 epoch, 10% warmup, fp16, NO_DUPLICATES, eval/save every 10%.
+# Evaluates on STSb validation (cosine) before and during training and on STSb test afterwards, saves to
+# output/training_nli_angle_<model>-<timestamp>/final and tries a Hub push of "<model>-nli-angle".
+# The max_seq_length and num_epochs variables are defined but never applied. Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: AnglELoss (a CoSENT-style loss) expects sentence pairs with a float similarity label, but the triplet dataset supplies three text columns and no label.
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with AnglELoss. Entailments are positive pairs and the contradiction on AllNLI dataset is added as a hard negative.

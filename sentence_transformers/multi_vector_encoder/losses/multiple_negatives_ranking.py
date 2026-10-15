@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# In-batch negatives contrastive loss for MultiVectorEncoder using late-interaction scoring, with optional
+# query-chunked scoring and cross-device gathering of document embeddings.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -19,6 +22,12 @@ from sentence_transformers.util import (
 
 
 class MultiVectorMultipleNegativesRankingLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module. Attributes: the model; a scale (inverse temperature) multiplied into scores; a
+    # contrastive scoring function (default ColBERT scores: queries Q by tokens by dim against document groups
+    # D by N by tokens by dim, returning Q by D times N in query-major order); mini-batch size for document
+    # forwards; a query-chunk size for scoring; and whether to gather documents across distributed ranks.
+    # Inputs: (anchor, positive, optional negatives...) feature dicts. Needs per-sample media counts.
     """In-batch negatives contrastive loss for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` models.
 
     For each query in the batch, the matched positive document is treated as the positive sample, and all
@@ -118,6 +127,9 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         score_mini_batch_size: int | None = None,
         gather_across_devices: bool = False,
     ) -> None:
+        # [FUNCTION DOC]
+        # Validate and store settings. Raises ValueError if the scale is not strictly positive. Defaults the
+        # scoring function to ColBERT scores.
         super().__init__()
         if not scale > 0:
             raise ValueError("Scale must be a positive value.")
@@ -129,6 +141,8 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.gather_across_devices = gather_across_devices
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the loss config: scale, scoring function name, both mini-batch sizes and the gather flag.
         return {
             "scale": self.scale,
             "similarity_fct": similarity_fct_name(self.similarity_fct),
@@ -142,6 +156,16 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
         sentence_features: Iterable[dict[str, Tensor]],
         labels: Tensor | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss; labels are ignored. Runs the model on query features (task from features, default
+        # "query") for token embeddings and boolean scoring mask. Embeds the N document columns (default task
+        # "document", optional mini-batching). If gathering, all-gathers each column's embeddings and masks across
+        # ranks with gradients (padding the token axis to a common width). Stacks columns into D by N by tokens.
+        # Scores queries in chunks of the score chunk size (default all queries) against all documents and
+        # concatenates. The target for query i is column i times N, offset by rank times batch size times N when
+        # gathering. Returns cross entropy of scaled scores against those targets.
+        # KNOWN ISSUE: The cross-device target offset assumes every rank has the same local batch size; with an
+        # uneven last batch across ranks the target columns would be wrong.
         sentence_features = list(sentence_features)
         # The collator stamps each column's tokenization task (column 0 is the query unless
         # router_mapping overrides it). The MultiVectorMask module reads `task` from forward
@@ -191,6 +215,8 @@ class MultiVectorMultipleNegativesRankingLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Henderson et al. 2017.
         return """
 @misc{henderson2017efficient,
     title={Efficient Natural Language Response Suggestion for Smart Reply},

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pytest tests for CrossEncoder learning-to-rank losses (PListMLE, Lambda, ListNet, ListMLE, RankNet, ADRMSE). Inputs
+# to these losses are a tuple of queries and per-query document lists, plus per-query label tensors. Covers
+# low-precision support (regression for issue 3793, where bf16/fp16 training crashed with a float32 dtype mismatch
+# when logits were scattered into an internal matrix) and padding invariance of the PListMLE-family losses. Uses the
+# v5.4 tiny reranker fixture (a deep copy per test).
 from __future__ import annotations
 
 import sys
@@ -32,6 +38,12 @@ LISTWISE_LOSSES = [
 def test_listwise_loss_supports_low_precision(
     reranker_bert_tiny_model_v54: CrossEncoder, loss_cls, dtype: torch.dtype
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over the listwise loss classes and over bfloat16/float16. Skips float16 without CUDA, and bfloat16
+    # on Windows without CUDA (CPU crash risk). Casts the model's underlying transformer to the dtype, computes the
+    # loss for two queries with two and three documents (graded labels on the model device), and asserts the loss is
+    # float32 and finite. Then backpropagates and asserts at least one parameter got a gradient and all gradients are
+    # finite.
     model = reranker_bert_tiny_model_v54
     if dtype == torch.float16 and not torch.cuda.is_available():
         pytest.skip("float16 CrossEncoder forward is only supported when CUDA is available.")
@@ -66,6 +78,11 @@ def test_listwise_loss_supports_low_precision(
 @pytest.mark.parametrize("loss_cls", [PListMLELoss, ListMLELoss])  # ListMLELoss subclasses PListMLELoss
 @pytest.mark.parametrize("respect_input_order", [True, False])
 def test_listwise_loss_is_padding_invariant(reranker_bert_tiny_model_v54: CrossEncoder, loss_cls, respect_input_order):
+    # [FUNCTION DOC]
+    # Parametrised over PListMLE and ListMLE and over respect input order. Computes the loss separately for a
+    # two-document query and a three-document query (labels deliberately unsorted), then for both batched together (so
+    # the first query is padded), and asserts the batched loss equals the mean of the two individual losses within
+    # 1e-5.
     # A query's loss must not change because another query in the batch has more documents
     # (which pads this query's row). Batching must equal the mean of the per-query losses.
     # Labels are intentionally unsorted so the respect_input_order=False branch actually

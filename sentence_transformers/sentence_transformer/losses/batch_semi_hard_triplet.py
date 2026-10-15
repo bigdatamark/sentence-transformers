@@ -1,3 +1,6 @@
+# [MODULE DOC] Batch semi-hard triplet loss (FaceNet-style online mining, ported from TensorFlow Addons): for each
+# anchor-positive pair it picks the closest negative that is still farther than the positive, falling back to
+# the farthest negative when none exists.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,12 +15,16 @@ from .batch_hard_triplet import BatchHardTripletLossDistanceFunction
 
 
 class BatchSemiHardTripletLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: sentence_embedder (model), margin (default 5), distance_metric (function from an
+    # embedding matrix to a pairwise distance matrix; default Euclidean).
+    # KNOWN ISSUE: The docstring points to SiameseDistanceMetric for metrics, but the loss calls the metric with one embedding matrix; only BatchHardTripletLossDistanceFunction metrics fit. The citation is for Hermans et al. while the algorithm follows FaceNet.
     def __init__(
         self,
         model: SentenceTransformer,
         distance_metric=BatchHardTripletLossDistanceFunction.euclidean_distance,
         margin: float = 5,
     ) -> None:
+        # [FUNCTION DOC] Store the model, margin and distance metric.
         """
         BatchSemiHardTripletLoss takes a batch with (label, input) pairs and computes the loss for all possible, valid
         triplets, i.e., anchor and positive must have the same label, anchor and negative a different label. It then looks
@@ -101,16 +108,26 @@ class BatchSemiHardTripletLoss(nn.Module):
         self.distance_metric = distance_metric
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed the first input column into sentence embeddings and compute the loss with the labels.
         rep = self.sentence_embedder(sentence_features[0])["sentence_embedding"]
         return self.compute_loss_from_embeddings([rep], labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute the semi-hard loss from the first embedding tensor and labels.
         return self.batch_semi_hard_triplet_loss(labels, embeddings[0])
 
     # Semi-Hard Triplet Loss
     # Based on: https://github.com/tensorflow/addons/blob/master/tensorflow_addons/losses/triplet.py#L71
     # Paper: FaceNet: A Unified Embedding for Face Recognition and Clustering: https://huggingface.co/papers/1503.03832
     def batch_semi_hard_triplet_loss(self, labels: Tensor, embeddings: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute pairwise distances D and the same-label adjacency matrix. Tile D batch-size times; for each
+        # (anchor, positive) combination build a mask of negatives (different label) whose distance to the anchor
+        # exceeds the anchor-positive distance. Where such negatives exist, the semi-hard negative distance is their
+        # masked minimum; otherwise it is the anchor's masked maximum distance over all negatives. The loss matrix is D
+        # minus that negative distance plus margin. Positive pairs are same-label pairs excluding the diagonal; the
+        # loss is the sum of clamped-at-zero losses over positive pairs divided by their count (clamped to a tiny
+        # minimum). Returns a scalar.
+        # KNOWN ISSUE: The docstring says the loss is averaged over the positive triplets; it is actually averaged over all anchor-positive pairs, including those with zero loss.
         """Build the triplet loss over a batch of embeddings.
         We generate all the valid triplets and average the loss over the positive ones.
         Args:
@@ -158,6 +175,8 @@ class BatchSemiHardTripletLoss(nn.Module):
 
     @staticmethod
     def _masked_minimum(data: Tensor, mask: Tensor, dim: int = 1) -> Tensor:
+        # [FUNCTION DOC] HELPER: Masked minimum along a dimension: subtract the row maximum, multiply by the mask, take the minimum,
+        # add the maximum back (masked-out entries cannot win). Returns a keep-dim tensor.
         axis_maximums, _ = data.max(dim, keepdims=True)
         masked_minimums = (data - axis_maximums) * mask
         masked_minimums, _ = masked_minimums.min(dim, keepdims=True)
@@ -167,6 +186,8 @@ class BatchSemiHardTripletLoss(nn.Module):
 
     @staticmethod
     def _masked_maximum(data: Tensor, mask: Tensor, dim: int = 1) -> Tensor:
+        # [FUNCTION DOC] HELPER: Masked maximum along a dimension: subtract the row minimum, multiply by the mask, take the maximum,
+        # add the minimum back. Returns a keep-dim tensor.
         axis_minimums, _ = data.min(dim, keepdims=True)
         masked_maximums = (data - axis_minimums) * mask
         masked_maximums, _ = masked_maximums.max(dim, keepdims=True)
@@ -175,6 +196,7 @@ class BatchSemiHardTripletLoss(nn.Module):
         return masked_maximums
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric's name and the margin.
         return {
             "distance_metric": getattr(self.distance_metric, "__name__", str(self.distance_metric)),
             "margin": self.margin,
@@ -182,6 +204,7 @@ class BatchSemiHardTripletLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for "In Defense of the Triplet Loss for Person Re-Identification".
         return """
 @misc{hermans2017defense,
     title={In Defense of the Triplet Loss for Person Re-Identification},

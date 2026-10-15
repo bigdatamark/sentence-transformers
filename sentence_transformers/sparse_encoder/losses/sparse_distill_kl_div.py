@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse distillation loss using KL divergence between teacher and student score distributions
+# over (query, positive, negatives) candidates, reusing the dense DistillKLDivLoss. Must be wrapped
+# in SpladeLoss or CSRLoss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -10,6 +14,11 @@ from sentence_transformers.util import pairwise_dot_score
 
 
 class SparseDistillKLDivLoss(DistillKLDivLoss):
+    # [CLASS DOC]
+    # DistillKLDivLoss subclass for SparseEncoder students. The inherited compute_loss_from_embeddings
+    # scores the query against each candidate with similarity_fct (dot product by default), and computes
+    # the KL divergence between the temperature-softened softmax of the teacher scores (labels) and
+    # the log-softmax of the student scores.
     def __init__(
         self,
         model: SparseEncoder,
@@ -18,6 +27,9 @@ class SparseDistillKLDivLoss(DistillKLDivLoss):
         student_temperature: float | None = None,
         teacher_temperature: float | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initializes the parent with the model, similarity function, shared temperature (default 2.0)
+        # and optional separate student and teacher temperatures.
         """
         Compute the KL divergence loss between probability distributions derived from student and teacher models' similarity scores.
         By default, similarity is calculated using the dot-product. This loss is designed for knowledge distillation
@@ -155,4 +167,6 @@ class SparseDistillKLDivLoss(DistillKLDivLoss):
         )
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError("SparseDistillKLDivLoss should not be used alone. Use it with SpladeLoss or CSRLoss.")

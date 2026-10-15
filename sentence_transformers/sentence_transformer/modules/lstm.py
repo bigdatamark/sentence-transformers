@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# LSTM module that runs a (by default bidirectional) LSTM over token embeddings and replaces them
+# with the LSTM hidden states.
 from __future__ import annotations
 
 try:
@@ -13,6 +16,10 @@ from sentence_transformers.util.decorators import deprecated_kwargs
 
 
 class LSTM(Module):
+    # [CLASS DOC]
+    # Module wrapping a batch-first torch LSTM. Config keys (stored in lstm_config.json):
+    # embedding_dimension, hidden_dim, num_layers, dropout, bidirectional; the old key
+    # word_embedding_dimension is renamed. Output size is hidden_dim, doubled when bidirectional.
     """Bidirectional LSTM running over word embeddings."""
 
     config_keys: list[str] = ["embedding_dimension", "hidden_dim", "num_layers", "dropout", "bidirectional"]
@@ -28,6 +35,9 @@ class LSTM(Module):
         dropout: float = 0,
         bidirectional: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Stores the config, computes the output dimension and creates the LSTM. Deprecated keyword names
+        # are accepted through the deprecated_kwargs decorator.
         super().__init__()
         self.embedding_dimension = embedding_dimension
         self.hidden_dim = hidden_dim
@@ -49,6 +59,12 @@ class LSTM(Module):
         )
 
     def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Reads "token_embeddings" and "sentence_lengths" (lengths clamped to at least 1), packs the
+        # padded sequences (unsorted allowed, lengths moved to CPU), runs the LSTM, unpacks back to a
+        # padded batch-first tensor and stores it as "token_embeddings" in the mutated features dict.
+        # Note the unpacked length is the longest sentence length in the batch, which can be shorter than
+        # the input padding.
         token_embeddings = features["token_embeddings"]
         sentence_lengths = torch.clamp(features["sentence_lengths"], min=1)
 
@@ -61,9 +77,14 @@ class LSTM(Module):
         return features
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the output dimension (hidden_dim, doubled when bidirectional).
         return self.embeddings_dimension
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves the config JSON, then temporarily moves the module to CPU (needed for safetensors), saves
+        # the weights, and moves it back to its original device.
         self.save_config(output_path)
 
         # Saving LSTM models with Safetensors does not work unless the weights are on CPU
@@ -84,6 +105,9 @@ class LSTM(Module):
         local_files_only: bool = False,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads config and weights from a local path or Hub repo, constructs the module
+        # and returns it with weights loaded.
         hub_kwargs = {
             "subfolder": subfolder,
             "token": token,

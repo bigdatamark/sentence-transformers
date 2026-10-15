@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Integration tests (marked "custom") for third-party SentenceTransformer models that need trust_remote_code: contextual document
+# embeddings (CDE), Jina embeddings v3 with task adapters, and multimodal Jina CLIP v2. All download large models and data from the
+# Hub. The module is skipped when the datasets library is unavailable.
 from __future__ import annotations
 
 import numpy as np
@@ -15,6 +19,12 @@ else:
 
 @pytest.mark.custom
 def test_cde_small_v2():
+    # [FUNCTION DOC]
+    # Loads cde-small-v2, reads its transductive corpus size (512), and loads the natural-questions train split. Takes the first 2
+    # queries, first 5 answers as docs and the last 512 answers as context docs. Embeds context docs first with the "document" prompt,
+    # then embeds docs and queries passing those context embeddings. Asserts the query-by-doc similarity matrix is 2x5 and matches
+    # reference values within 1e-3.
+    # KNOWN ISSUE: The dataset shuffle result is discarded (shuffle returns a new dataset), so the data is never actually shuffled.
     # 1. Load the Sentence Transformer model
     model = SentenceTransformer("jxm/cde-small-v2", trust_remote_code=True)
     context_docs_size = model[0].config.transductive_corpus_size  # 512
@@ -60,6 +70,10 @@ def test_cde_small_v2():
 
 @pytest.mark.custom
 def test_jina_embeddings_v3():
+    # [FUNCTION DOC]
+    # Encodes one query with the "retrieval.query" task and prompt using jina-embeddings-v3; asserts a 1x1024 output whose first value is
+    # about -0.082 within 0.01.
+    # KNOWN ISSUE: The assertion failure message says the expected value is positive 0.08203125, while the check compares against the negative value.
     model = SentenceTransformer("jinaai/jina-embeddings-v3", trust_remote_code=True)
     task = "retrieval.query"
     embeddings = model.encode(
@@ -75,6 +89,10 @@ def test_jina_embeddings_v3():
 
 @pytest.mark.custom
 def test_jina_clip():
+    # [FUNCTION DOC]
+    # Loads jina-clip-v2 truncated to 512 dims with xformers vision attention disabled. Encodes nine multilingual "beautiful sunset on
+    # the beach" sentences and two image URLs (downloaded) with normalization, concatenates them, encodes an English query with the
+    # retrieval.query prompt, and asserts the 1x11 similarity row matches reference values within 1e-3.
     # Choose a matryoshka dimension
     truncate_dim = 512
 

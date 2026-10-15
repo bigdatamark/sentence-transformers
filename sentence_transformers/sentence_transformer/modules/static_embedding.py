@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# StaticEmbedding input module: a very fast embedding-bag model that tokenizes text with a fast
+# (Rust) tokenizer and averages trainable per-token embeddings to get a text embedding. Provides
+# constructors from model2vec distillation and from pre-trained model2vec models.
 from __future__ import annotations
 
 import inspect
@@ -26,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 
 class StaticEmbedding(InputModule):
+    # [CLASS DOC]
+    # Text-only input module holding a tokenizers Tokenizer and a torch EmbeddingBag (mean mode).
+    # Attributes: embedding, num_embeddings, embedding_dim, tokenizer (padding disabled), base_model
+    # (used for the model card).
     modalities: list[str] = ["text"]
 
     def __init__(
@@ -35,6 +43,13 @@ class StaticEmbedding(InputModule):
         embedding_dim: int | None = None,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initializes the module. A transformers fast tokenizer is unwrapped to its backend Tokenizer;
+        # any other non-Tokenizer type raises ValueError. If embedding_weights are given (numpy arrays are
+        # converted to tensors) creates a trainable EmbeddingBag from them; else if embedding_dim is
+        # given creates a randomly initialized EmbeddingBag of vocab size by embedding_dim; else raises
+        # ValueError. Disables padding on the tokenizer (mutating it) and stores an optional base_model
+        # kwarg.
         """
         Initializes the StaticEmbedding model given a tokenizer. The model is a simple embedding bag model that
         takes the mean of trained per-token embeddings to compute text embeddings.
@@ -109,6 +124,10 @@ class StaticEmbedding(InputModule):
         self.base_model = kwargs.get("base_model", None)
 
     def preprocess(self, inputs: list[str], prompt: str | None = None, **kwargs) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Tokenizes inputs (after prepending prompt if given) in batch without special tokens. Flattens
+        # all token ids into one long tensor and computes offsets, the start index of each text in that
+        # flat tensor (cumulative lengths). Returns a dict with "input_ids" and "offsets".
         if prompt:
             inputs = self._prepend_prompt(inputs, prompt)
         encodings = self.tokenizer.encode_batch(inputs, add_special_tokens=False)
@@ -119,17 +138,29 @@ class StaticEmbedding(InputModule):
         return {"input_ids": input_ids, "offsets": offsets}
 
     def forward(self, features: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Computes the mean of token embeddings per text with the EmbeddingBag using input_ids and
+        # offsets, stores it as "sentence_embedding" in the features dict and returns the mutated dict.
         features["sentence_embedding"] = self.embedding(features["input_ids"], features["offsets"])
         return features
 
     @property
     def max_seq_length(self) -> int:
+        # [FUNCTION DOC]
+        # Property returning infinity, since there is no sequence length limit.
+        # KNOWN ISSUE: Annotated to return an int but returns the float infinity.
         return math.inf
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the embedding dimension.
         return self.embedding_dim
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves the state dict as model.safetensors (or pytorch_model.bin when not safe_serialization)
+        # and the tokenizer as tokenizer.json in output_path.
+        # KNOWN ISSUE: base_model is not saved, so it is lost when the module is reloaded.
         if safe_serialization:
             save_safetensors_file(self.state_dict(), os.path.join(output_path, "model.safetensors"))
         else:
@@ -147,6 +178,11 @@ class StaticEmbedding(InputModule):
         local_files_only: bool = False,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads tokenizer.json and the weights from a local path or Hub repo, takes the
+        # "embedding.weight" tensor (falling back to the model2vec key "embeddings"), and returns a new
+        # module built from them. Raises KeyError if neither key exists.
+        # KNOWN ISSUE: Always constructs StaticEmbedding instead of cls, so subclasses get the wrong type.
         hub_kwargs = {
             "subfolder": subfolder,
             "token": token,
@@ -179,6 +215,16 @@ class StaticEmbedding(InputModule):
         use_subword: bool = True,
         **kwargs: Any,
     ) -> StaticEmbedding:
+        # [FUNCTION DOC]
+        # Class method that distills a static embedding model from a sentence-transformer/transformer model
+        # with model2vec. Raises ImportError if model2vec's distill is unavailable. Builds the distill
+        # arguments (vocabulary, device, pca_dims, apply_zipf, use_subword, quantize_to, sif_coefficient,
+        # token_remove_pattern, plus extra kwargs); drops any the installed distill function does not
+        # accept, logging a warning naming them. Runs distillation, converts the resulting embedding
+        # (numpy array or embedding layer) to a tensor, and returns a new instance with the distilled
+        # tokenizer, weights and base_model set to model_name.
+        # KNOWN ISSUE: The detected device from get_device_name is assigned after the kwargs are built and
+        # never used, so device stays None unless given by the caller (auto-detection is left to model2vec).
         r"""
         Creates a StaticEmbedding instance from a distillation process using the `model2vec` package.
 
@@ -242,6 +288,10 @@ class StaticEmbedding(InputModule):
 
     @classmethod
     def from_model2vec(cls, model_id_or_path: str) -> StaticEmbedding:
+        # [FUNCTION DOC]
+        # Class method that loads a pre-trained model2vec StaticModel by id or path (raises ImportError if
+        # model2vec is missing), converts its embedding to a tensor, and returns a new instance with its
+        # tokenizer, weights and base_model set to the id or path.
         """
         Create a StaticEmbedding instance from a model2vec model. This method loads a pre-trained model2vec model
         and extracts the embedding weights and tokenizer to create a StaticEmbedding instance.

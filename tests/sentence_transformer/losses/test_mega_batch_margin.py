@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests MegaBatchMarginLoss (anchor/positive pairs, hardest in-batch negative mined from other positives, margin-based objective) with
+# emphasis on its mini-batched gradient-caching version: it embeds mini-batches without gradients, computes the loss over the full batch,
+# caches gradients with respect to the embeddings, and re-embeds each mini-batch in a backward hook replaying RNG state. Checks equivalence
+# with the non mini-batched version, dropout replay, isolation between forwards, no-grad use, mode preservation, scaling by the outer
+# backward, input validation, Matryoshka/AdaptiveLayer compatibility, StaticEmbedding rejection, and token-budget mini-batching.
+# Uses seven fixed anchor/positive strings and the tiny BERT model moved to CPU.
 from __future__ import annotations
 
 import warnings
@@ -21,6 +28,9 @@ POSITIVES = ["positive a", "positive b", "positive c", "positive d", "positive e
 def _loss_and_grads(
     model: SentenceTransformer, use_mini_batched_version: bool, mini_batch_size: int, batch_size: int
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    # [FUNCTION DOC]
+    # HELPER: Zeroes gradients, builds the loss with the given mini-batched flag and mini-batch size, runs it on the first batch_size anchors
+    # and positives with zero labels, backpropagates, and returns the detached loss and the cloned parameter gradients.
     model.zero_grad()
     loss = MegaBatchMarginLoss(
         model, use_mini_batched_version=use_mini_batched_version, mini_batch_size=mini_batch_size
@@ -45,6 +55,10 @@ def _loss_and_grads(
 def test_mega_batch_margin_mini_batched_matches_non_mini_batched(
     stsb_bert_tiny_model: SentenceTransformer, batch_size: int, mini_batch_size: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over batch and mini-batch sizes including even and uneven splits, one mini-batch, and mini-batch larger than the batch.
+    # With dropout disabled in train mode, asserts both versions produce non-trivial gradients, approximately equal losses and equal
+    # per-parameter gradients.
     """``mini_batch_size`` only bounds memory, so it must change neither the loss nor the gradient.
 
     The mini-batched version embeds each mini-batch without gradients, computes the loss over the whole
@@ -73,6 +87,10 @@ def test_mega_batch_margin_mini_batched_matches_non_mini_batched(
 
 
 def test_mega_batch_margin_replays_dropout_in_the_backward_pass(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With dropout active (asserted), spies on the loss's embed_minibatch to record each embedding produced, switching the record list from
+    # forward to backward after the forward pass. Asserts six embeddings were recorded in each pass (two columns times three mini-batches) and
+    # that each backward re-embedding equals its forward embedding exactly (RNG replay).
     """The backward pass must re-embed exactly what the forward pass embedded, dropout included.
 
     The cached gradients are taken wrt. the embeddings of the first (no-grad) forward pass and applied to
@@ -94,6 +112,9 @@ def test_mega_batch_margin_replays_dropout_in_the_backward_pass(stsb_bert_tiny_m
     embed_minibatch = loss.embed_minibatch
 
     def spy(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Calls the original embed_minibatch, appends a detached copy of the embeddings to whichever list is currently the sink, and
+        # returns the embeddings and random state unchanged.
         reps, random_state = embed_minibatch(**kwargs)
         sink.append(reps.detach().clone())
         return reps, random_state
@@ -112,6 +133,9 @@ def test_mega_batch_margin_replays_dropout_in_the_backward_pass(stsb_bert_tiny_m
 
 
 def test_mega_batch_margin_two_forwards_before_one_backward(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Runs one loss object forward twice on two overlapping batches and backpropagates their sum, then compares the gradients with two separate
+    # loss objects doing the same. Asserts the gradients match, proving each forward keeps its own gradient cache.
     """Each forward pass must hand its own cached gradients to its own backward hook.
 
     The cache used to live on the loss module, so a second forward pass overwrote it and both hooks then
@@ -145,6 +169,9 @@ def test_mega_batch_margin_two_forwards_before_one_backward(stsb_bert_tiny_model
 
 @pytest.mark.parametrize("training", [True, False])
 def test_mega_batch_margin_under_no_grad(stsb_bert_tiny_model: SentenceTransformer, training: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over train/eval mode. Under no-grad, asserts the mini-batched loss (mini-batch 2, batch 6) can be computed and equals the
+    # non mini-batched value.
     """The loss must be computable under ``torch.no_grad``, as the trainer does when computing the eval loss.
 
     The in-loop ``backward()`` used to fire regardless of whether gradients were enabled, raising "element 0
@@ -166,6 +193,8 @@ def test_mega_batch_margin_under_no_grad(stsb_bert_tiny_model: SentenceTransform
 
 @pytest.mark.parametrize("training", [True, False])
 def test_mega_batch_margin_preserves_training_mode(stsb_bert_tiny_model: SentenceTransformer, training: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over train/eval mode. Runs forward and backward and asserts the model's training flag is unchanged afterwards.
     """The loss must not change the mode it found the model in.
 
     It used to call ``self.model.train()`` unconditionally, which left the model in training mode after an
@@ -184,6 +213,9 @@ def test_mega_batch_margin_preserves_training_mode(stsb_bert_tiny_model: Sentenc
 def test_mega_batch_margin_scales_with_the_outer_backward(
     stsb_bert_tiny_model: SentenceTransformer, grad_accum_steps: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over gradient-accumulation factors 2 and 4. Computes gradients for the loss times 1 and times one over the factor, asserts
+    # both are non-trivial, and that the scaled gradients equal the unscaled ones divided by the factor (every mini-batch sees the outer scale).
     """Every mini-batch must be scaled by whatever the outer backward pass passes in.
 
     The trainer divides the loss by ``gradient_accumulation_steps`` and, under fp16, hands it to a
@@ -198,6 +230,8 @@ def test_mega_batch_margin_scales_with_the_outer_backward(
     labels = torch.zeros(6, dtype=torch.long)
 
     def grads(scale: float) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, backpropagates the mini-batched loss multiplied by scale, and returns the parameter gradients.
         model.zero_grad()
         (MegaBatchMarginLoss(model, mini_batch_size=2)(features, labels) * scale).backward()
         return gradients(model)
@@ -218,6 +252,9 @@ def test_mega_batch_margin_scales_with_the_outer_backward(
 def test_mega_batch_margin_requires_exactly_two_columns(
     stsb_bert_tiny_model: SentenceTransformer, use_mini_batched_version: bool, num_columns: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mini-batched or not and one or three input columns. Asserts the loss raises ValueError stating it expects exactly 2
+    # input columns (anchor, positive) and naming the given count.
     """The loss mines its negatives from the other positives in the batch, so it takes exactly 2 columns.
 
     Rewriting the two forward passes dropped the ``anchor, positive = sentence_features`` unpack that used
@@ -239,6 +276,9 @@ def test_mega_batch_margin_requires_exactly_two_columns(
 
 @pytest.mark.parametrize("mini_batch_size", [2, 3])
 def test_mega_batch_margin_matryoshka(stsb_bert_tiny_model: SentenceTransformer, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mini-batch sizes 2 and 3. Wraps the loss in MatryoshkaLoss with dims 128, 64, 32 and asserts the mini-batched and non
+    # mini-batched versions give non-trivial, approximately equal losses and equal gradients.
     """MatryoshkaLoss must route the mini-batched loss through its ``CachedLossDecorator``.
 
     The mini-batched loss back-propagates from a hook, which fires long after MatryoshkaLoss has restored
@@ -253,6 +293,9 @@ def test_mega_batch_margin_matryoshka(stsb_bert_tiny_model: SentenceTransformer,
     labels = torch.zeros(6, dtype=torch.long)
 
     def loss_and_grads(**kwargs) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, builds a Matryoshka-wrapped loss with the given keyword arguments, runs and backpropagates it on the fixed
+        # features, and returns the detached loss and gradients.
         model.zero_grad()
         loss = MatryoshkaLoss(model, MegaBatchMarginLoss(model, **kwargs), matryoshka_dims=[128, 64, 32])
         loss_value = loss(features, labels)
@@ -269,6 +312,9 @@ def test_mega_batch_margin_matryoshka(stsb_bert_tiny_model: SentenceTransformer,
 
 
 def test_mega_batch_margin_adaptive_layer_warns(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts that wrapping the mini-batched loss in AdaptiveLayerLoss emits a UserWarning about incompatibility, while wrapping the non
+    # mini-batched version emits no such warning.
     """AdaptiveLayerLoss calls its base loss once per layer, and the mini-batched loss defers its backward
     pass to a hook, so the combination is unsupported, exactly as it is for the Cached* losses, which it
     already warns about. It used to construct silently and then die with ``KeyError``.
@@ -286,6 +332,8 @@ def test_mega_batch_margin_adaptive_layer_warns(stsb_bert_tiny_model: SentenceTr
 
 
 def test_mega_batch_margin_rejects_static_embedding(static_embedding_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts the mini-batched loss rejects a StaticEmbedding-based model with ValueError, while the non mini-batched version constructs fine.
     """StaticEmbedding features are an EmbeddingBag (``input_ids``, ``offsets``) with no batch dimension to
     slice along, so the mini-batched version must reject it rather than slice it incorrectly."""
     with pytest.raises(ValueError, match="not compatible with a SentenceTransformer model based on a StaticEmbedding"):
@@ -295,6 +343,9 @@ def test_mega_batch_margin_rejects_static_embedding(static_embedding_model: Sent
 
 
 def test_mega_batch_margin_rejects_static_embedding_behind_a_router(static_embedding: StaticEmbedding) -> None:
+    # [FUNCTION DOC]
+    # Builds a model whose only module is a query/document Router over StaticEmbedding and asserts the same rejection for the mini-batched
+    # version and acceptance of the non mini-batched one.
     """A Router keeps its input modules one level down, so a guard that only inspects ``model[0]`` waves a
     StaticEmbedding straight through, and ``_get_batch_size`` then reads the total token count as the
     batch size, mini-batching the EmbeddingBag features by token index."""
@@ -309,6 +360,9 @@ def test_mega_batch_margin_rejects_static_embedding_behind_a_router(static_embed
 
 
 def test_mega_batch_margin_token_budget_matches_non_mini_batched(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With texts of varied length, asserts mini-batching by a 16-token budget yields non-trivial gradients and the same loss and gradients
+    # as the non mini-batched version.
     """Packing the embedding passes by token count must not change the loss or the gradient."""
     model = stsb_bert_tiny_model.to("cpu")
     disable_dropout(model)
@@ -319,6 +373,9 @@ def test_mega_batch_margin_token_budget_matches_non_mini_batched(stsb_bert_tiny_
     labels = torch.zeros(6, dtype=torch.long)
 
     def loss_and_grads(**kwargs) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, builds the loss with the given keyword arguments, runs and backpropagates it on the varied texts, and returns
+        # the detached loss and gradients.
         model.zero_grad()
         loss_fn = MegaBatchMarginLoss(model, **kwargs)
         loss_value = loss_fn([model.preprocess(anchors), model.preprocess(positives)], labels)

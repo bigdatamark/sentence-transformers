@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: run SparseEmbeddingSimilarityEvaluator on STSb validation with a SPLADE model whose similarity function is
+# switched to cosine first, reporting Pearson/Spearman correlations and sparsity, then print the primary metric
+# (Spearman cosine) and value. Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

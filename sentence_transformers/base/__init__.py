@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# sentence_transformers.base: model-type-agnostic building blocks shared by the SentenceTransformer, SparseEncoder,
+# CrossEncoder and MultiVectorEncoder families: BaseModel, BaseDataCollator, BaseTrainer, BaseTrainingArguments with the
+# BatchSamplers/MultiDatasetBatchSamplers enums, PeftAdapterMixin, and the batch samplers (default, group-by-label,
+# no-duplicates) and multi-dataset samplers (default, round-robin, proportional). It only re-exports these names (__all__).
 from __future__ import annotations
 
 from .data_collator import BaseDataCollator

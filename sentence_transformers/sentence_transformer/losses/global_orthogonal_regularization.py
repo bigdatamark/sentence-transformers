@@ -1,3 +1,6 @@
+# [MODULE DOC] Global Orthogonal Regularization (GOR) loss: a regularizer that spreads embeddings out by penalizing the squared
+# mean and the excess second moment of pairwise similarities within each input column. Returns named loss
+# components rather than a single scalar.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,6 +15,8 @@ from sentence_transformers.util import cos_sim
 
 
 class GlobalOrthogonalRegularizationLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, similarity_fct (matrix similarity, default cosine), mean_weight and
+    # second_moment_weight (None or 0 disables a term), aggregation ("mean" or "sum" across columns).
     def __init__(
         self,
         model: SentenceTransformer,
@@ -20,6 +25,7 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         second_moment_weight: float | None = 1.0,
         aggregation: Literal["mean", "sum"] = "mean",
     ) -> None:
+        # [FUNCTION DOC] Store settings. Raises ValueError if both weights are falsy or the aggregation is not "mean" or "sum".
         """
         Global Orthogonal Regularization (GOR) Loss that encourages embeddings to be well-distributed
         in the embedding space by penalizing high mean similarities and high second moments of similarities
@@ -134,12 +140,16 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
     def forward(
         self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor | None = None
     ) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Embed every input column with the shared helper and return the component dict; labels are ignored.
         embeddings = embed_columns(self.model, sentence_features)
         return self.compute_loss_from_embeddings(embeddings)
 
     def compute_loss_from_embeddings(
         self, embeddings: list[Tensor], labels: Tensor | None = None
     ) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Compute the GOR terms for each column's embeddings, then for each enabled term stack the per-column values,
+        # aggregate by sum or mean, multiply by the term's weight, and return a dict with "gor_mean" and/or
+        # "gor_second_moment".
         """
         Compute the GOR loss from pre-computed embeddings.
 
@@ -165,6 +175,10 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         return results
 
     def compute_gor(self, embeddings: Tensor) -> tuple[Tensor, Tensor]:
+        # [FUNCTION DOC] For one (batch, dim) embedding tensor: compute the similarity matrix and zero its diagonal (in place). Mean term:
+        # square of the sum of off-diagonal similarities divided by batch times (batch minus 1). Second moment term: the
+        # mean of squared off-diagonal similarities minus one over the embedding dimension, clamped at zero. Returns both.
+        # KNOWN ISSUE: With a batch of one there are no off-diagonal pairs, so both terms divide by zero and become NaN.
         """
         Compute the Global Orthogonal Regularization terms for a batch of embeddings.
 
@@ -198,6 +212,7 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
         return mean_term, second_moment_term
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the similarity function's name, both weights and the aggregation.
         return {
             "similarity_fct": self.similarity_fct.__name__,
             "mean_weight": self.mean_weight,
@@ -207,6 +222,7 @@ class GlobalOrthogonalRegularizationLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for "Learning Spread-out Local Feature Descriptors".
         return """
 @misc{zhang2017learningspreadoutlocalfeature,
       title={Learning Spread-out Local Feature Descriptors},

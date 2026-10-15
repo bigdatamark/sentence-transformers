@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for SparseEncoder model card generation: constructing a SparseEncoderTrainer populates the model card
+# data (tags, base model, dataset statistics and samples, loss configuration), and the generated markdown must
+# contain expected substrings for SPLADE, CSR and inference-free SPLADE models with 1 to 50 datasets, render
+# per-task maximum lengths, reflect dataset transforms, and produce SparseEncoder usage snippets. Skipped at
+# module level without the training extras.
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,6 +29,9 @@ if not is_training_available():
 
 @pytest.fixture(scope="session")
 def dummy_dataset():
+    # [FUNCTION DOC]
+    # Session-scoped fixture returning an in-memory dataset with anchor, positive and negative columns holding
+    # "anchor 1" through "anchor 10" and the equivalent positive and negative strings.
     """
     Dummy dataset for testing purposes. The dataset looks as follows:
     {
@@ -164,6 +173,12 @@ def test_model_card_base(
     request: pytest.FixtureRequest,
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over a model fixture name, a dataset count (0 meaning a single unnamed dataset, otherwise a
+    # dataset dict of that many "train_i" copies) and expected substrings. Resolves the model fixture, disables Hub
+    # lookups for card data, builds a SpladeLoss (query weight 5e-5, document weight 3e-5) and training arguments
+    # (with a router mapping for the inference-free model), constructs the trainer (which fills card data),
+    # generates the card and asserts every expected substring is present and no triple newline occurs.
     model = request.getfixturevalue(model_fixture_name)
 
     # Let's avoid requesting the Hub for e.g. checking if a base model exists there
@@ -207,6 +222,10 @@ def test_model_card_base(
 
 
 def test_model_card_renders_query_and_document_lengths(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts the card has no query length line by default; after setting the first module's query length to 32
+    # and document length 180, asserts the card lists them nested under the maximum sequence length line, and has
+    # no triple newline.
     # Per-task caps are rare outside ColBERT-style models but they apply here too, so the card must
     # not present the tokenizer's model_max_length as the effective cap.
     model = splade_bert_tiny_model
@@ -230,12 +249,17 @@ def test_model_card_renders_query_and_document_lengths(splade_bert_tiny_model: S
 def test_model_card_set_transform(
     splade_bert_tiny_model: SparseEncoder, dummy_dataset: Dataset, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Copies the session dataset, sets a transform producing uppercased "new_" columns, builds a trainer with
+    # it, and asserts the card shows the post-transform column names and not the original ones.
     model = splade_bert_tiny_model
 
     # Let's avoid requesting the Hub for e.g. checking if a base model exists there
     model.model_card_data.local_files_only = True
 
     def dummy_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: Transform returning new_anchor, new_positive and new_negative columns with uppercased texts.
         return {
             "new_anchor": [text.upper() for text in batch["anchor"]],
             "new_positive": [text.upper() for text in batch["positive"]],
@@ -270,9 +294,14 @@ def test_model_card_set_transform(
 
 
 class TestGenerateUsageSnippetSparseEncoder:
+    # [CLASS DOC]
+    # Groups tests checking that SparseEncoderModelCardData usage snippets use the SparseEncoder class name.
     """Verify SparseEncoder uses its own class name in usage snippets."""
 
     def test_sparse_encoder_class_name(self) -> None:
+        # [FUNCTION DOC]
+        # With default card data, two usage examples and no similarities or model, asserts the snippet imports and
+        # instantiates SparseEncoder with the placeholder model id and never mentions SentenceTransformer.
         data = SparseEncoderModelCardData()
         data.usage_examples = ["A", "B"]
         data.similarities = None
@@ -284,6 +313,8 @@ class TestGenerateUsageSnippetSparseEncoder:
         assert "SentenceTransformer" not in snippet
 
     def test_sparse_encoder_custom_model_id(self) -> None:
+        # [FUNCTION DOC]
+        # Asserts a custom model id appears in the SparseEncoder instantiation of the snippet.
         data = SparseEncoderModelCardData(model_id="my-org/my-sparse-model")
         data.usage_examples = ["test"]
         data.similarities = None

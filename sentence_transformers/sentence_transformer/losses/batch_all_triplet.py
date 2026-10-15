@@ -1,3 +1,5 @@
+# [MODULE DOC] Batch-all triplet loss: averages the hinge triplet loss over every valid (anchor, positive, negative) triplet
+# in a batch of class-labeled single inputs that has a positive loss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -11,12 +13,16 @@ from .batch_hard_triplet import BatchHardTripletLoss, BatchHardTripletLossDistan
 
 
 class BatchAllTripletLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: sentence_embedder (the model), triplet_margin (default 5), distance_metric (function
+    # mapping an embedding matrix to a pairwise distance matrix; default Euclidean from the batch-hard helpers).
+    # KNOWN ISSUE: The docstring says SiameseDistanceMetric provides suitable metrics, but those take two embedding tensors, whereas this loss calls the metric with a single embedding matrix (BatchHardTripletLossDistanceFunction is the matching class).
     def __init__(
         self,
         model: SentenceTransformer,
         distance_metric=BatchHardTripletLossDistanceFunction.euclidean_distance,
         margin: float = 5,
     ) -> None:
+        # [FUNCTION DOC] Store the model, margin and distance metric.
         """
         BatchAllTripletLoss takes a batch with (input, label) pairs and computes the loss for all possible, valid
         triplets, i.e., anchor and positive must have the same label, anchor and negative a different label. The labels
@@ -91,13 +97,19 @@ class BatchAllTripletLoss(nn.Module):
         self.distance_metric = distance_metric
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed the first (only) input column to sentence embeddings and compute the loss with the labels.
         rep = self.sentence_embedder(sentence_features[0])["sentence_embedding"]
         return self.compute_loss_from_embeddings([rep], labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute the batch-all loss from the first embedding tensor and the labels.
         return self.batch_all_triplet_loss(labels, embeddings[0])
 
     def batch_all_triplet_loss(self, labels: Tensor, embeddings: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute the pairwise distance matrix; form the 3-D tensor of anchor-positive distance minus anchor-negative
+        # distance plus margin for every (anchor i, positive j, negative k); zero entries that are not valid triplets
+        # (distinct i, j, k; same label for i and j; different label for k); clamp negatives to zero; divide the sum by
+        # the count of entries above a tiny epsilon (plus epsilon). Returns a scalar tensor (0 when no positive triplets).
         """Build the triplet loss over a batch of embeddings.
         We generate all the valid triplets and average the loss over the positive ones.
         Args:
@@ -138,6 +150,7 @@ class BatchAllTripletLoss(nn.Module):
         return triplet_loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric's name (or string form) and the margin.
         return {
             "distance_metric": getattr(self.distance_metric, "__name__", str(self.distance_metric)),
             "margin": self.triplet_margin,
@@ -145,6 +158,7 @@ class BatchAllTripletLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for "In Defense of the Triplet Loss for Person Re-Identification".
         return """
 @misc{hermans2017defense,
     title={In Defense of the Triplet Loss for Person Re-Identification},

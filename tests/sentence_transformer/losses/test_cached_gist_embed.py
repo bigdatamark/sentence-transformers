@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests CachedGISTEmbedLoss (gradient-cached GISTEmbedLoss: mini-batches are embedded without gradients by the model and a guide model,
+# the loss is computed over the full batch, and embeddings are recomputed with gradients in a backward hook). Covers the positive-column
+# mask offset on non-zero ranks when gathering across devices, relative margin with negative scores, per-forward gradient caches, parity
+# with the non-cached loss (including under MatryoshkaLoss and a token budget), dropout replay, and StaticEmbedding rejection behind a Router.
 from __future__ import annotations
 
 import math
@@ -10,6 +15,10 @@ from sentence_transformers.sentence_transformer.losses import CachedGISTEmbedLos
 
 
 def _make_loss(margin: float, mini_batch_size: int = 32) -> CachedGISTEmbedLoss:
+    # [FUNCTION DOC]
+    # HELPER: Creates a CachedGISTEmbedLoss bypassing its constructor and sets attributes needed by calculate_loss: temperature 0.01, cosine
+    # similarity, the given mini-batch size, no progress bar, absolute margin with the given value, anchor and positive contrasting, cross-device
+    # gathering, and a cross-entropy criterion.
     """Build a CachedGISTEmbedLoss without loading real models.
 
     ``calculate_loss`` only needs the configuration attributes and operates on
@@ -32,6 +41,9 @@ def _make_loss(margin: float, mini_batch_size: int = 32) -> CachedGISTEmbedLoss:
 
 @pytest.fixture
 def simulate_rank1_world2(monkeypatch):
+    # [FUNCTION DOC]
+    # HELPER: Fixture simulating rank 1 of world size 2: monkeypatches the module's all_gather_with_grad to prepend a seeded random 3-row block to
+    # the tensor and get_rank to return 1. Returns the per-rank batch size 3.
     """Monkeypatch the distributed helpers so ``calculate_loss`` runs the rank=1/world=2
     gather path in a single process: ``all_gather_with_grad`` prepends a rank-0 block to
     the local (rank-1) block, and the rank is reported as 1 so ``offset = batch_size``.
@@ -39,6 +51,8 @@ def simulate_rank1_world2(monkeypatch):
     per = 3
 
     def fake_gather(tensor: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Returns a seeded random rank-0 block of 3 rows concatenated before the given tensor.
         # rank 0's block is deterministic and distinct from the local (rank 1) block.
         g = torch.Generator().manual_seed(1234)
         rank0_block = torch.randn(per, tensor.size(1), generator=g)
@@ -50,6 +64,9 @@ def simulate_rank1_world2(monkeypatch):
 
 
 def _local_reps(per: int, dim: int = 16, seed: int = 7):
+    # [FUNCTION DOC]
+    # HELPER: Builds seeded random anchors and positives (per by dim) and returns two structures, model reps and guide reps, each a list of two
+    # columns holding a single mini-batch tensor (independent clones).
     g = torch.Generator().manual_seed(seed)
     anchors = torch.randn(per, dim, generator=g)
     positives = torch.randn(per, dim, generator=g)
@@ -61,6 +78,9 @@ def _local_reps(per: int, dim: int = 16, seed: int = 7):
 
 @pytest.mark.parametrize("mini_batch_size", [32, 2])
 def test_gather_rank1_positive_not_masked_with_margin(simulate_rank1_world2, mini_batch_size):
+    # [FUNCTION DOC]
+    # Parametrized over mini-batch sizes 32 and 2 (the latter exercises a chunk with non-zero start). With simulated rank 1 and margin 0.1,
+    # asserts calculate_loss returns a finite value.
     """Regression for the rank>0 positive-mask offset bug (gather_across_devices).
 
     On rank 1, each anchor's true positive lives at gathered column ``offset + row``.
@@ -79,6 +99,8 @@ def test_gather_rank1_positive_not_masked_with_margin(simulate_rank1_world2, min
 
 
 def test_gather_rank1_margin_zero_baseline(simulate_rank1_world2):
+    # [FUNCTION DOC]
+    # Baseline with simulated rank 1 and margin 0: asserts a finite loss.
     """Sanity baseline: with margin=0 the positive equals its own threshold and is not
     suppressed regardless of the mask, so the loss is finite both before and after the fix.
     """
@@ -90,6 +112,9 @@ def test_gather_rank1_margin_zero_baseline(simulate_rank1_world2):
 
 @pytest.mark.parametrize("mini_batch_size", [32, 2])
 def test_positive_mask_protects_ce_target_column(simulate_rank1_world2, mini_batch_size):
+    # [FUNCTION DOC]
+    # Parametrized over mini-batch sizes. Replaces the cross-entropy child with a capturing wrapper, runs calculate_loss, and asserts that for
+    # every captured mini-batch the logit at each row's target column is finite, and the loss is finite.
     """Drive the real loss and assert it protects exactly the CE-target column in every minibatch.
 
     We capture each minibatch's (masked) score matrix and labels as passed to cross-entropy and
@@ -105,6 +130,8 @@ def test_positive_mask_protects_ce_target_column(simulate_rank1_world2, mini_bat
     real_ce = loss_fn.cross_entropy_loss
 
     def capturing_ce(scores, labels):
+        # [FUNCTION DOC]
+        # HELPER: Records the scores and labels, then returns the real cross-entropy.
         captured.append((scores, labels))
         return real_ce(scores, labels)
 
@@ -124,6 +151,8 @@ def test_positive_mask_protects_ce_target_column(simulate_rank1_world2, mini_bat
 
 
 def _make_relative_loss(margin: float) -> CachedGISTEmbedLoss:
+    # [FUNCTION DOC]
+    # HELPER: Like the absolute builder but with relative margin strategy, mini-batch size 32 and no contrasting or gathering.
     """relative-margin CachedGISTEmbedLoss fed precomputed embeddings (#3819)."""
     obj = CachedGISTEmbedLoss.__new__(CachedGISTEmbedLoss)
     torch.nn.Module.__init__(obj)
@@ -141,6 +170,9 @@ def _make_relative_loss(margin: float) -> CachedGISTEmbedLoss:
 
 
 def _negative_score_reps():
+    # [FUNCTION DOC]
+    # HELPER: Returns model and guide reps for two anchors and two positives where anchor 0's positive has cosine -0.50 and the other positive
+    # -0.49 (closer); anchor 1 equals positive 1.
     """anchor0's positive has a negative cosine (-0.50). A non-paired candidate (column 1) is
     *more* similar (-0.49). anchor1 is paired with that candidate (diagonal cosine 1.0)."""
     a0 = [1.0, 0.0, 0.0]
@@ -155,6 +187,9 @@ def _negative_score_reps():
 
 
 def test_relative_margin_negative_positive_score_suppresses_closer_negative():
+    # [FUNCTION DOC]
+    # With relative margin 0.05, captures the scores passed to cross-entropy and asserts the closer-than-positive candidate for anchor 0 is
+    # masked to -inf while the true positive and the loss stay finite.
     """Regression for #3819 in CachedGISTEmbedLoss: with ``margin_strategy="relative"`` and a
     negative positive-pair score, a candidate more similar to the anchor than the positive must
     still be suppressed."""
@@ -164,6 +199,8 @@ def test_relative_margin_negative_positive_score_suppresses_closer_negative():
     real_ce = loss_fn.cross_entropy_loss
 
     def capturing_ce(scores, labels):
+        # [FUNCTION DOC]
+        # HELPER: Records the scores, then returns the real cross-entropy.
         captured.append(scores)
         return real_ce(scores, labels)
 
@@ -179,6 +216,9 @@ def test_relative_margin_negative_positive_score_suppresses_closer_negative():
 
 
 def test_cached_gist_two_forwards_before_one_backward(stsb_bert_tiny_model) -> None:
+    # [FUNCTION DOC]
+    # With dropout disabled, runs one loss object forward on two overlapping 3-row batches then backpropagates the sum, and compares gradients
+    # with two separate loss objects. Asserts non-trivial, matching gradients (each forward keeps its own cache).
     """Each forward pass must hand its own cached gradients to its own backward hook.
 
     The cache used to live on the loss module, so a second forward pass overwrote it and both hooks
@@ -197,6 +237,8 @@ def test_cached_gist_two_forwards_before_one_backward(stsb_bert_tiny_model) -> N
     labels = torch.zeros(3, dtype=torch.long)
 
     def make_loss() -> CachedGISTEmbedLoss:
+        # [FUNCTION DOC]
+        # HELPER: Returns a new CachedGISTEmbedLoss using the model as its own guide with mini-batch size 2.
         return CachedGISTEmbedLoss(model, guide=model, mini_batch_size=2)
 
     model.zero_grad()
@@ -216,6 +258,9 @@ def test_cached_gist_two_forwards_before_one_backward(stsb_bert_tiny_model) -> N
 @pytest.mark.parametrize("num_columns", [2, 3])
 @pytest.mark.parametrize("mini_batch_size", [2, 3])
 def test_cached_gist_matches_gist(stsb_bert_tiny_model, num_columns: int, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over 2 or 3 columns and mini-batch sizes 2 or 3. Asserts the cached loss and plain GISTEmbedLoss (model as guide) give
+    # non-trivial gradients, approximately equal losses and equal gradients.
     """``mini_batch_size`` only bounds memory: for the 2- and 3-column shapes the non-cached loss
     supports, the cached loss must reproduce GISTEmbedLoss's loss and gradient."""
     from sentence_transformers.sentence_transformer.losses import GISTEmbedLoss
@@ -233,6 +278,8 @@ def test_cached_gist_matches_gist(stsb_bert_tiny_model, num_columns: int, mini_b
     labels = torch.zeros(5, dtype=torch.long)
 
     def loss_and_grads(loss_fn: torch.nn.Module) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, runs the loss on the preprocessed columns, backpropagates, and returns the detached loss and gradients.
         model.zero_grad()
         loss_value = loss_fn([model.preprocess(column) for column in columns], labels)
         loss_value.backward()
@@ -250,6 +297,9 @@ def test_cached_gist_matches_gist(stsb_bert_tiny_model, num_columns: int, mini_b
 
 
 def test_cached_gist_replays_dropout_in_the_backward_pass(stsb_bert_tiny_model) -> None:
+    # [FUNCTION DOC]
+    # With dropout active (asserted), spies on embed_minibatch to record model embeddings in the forward and the backward pass, and asserts six
+    # records per pass (two columns times three mini-batches) that are pairwise identical (RNG replay).
     """The backward pass must re-embed exactly what the forward pass embedded, dropout included,
     also with this loss's bespoke ``embed_minibatch``, which runs the guide model in the
     forward pass but skips it in the backward re-embedding."""
@@ -266,6 +316,8 @@ def test_cached_gist_replays_dropout_in_the_backward_pass(stsb_bert_tiny_model) 
     embed_minibatch = loss_fn.embed_minibatch
 
     def spy(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Calls the original embed_minibatch, records a detached copy of the model embeddings in the current sink, and returns its outputs.
         reps, guide_reps, random_state = embed_minibatch(**kwargs)
         sink.append(reps.detach().clone())
         return reps, guide_reps, random_state
@@ -285,6 +337,8 @@ def test_cached_gist_replays_dropout_in_the_backward_pass(stsb_bert_tiny_model) 
 
 
 def test_cached_gist_rejects_static_embedding_behind_a_router(static_embedding, stsb_bert_tiny_model) -> None:
+    # [FUNCTION DOC]
+    # Builds a model consisting of a query/document Router over StaticEmbedding and asserts CachedGISTEmbedLoss raises ValueError for it.
     """A Router keeps its input modules one level down, so a guard that only inspects ``model[0]``
     waves a StaticEmbedding straight through, and mini-batching then slices the EmbeddingBag
     features by token index."""
@@ -300,6 +354,9 @@ def test_cached_gist_rejects_static_embedding_behind_a_router(static_embedding, 
 
 @pytest.mark.parametrize("mini_batch_size", [2, 3])
 def test_gist_matryoshka_matches_cached_gist_matryoshka(stsb_bert_tiny_model, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mini-batch sizes. Uses a deep copy of the model as the guide; wraps both plain and cached GIST losses in MatryoshkaLoss
+    # (dims 128, 64, 32) and asserts approximately equal losses and gradients (with a looser absolute tolerance).
     """``MatryoshkaLoss(GISTEmbedLoss(...))`` must match ``MatryoshkaLoss(CachedGISTEmbedLoss(...))``.
 
     The plain loss used to run the guide on the same features dicts whose model outputs
@@ -325,6 +382,8 @@ def test_gist_matryoshka_matches_cached_gist_matryoshka(stsb_bert_tiny_model, mi
     labels = torch.zeros(5, dtype=torch.long)
 
     def loss_and_grads(inner: torch.nn.Module) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, runs MatryoshkaLoss around the given inner loss on fresh features, backpropagates, and returns loss and gradients.
         model.zero_grad()
         features = [model.preprocess(anchors), model.preprocess(positives)]
         loss_value = MatryoshkaLoss(model, inner, matryoshka_dims=[128, 64, 32])(features, labels)
@@ -344,6 +403,8 @@ def test_gist_matryoshka_matches_cached_gist_matryoshka(stsb_bert_tiny_model, mi
 
 
 def test_cached_gist_token_budget_matches_gist(stsb_bert_tiny_model) -> None:
+    # [FUNCTION DOC]
+    # With texts of varied length, asserts the cached loss with a 16-token budget matches the plain GISTEmbedLoss in loss and gradients.
     """The token budget must flow through this loss's bespoke ``embed_minibatch_iter`` (which also runs
     the guide model) without changing the loss or gradient."""
     from sentence_transformers.sentence_transformer.losses import GISTEmbedLoss
@@ -358,6 +419,8 @@ def test_cached_gist_token_budget_matches_gist(stsb_bert_tiny_model) -> None:
     labels = torch.zeros(5, dtype=torch.long)
 
     def loss_and_grads(loss_fn: torch.nn.Module) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, runs the loss on the preprocessed texts, backpropagates, and returns loss and gradients.
         model.zero_grad()
         loss_value = loss_fn([model.preprocess(anchors), model.preprocess(positives)], labels)
         loss_value.backward()

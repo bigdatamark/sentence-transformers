@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: compute sparse SPLADE embeddings (naver/splade-cocondenser-ensembledistil) for three sentences and print the
+# vocabulary-sized embedding dimension and sparsity stats (average active dims, sparsity ratio), the top 10 decoded
+# (token, weight) pairs per sentence, the same stats when encoding with max_active_dims 32, and the memory size of both
+# embedding tensors. String literals show sample output. Side effects: model download, stdout.
 """
 This is a simple application for sparse encoder: Computing embeddings.
 
@@ -75,6 +80,9 @@ print("\n--- Comparing memory usage ---")
 
 
 def get_memory_size(tensor):
+    # [FUNCTION DOC]
+    # HELPER: return a tensor's memory footprint in bytes. For sparse tensors, the sum of the bytes of the stored values and
+    # indices; for dense tensors, element size times number of elements. Uses the private sparse accessors of torch.
     if tensor.is_sparse:
         # For sparse tensors, only count non-zero elements
         return (

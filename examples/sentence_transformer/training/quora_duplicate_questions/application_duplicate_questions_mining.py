@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Example script: paraphrase mining. Encodes a fixed list of 20 Quora-style questions with all-MiniLM-L6-v2, uses
+# paraphrase_mining to score all pairs by cosine similarity (returned as (score, i, j) sorted by descending score),
+# and prints the top 20 pairs as score and both question texts. Side effects: model download, stdout.
 """
 This application demonstrates how to find duplicate questions (paraphrases) in a long
 list of sentences.

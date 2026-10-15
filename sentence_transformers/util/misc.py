@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER: Miscellaneous utilities: qualified names for objects, readable names for similarity
+# callables, a distillation teacher-target sanity check, dynamic class import (with a trust gate
+# for code outside the sentence_transformers namespace), context managers that temporarily
+# disable datasets caching or logging, a CSV last-row appender, and a list of legacy un-namespaced
+# Hugging Face model ids (ORIGINAL_TRANSFORMER_MODELS) that must not get an organization prefix.
 from __future__ import annotations
 
 import csv
@@ -18,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 def fullname(obj) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "module.ClassName" for a class, or for an instance's class. If the module is
+    # None or the builtins module, returns just the class name.
     """
     Gives a full name (package_name.class_name) for a class / object in Python. Will
     be used to load the correct classes from JSON files
@@ -46,6 +55,14 @@ def fullname(obj) -> str:
 
 
 def similarity_fct_name(similarity_fct: Callable) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Produces a readable name for a scoring callable used by a loss.
+    # - functools.partial: the wrapped function's name (or its type name), followed by its bound
+    #   keyword arguments in parentheses as key=repr(value) when any exist.
+    # - A bound method named "similarity" or "similarity_pairwise" whose owner has a
+    #   similarity_fn_name: the name of the function that SimilarityFunction resolves that name to.
+    # - Objects with get_config_dict: name followed by the config entries in parentheses.
+    # - Otherwise: the callable's name, or its type name.
     """Readable config-dict rendering of a loss's scoring callable: objects exposing
     ``get_config_dict`` (e.g. configured metric classes) and :func:`functools.partial` bindings
     include their settings."""
@@ -76,6 +93,15 @@ def similarity_fct_name(similarity_fct: Callable) -> str:
 def check_teacher_targets(
     teacher_probabilities: Tensor, teacher_logits: Tensor, teacher_temperature: float, loss_name: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Sanity-checks a distillation loss's teacher targets (meant to be called once per loss).
+    # Inputs: teacher_probabilities (softmaxed target), teacher_logits (raw scores), the temperature
+    # already applied, and the loss name used as message prefix.
+    # Raises ValueError if any detached float teacher score is NaN. Returns silently if any score is
+    # infinite (deliberately masked candidates) or if no probability is exactly zero. Otherwise logs a
+    # warning with the number of zero probabilities, the largest per-row max-minus-min spread of the
+    # scores, and a suggested minimum temperature of spread divided by 100.
+    # Side effect: device synchronization when reading values; logging.
     """Inspect a distillation loss's teacher target once, on its first forward.
 
     Takes the target the loss itself computed rather than recomputing a softmax, so the two can
@@ -117,6 +143,11 @@ def check_teacher_targets(
 
 
 def import_from_string(dotted_path: str) -> type:
+    # [FUNCTION DOC]
+    # HELPER: Imports and returns the object named by a dotted path. Raises ImportError if the path
+    # has no dot. With DeprecationWarnings suppressed, first tries to import the whole path as a module
+    # (any failure falls back) and otherwise imports everything before the last dot as a module.
+    # Returns the attribute named by the last component, raising ImportError if missing.
     """
     Import a dotted module path and return the attribute/class designated by the
     last name in the path. Raise ImportError if the import failed.
@@ -166,6 +197,15 @@ def import_module_class(
     cache_folder: str | None = None,
     local_files_only: bool = False,
 ) -> type:
+    # [FUNCTION DOC]
+    # Resolves a module class reference string to a class.
+    # References starting with "sentence_transformers." are imported via import_from_string.
+    # Otherwise, when model_name_or_path is given: if trust_remote_code is falsy, raises ValueError
+    # whose message points to the absolute local directory or the Hub URL for inspection; if trusted,
+    # tries the transformers dynamic module loader with the revision, code_revision, token, cache dir
+    # and local-only flag, ignoring OSError/ValueError (missing file or malformed reference).
+    # Falls back to import_from_string (also used directly when no model path is given, without a trust
+    # check). Side effects: may download and execute remote code.
     """
     Resolve a module class reference to a class object.
 
@@ -250,6 +290,9 @@ def import_module_class(
 
 @contextmanager
 def disable_datasets_caching():
+    # [FUNCTION DOC]
+    # HELPER: Context manager that disables Hugging Face datasets caching for the duration of the
+    # block if it was enabled, re-enabling it afterwards (even on error). Requires datasets.
     """
     A context manager that will disable caching in the datasets library.
     """
@@ -268,6 +311,9 @@ def disable_datasets_caching():
 
 @contextmanager
 def disable_logging(highest_level=logging.CRITICAL):
+    # [FUNCTION DOC]
+    # HELPER: Context manager that globally disables logging at and below highest_level (default
+    # CRITICAL) during the block, then restores the previous global disable level.
     """
     A context manager that will prevent any logging messages
     triggered during the body from being processed.
@@ -285,6 +331,10 @@ def disable_logging(highest_level=logging.CRITICAL):
 
 
 def append_to_last_row(csv_path, additional_data):
+    # [FUNCTION DOC]
+    # HELPER: Reads the whole CSV file (UTF-8). If it has more than one row (header plus data), extends
+    # the last row with the additional_data values, rewrites the whole file and returns True; otherwise
+    # returns False without writing.
     # Read the entire CSV file
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)

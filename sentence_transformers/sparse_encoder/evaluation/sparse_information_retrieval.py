@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the information retrieval evaluator: ranks a corpus for each query using
+# sparse embeddings and reports accuracy, precision, recall, MRR, NDCG and MAP at various k, plus
+# query and corpus sparsity statistics and an estimate of retrieval FLOPS.
 from __future__ import annotations
 
 import logging
@@ -22,6 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 class SparseInformationRetrievalEvaluator(InformationRetrievalEvaluator):
+    # [CLASS DOC]
+    # Subclass of InformationRetrievalEvaluator for SparseEncoder models. Adds max_active_dims,
+    # sparsity_stats (separate query and corpus statistic lists), count_vectors (per side, the
+    # summed per-dimension count of non-zero entries) and count_lengths (per side, the number of
+    # texts per encode call). Retrieval metrics are inherited.
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.InformationRetrievalEvaluator` but is specifically designed for sparse encoder models.
 
@@ -157,6 +166,10 @@ class SparseInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         corpus_prompt_name: str | None = None,
         write_predictions: bool = False,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores max_active_dims, initializes empty sparsity/count state, and delegates queries, corpus,
+        # relevant docs, chunk size, k lists, progress bar, batch size, name, CSV flag, score functions,
+        # main score function, query/corpus prompts and prompt names and write_predictions to the parent.
         self.max_active_dims = max_active_dims
         self.sparsity_stats = {"query": defaultdict(list), "corpus": defaultdict(list)}
         self.count_vectors = {}
@@ -185,6 +198,10 @@ class SparseInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         )
 
     def _append_csv_headers(self, score_function_names):
+        # [FUNCTION DOC]
+        # Extends the parent's CSV headers; only when score_function_names is non-empty (so they are
+        # added once) appends query_active_dims, query_sparsity_ratio, corpus_active_dims,
+        # corpus_sparsity_ratio and avg_flops.
         super()._append_csv_headers(score_function_names)
         # To avoid adding the sparse-specific headers multiple times, we only add them if the superclass will
         # add metric columns for the specified score functions
@@ -202,6 +219,16 @@ class SparseInformationRetrievalEvaluator(InformationRetrievalEvaluator):
     def __call__(
         self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1, *args, **kwargs
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation. Resets sparsity and count state, runs the parent evaluation (which encodes
+        # via embed_inputs), then averages query statistics as a plain mean over encode calls and corpus
+        # statistics as a mean weighted by the number of texts per call. Flattens them into keys like
+        # query_active_dims, adds avg_flops from _calculate_avg_flops, adds all of these (prefixed with
+        # name) to the metrics, stores the metrics in the model card data, logs the query and corpus
+        # sparsity and the FLOPS, and appends the values to the last CSV row when output_path is given
+        # and write_csv is set. Extra args and kwargs are ignored. Returns the metrics dict.
+        # KNOWN ISSUE: Query statistics use an unweighted mean over encode calls while corpus statistics
+        # are weighted by batch size, so query values are skewed when encode calls have different sizes.
         self.sparsity_stats = {"query": defaultdict(list), "corpus": defaultdict(list)}
         self.count_vectors = {}
         self.count_lengths = {"query": [], "corpus": []}
@@ -242,6 +269,14 @@ class SparseInformationRetrievalEvaluator(InformationRetrievalEvaluator):
         prompt: str | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Encodes texts with model.encode (encode_fn_name None), encode_query ("query") or encode_document
+        # ("document"), passing the prompt name/prompt, batch size, progress bar, max_active_dims and
+        # extra kwargs, as sparse CPU tensors. Records sparsity statistics under the query side (for None
+        # or "query") or the corpus side, adds the per-dimension non-zero count vector to that side's
+        # running sum, and records the number of texts. Returns the embeddings.
+        # KNOWN ISSUE: Any other encode_fn_name leaves the encode function unassigned and raises
+        # UnboundLocalError; and a single string input counts its character length as the number of texts.
         if encode_fn_name is None:
             encode_fn = model.encode
         elif encode_fn_name == "query":
@@ -274,15 +309,23 @@ class SparseInformationRetrievalEvaluator(InformationRetrievalEvaluator):
     def store_metrics_in_model_card_data(
         self, model: SparseEncoder, metrics: dict[str, Any], epoch: int = 0, step: int = 0
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the metrics in the model's model card data for this evaluator at the given epoch and step.
         model.model_card_data.set_evaluation_metrics(self, metrics, epoch=epoch, step=step)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims
         return config_dict
 
     def _calculate_avg_flops(self) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns the estimated FLOPS: the dot product of the average query count vector and the
+        # average corpus count vector (each summed count vector divided by its number of texts), as a
+        # float. Returns 0.0 if either side was never encoded.
         """Calculate average FLOPS between queries and corpus.
 
         FLOPS is the dot product of the average query and corpus count vectors,

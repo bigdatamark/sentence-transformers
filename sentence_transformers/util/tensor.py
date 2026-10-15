@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER: Tensor conversion and manipulation utilities for embeddings: converting lists/numpy
+# arrays to torch tensors (zero-copy where possible), adding batch dimensions, L2 normalization
+# (dense and sparse COO), Matryoshka truncation, top-k sparsification, undoing FlashAttention-2
+# input flattening, stacking/concatenating ragged token embeddings with masks, moving batches to a
+# device, converting sparse tensors to SciPy COO, and counting active dimensions.
 from __future__ import annotations
 
 from typing import Any, overload
@@ -9,6 +15,10 @@ from torch import Tensor, device
 
 
 def _wrap_numpy(a: np.ndarray) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Wraps a numpy array as a tensor. Writeable arrays are shared without copying via
+    # from_numpy (falling back to a copy if the dtype is unsupported, signalled by TypeError);
+    # read-only arrays are copied. The result may alias the input. Negative strides raise.
     """View a numpy array as a tensor without copying its buffer, which on a corpus of embeddings
     costs as much as the scoring it feeds. Two kinds of array cannot be viewed and are copied with
     :func:`torch.tensor` instead: read-only buffers (memmaps, broadcast views), and dtypes with no
@@ -25,6 +35,13 @@ def _wrap_numpy(a: np.ndarray) -> Tensor:
 
 
 def _convert_to_tensor(a: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Converts input to a tensor.
+    # List input: if every element is a sparse tensor, coalesces each, casts to float32 and stacks
+    # (staying sparse) and returns; if non-empty and all numpy arrays, wraps each without copy and
+    # stacks; otherwise builds a tensor from the list. Numpy arrays are wrapped; other non-tensors go
+    # through the tensor constructor; tensors pass through. Sparse results are cast to float32.
+    # KNOWN ISSUE: an empty list satisfies the "all sparse tensors" check vacuously and reaches stacking an empty list, which raises instead of producing an empty tensor.
     """
     Converts the input `a` to a PyTorch tensor if it is not already a tensor. Lists are stacked into
     one tensor: a list of sparse tensors keeps its sparsity, and a list of numpy arrays is viewed
@@ -57,6 +74,9 @@ def _convert_to_tensor(a: list | np.ndarray | Tensor) -> Tensor:
 
 
 def _convert_to_float_tensor(a: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Converts like the plain tensor conversion, then casts floating tensors narrower than
+    # 32 bits (fp8, float16, bfloat16) to float32 to avoid low-precision tie artifacts in matmuls.
     """
     Converts like :func:`_convert_to_tensor`, then upcasts sub-float32 floats (fp8, float16,
     bfloat16) to float32: matmul rounds its output to the input dtype, bucketing nearby similarity
@@ -76,6 +96,8 @@ def _convert_to_float_tensor(a: list | np.ndarray | Tensor) -> Tensor:
 
 
 def _convert_to_batch(a: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Adds a leading batch dimension to a 1-D tensor; other tensors are returned unchanged.
     """
     If the tensor `a` is 1-dimensional, it is unsqueezed to add a batch dimension.
 
@@ -91,6 +113,8 @@ def _convert_to_batch(a: Tensor) -> Tensor:
 
 
 def _convert_to_batch_tensor(a: list | np.ndarray | Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Converts to a tensor with float upcasting, then adds a batch dimension if 1-D.
     """
     Converts the input data to a tensor with a batch dimension, stacking lists as
     :func:`_convert_to_tensor` does.
@@ -109,6 +133,12 @@ def _convert_to_batch_tensor(a: list | np.ndarray | Tensor) -> Tensor:
 
 
 def normalize_embeddings(embeddings: Tensor) -> Tensor:
+    # [FUNCTION DOC]
+    # Returns the embeddings with each row scaled to unit L2 norm (along dimension 1).
+    # Dense tensors use the standard normalize function (with its epsilon for zero rows). Sparse COO
+    # tensors are coalesced; per-row sums of squared values are accumulated, square-rooted and gathered
+    # per stored value; values in rows with a positive norm are divided by it (zero rows unchanged);
+    # a new sparse COO tensor with the same indices and shape is returned. The input is not modified.
     """
     Normalizes the embeddings matrix, so that each sentence embedding has unit length.
 
@@ -139,13 +169,20 @@ def normalize_embeddings(embeddings: Tensor) -> Tensor:
 
 @overload
 def truncate_embeddings(embeddings: np.ndarray, truncate_dim: int | None) -> np.ndarray: ...
+    # [FUNCTION DOC]
+    # HELPER: Typing overload for numpy input (no runtime body).
 
 
 @overload
 def truncate_embeddings(embeddings: torch.Tensor, truncate_dim: int | None) -> torch.Tensor: ...
+    # [FUNCTION DOC]
+    # HELPER: Typing overload for tensor input (no runtime body).
 
 
 def truncate_embeddings(embeddings: np.ndarray | torch.Tensor, truncate_dim: int | None) -> np.ndarray | torch.Tensor:
+    # [FUNCTION DOC]
+    # Returns the embeddings sliced to their first truncate_dim entries along the last axis (a view;
+    # None keeps all dimensions). Works for numpy arrays and tensors.
     """
     Truncates the embeddings matrix.
 
@@ -179,19 +216,31 @@ def truncate_embeddings(embeddings: np.ndarray | torch.Tensor, truncate_dim: int
 
 @overload
 def select_max_active_dims(embeddings: np.ndarray | torch.Tensor, max_active_dims: int) -> torch.Tensor: ...
+    # [FUNCTION DOC]
+    # HELPER: Typing overload: int limit returns a tensor (no runtime body).
 
 
 @overload
 def select_max_active_dims(embeddings: np.ndarray, max_active_dims: None) -> np.ndarray: ...
+    # [FUNCTION DOC]
+    # HELPER: Typing overload: numpy input without a limit is returned as numpy (no runtime body).
 
 
 @overload
 def select_max_active_dims(embeddings: torch.Tensor, max_active_dims: None) -> torch.Tensor: ...
+    # [FUNCTION DOC]
+    # HELPER: Typing overload: tensor input without a limit is returned as a tensor (no runtime body).
 
 
 def select_max_active_dims(
     embeddings: np.ndarray | torch.Tensor, max_active_dims: int | None
 ) -> np.ndarray | torch.Tensor:
+    # [FUNCTION DOC]
+    # Keeps only the max_active_dims largest-magnitude values in each embedding (last axis), zeroing
+    # the rest. None returns the input unchanged; zero or negative raises ValueError. Numpy input is
+    # converted to a tensor (so the output is a tensor). The limit is capped at the embedding width.
+    # Builds a fresh zero tensor and scatters the original signed values at the top indices into it;
+    # the input is not mutated.
     """
     Returns a new tensor with only the top-k values (in absolute terms) of each embedding, all others set to zero.
 
@@ -230,6 +279,14 @@ def select_max_active_dims(
 
 
 def repad_flattened_features(features: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Restores padded batch layout from FlashAttention-2 flattened features, mutating the dict.
+    # Reads cumulative sequence boundaries from "cu_seq_lens_q"; splits the single flattened row of
+    # "token_embeddings" (1, total, D) and "input_ids" (1, total) into per-sequence pieces and right-pads
+    # them to the longest (zeros for embeddings and ids) into (batch, T_max, ...) tensors. Builds a
+    # boolean "attention_mask" marking positions below each sequence length. Removes the FA2 keys
+    # cu_seq_lens_q/k, max_length_q/k, seq_idx and position_ids if present. Returns the same dict.
+    # Assumes the caller has verified "cu_seq_lens_q" is present (KeyError otherwise).
     """Reverse FA2 input flattening on a features dict, in place.
 
     When :class:`Transformer` runs with FA2 unpadding, ``DataCollatorWithFlattening`` flattens the
@@ -263,6 +320,10 @@ def repad_flattened_features(features: dict[str, Any]) -> dict[str, Any]:
 
 
 def stack_padded_token_embeddings(embeddings: list[Tensor], masks: list[Tensor]) -> tuple[Tensor, Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Given lists of (B, T_i, D) token embeddings and (B, T_i) masks, right-pads all along the
+    # token axis to the max T (zeros/False) only when lengths differ, then stacks along a new
+    # dimension 1, returning (B, N, T_max, D) embeddings and (B, N, T_max) masks.
     """Stack a list of ``(B, T_i, D)`` token embeddings and their ``(B, T_i)`` masks along
     ``dim=1``, padding each column up to the batch-wide max token count.
 
@@ -283,6 +344,9 @@ def stack_padded_token_embeddings(embeddings: list[Tensor], masks: list[Tensor])
 
 
 def cat_padded_token_embeddings(embeddings: list[Tensor], masks: list[Tensor]) -> tuple[Tensor, Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Same padding rule as the stacking helper, but concatenates the chunks along dimension 0,
+    # returning (sum of B_i, T_max, D) embeddings and (sum of B_i, T_max) masks.
     """Concatenate ``(B_i, T_i, D)`` token-embedding chunks and ``(B_i, T_i)`` mask chunks along
     ``dim=0``, padding each chunk up to the chunk-wide max token count.
 
@@ -302,6 +366,9 @@ def cat_padded_token_embeddings(embeddings: list[Tensor], masks: list[Tensor]) -
 
 
 def batch_to_device(batch: dict[str, Any], target_device: device) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Moves every tensor value of the batch dict to target_device, mutating the dict in place
+    # (non-tensor values untouched), and returns the same dict.
     """
     Send a PyTorch batch (i.e., a dictionary of string keys to Tensors) to a device (e.g. "cpu", "cuda", "mps").
 
@@ -319,6 +386,9 @@ def batch_to_device(batch: dict[str, Any], target_device: device) -> dict[str, A
 
 
 def to_scipy_coo(x: Tensor) -> coo_matrix:
+    # [FUNCTION DOC]
+    # HELPER: Coalesces a 2-D sparse COO tensor, moves its indices and values to CPU numpy, and returns
+    # a SciPy COO matrix with the same shape.
     """
     Converts a sparse PyTorch tensor to a SciPy COO sparse matrix.
 
@@ -344,6 +414,12 @@ def to_scipy_coo(x: Tensor) -> coo_matrix:
 
 
 def compute_count_vector(embeddings: torch.Tensor) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # Counts, per dimension, how many embeddings have a stored (non-zero) value.
+    # Dense input is converted to sparse (dropping zeros) and coalesced. Returns an int32 tensor of the
+    # last-dimension size on the input device. 1-D input: positions of stored entries are set to 1.
+    # 2-D input: counts of each column index among stored entries (all zeros if there are none).
+    # Raises ValueError for any other dimensionality.
     """
     Compute count vector from sparse embeddings indicating how many samples have non-zero values in each dimension.
 

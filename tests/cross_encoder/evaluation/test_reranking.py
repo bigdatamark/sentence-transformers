@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pytest tests for CrossEncoderRerankingEvaluator, which scores (query, document) pairs with a CrossEncoder and
+# reports ranking metrics (MAP, MRR at k, NDCG at k) keyed with the evaluator name as prefix. Samples are dicts with
+# "query", "positive" (string or list) and exactly one of "negative" (list, scored together with positives) or
+# "documents" (a candidate list to rerank, which also yields "base_" metrics for the original order). Uses the tiny
+# reranker fixture.
 """Tests for CrossEncoderRerankingEvaluator batched prediction."""
 
 from __future__ import annotations
@@ -9,6 +15,9 @@ from sentence_transformers.cross_encoder.evaluation import CrossEncoderReranking
 
 
 def test_negative_format(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates three samples in negative format and asserts MAP, MRR at k and NDCG at k keys exist (k from the
+    # evaluator) and every metric value lies in 0 to 1.
     """Basic test with 'negative' format produces valid metrics."""
     samples = [
         {
@@ -34,6 +43,9 @@ def test_negative_format(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_documents_format(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates two samples in documents format and asserts both reranked and base MAP and NDCG at k metrics are
+    # reported.
     """Test with 'documents' format produces both base and reranked metrics."""
     samples = [
         {
@@ -58,6 +70,9 @@ def test_documents_format(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_no_relevant_docs_in_documents(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Evaluates one documents-format sample whose positive does not appear among its documents and asserts NDCG at k
+    # is still reported (no crash).
     """Edge case: positive not in documents list."""
     samples = [
         {"query": "empty", "positive": ["x"], "documents": ["a", "b", "c"]},
@@ -69,6 +84,8 @@ def test_no_relevant_docs_in_documents(reranker_bert_tiny_model: CrossEncoder) -
 
 
 def test_single_sample(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a single negative-format sample still yields NDCG at k.
     """Single sample still works."""
     samples = [
         {"query": "test", "positive": ["yes"], "negative": ["no"]},
@@ -80,6 +97,8 @@ def test_single_sample(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_string_positive(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a positive given as a plain string (not a list) is accepted and NDCG at k is reported.
     """Positive as a string (not list) is handled correctly."""
     samples = [
         {"query": "test", "positive": "yes", "negative": ["no", "nope"]},
@@ -91,6 +110,10 @@ def test_string_positive(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_validation_errors() -> None:
+    # [FUNCTION DOC]
+    # Asserts calling evaluators (with no model) on invalid samples raises ValueError: missing query (message mentions
+    # "query"), missing positive ("positive"), neither negative nor documents ("exactly one"), and both negative and
+    # documents ("exactly one"). Validation happens before the model is used.
     """Invalid samples raise clear errors."""
     with pytest.raises(ValueError, match="query"):
         CrossEncoderRerankingEvaluator([{"positive": ["a"], "negative": ["b"]}])(None)

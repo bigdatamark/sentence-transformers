@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# HELPER: Small wrappers around torch.distributed for rank/world-size queries and all-gather
+# collectives that degrade gracefully when no process group is initialized. Uses the transformers
+# logger (warning_once) and environment.is_dist_initialized.
 from __future__ import annotations
 
 import torch
@@ -11,6 +15,8 @@ logger = logging.get_logger(__name__)
 
 
 def get_rank() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Returns this process's rank in the default process group, or 0 if distributed is not initialized.
     """The rank of the current process in the distributed group, or ``0`` when not distributed."""
     if is_dist_initialized():
         return dist.get_rank()
@@ -18,6 +24,8 @@ def get_rank() -> int:
 
 
 def get_world_size() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Returns the number of processes in the default group, or 1 if distributed is not initialized.
     """The number of processes in the distributed group, or ``1`` when not distributed."""
     if is_dist_initialized():
         return dist.get_world_size()
@@ -25,6 +33,16 @@ def get_world_size() -> int:
 
 
 def all_gather(tensor: torch.Tensor, with_grad: bool = False) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # Gathers a tensor from every rank and concatenates the results along dimension 0 (rank order).
+    # Inputs: tensor (same shape on all ranks), with_grad flag.
+    # With with_grad true, uses the autograd-aware torch.distributed.nn all_gather so gradients flow
+    # back to all ranks' contributions. Otherwise allocates zero tensors per rank, runs the plain
+    # collective (no gradients), then puts the original local tensor back at the local rank's slot so
+    # at least the local part keeps its gradient.
+    # If distributed is not initialized, logs a one-time warning and returns the input tensor unchanged.
+    # Side effects: collective communication; logging.
+    # KNOWN ISSUE: the docstring says with_grad makes "the local rank's tensor" retain gradients, but the local tensor always retains gradients; with_grad actually enables gradients through the gathered tensors of all ranks.
     """
     Gathers a tensor from each distributed rank into a list. Always retains gradients for the local rank's tensor,
     and optionally retains gradients for the gathered tensors if `with_grad` is True.
@@ -64,6 +82,8 @@ def all_gather(tensor: torch.Tensor, with_grad: bool = False) -> torch.Tensor:
 
 
 def all_gather_with_grad(tensor: torch.Tensor) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Shortcut for all_gather with with_grad enabled.
     """
     Gathers a tensor from each distributed rank into a list, retaining gradients for the local rank's tensor.
 
@@ -80,6 +100,14 @@ def all_gather_with_grad(tensor: torch.Tensor) -> torch.Tensor:
 def all_gather_padded(
     tensor: torch.Tensor, mask: torch.Tensor, with_grad: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # [FUNCTION DOC]
+    # Gathers a (batch, tokens, dim) embedding tensor and its (batch, tokens) mask across ranks when
+    # the token length differs per rank. If distributed is initialized, all-reduces the local token
+    # length with a max to get the global max length, and right-pads the token axis of the embeddings
+    # (with zeros) and of the mask (with zeros/False) up to it. Then gathers the embeddings via
+    # all_gather with the given with_grad and the mask via all_gather without gradients.
+    # Returns the tuple (gathered embeddings, gathered mask). Without a process group, both are
+    # returned unchanged (with all_gather's warning).
     """All-gather a ``(B, T, D)`` token-embedding tensor and its ``(B, T)`` mask across ranks, padding
     the token axis to the cross-rank max ``T`` first.
 

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Reranking evaluator for CrossEncoder: scores each query's candidate documents, ranks them, and reports MAP,
+# MRR@k and NDCG@k, optionally compared against the incoming first-stage ranking.
 from __future__ import annotations
 
 import csv
@@ -17,6 +20,12 @@ logger = logging.getLogger(__name__)
 
 
 class CrossEncoderRerankingEvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # Evaluator holding samples (dicts with "query", "positive" (string or list) and exactly one of "negative"
+    # (list) or "documents" (a pre-ranked list that may include positives)), the cutoff k, whether all positives
+    # are always injected into the candidates, name, optional prompt name, batch size, progress bar and CSV flag.
+    # CSV file name is the class name, optional underscore name, and "_results_@k.csv"; headers are epoch, steps,
+    # MAP, MRR@k, NDCG@k. Primary metric is NDCG@k.
     """
     This class evaluates a CrossEncoder model for the task of re-ranking.
 
@@ -114,6 +123,9 @@ class CrossEncoderRerankingEvaluator(BaseEvaluator):
         write_csv: bool = True,
         mrr_at_k: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Store settings. A non-None deprecated MRR cutoff overrides k with a logged warning. A dict of samples is
+        # converted to the list of its values. Builds CSV name/headers and primary metric from k.
         super().__init__()
         self.samples = samples
         if mrr_at_k is not None:
@@ -139,6 +151,21 @@ class CrossEncoderRerankingEvaluator(BaseEvaluator):
     def __call__(
         self, model: CrossEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Evaluate the model. Validates every sample (ValueError if "query" or "positive" is missing, or not exactly
+        # one of "negative"/"documents"). For samples with documents: computes base metrics from the given order
+        # (relevance by membership in positives, missing positives appended at the end as relevant, scores
+        # descending by position; zeros if no positive appears), then candidates are either all positives followed by
+        # non-positive documents, or the documents as is (relevance by membership). For negatives: positives then
+        # negatives. Records positive/negative counts; samples with no relevant candidate are skipped (scored 0).
+        # Predicts all (query, document) pairs in one batched call, splits scores back per sample and computes MRR,
+        # NDCG and AP. Means are reported as "map", "mrr@k", "ndcg@k". When base metrics exist, logs base versus
+        # reranked, stores model-card metrics formatted with the delta from base, and adds "base_" metrics to the
+        # returned dict; otherwise logs and stores the plain metrics. Names are prefixed by the evaluator name.
+        # Appends a CSV row when enabled. Returns the metrics dict.
+        # KNOWN ISSUE: A sample whose "documents" value is an empty list is treated as falsy and falls into the
+        # negatives branch, where concatenating positives with a missing negative list raises TypeError instead of a
+        # clear error.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -308,6 +335,10 @@ class CrossEncoderRerankingEvaluator(BaseEvaluator):
         return metrics
 
     def compute_metrics(self, y_true, y_pred):
+        # [FUNCTION DOC]
+        # Compute metrics for one ranking: MRR is one over the rank of the first relevant item within the top k by
+        # predicted score (0 if none), NDCG@k via scikit-learn, and average precision over the full list (not
+        # truncated at k). Returns the three values.
         ranking = np.argsort(y_pred)[::-1]
 
         mrr = 0
@@ -321,6 +352,8 @@ class CrossEncoderRerankingEvaluator(BaseEvaluator):
         return mrr, ndcg, ap
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Return the evaluator config: k, plus the always-rerank-positives flag when samples use "documents".
         config_dict = {
             "at_k": self.at_k,
         }

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: unsupervised Contrastive Tension (CT) training of distilbert-base-uncased (max length 75, mean pooling)
+# on AskUbuntu questions, excluding any question appearing in the dev/test reranking sets (rows without positives are
+# dropped). Each training row becomes a pair (text1, text2) where text2 is the same text with probability 1/8 and a
+# random training question otherwise. Trains 1 epoch with ContrastiveTensionLoss (batch 16, lr 2e-6, no warmup or weight
+# decay, RMSprop, eval/save every 1000 steps), evaluating RerankingEvaluators on dev and test before and after.
+# Saves to output/train_askubuntu_ct-<model>-16-<timestamp>/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging; uses the unseeded random module.
 import logging
 import random
 import traceback
@@ -47,6 +55,10 @@ train_dataset = load_dataset("sentence-transformers/askubuntu-questions", split=
 
 # Generate sentence pairs for ContrastiveTensionLoss
 def to_ct_pairs(sample, pos_neg_ratio=8):
+    # [FUNCTION DOC]
+    # HELPER: map function. Input: a row with "text" and pos_neg_ratio (default 8). Returns text1 equal to the text and
+    # text2 equal to the same text with probability 1/pos_neg_ratio, otherwise the text of a random row of the global
+    # train_dataset.
     pos_neg_ratio = 1 / pos_neg_ratio
     return {
         "text1": sample["text"],

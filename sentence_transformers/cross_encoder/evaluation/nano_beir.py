@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# NanoBEIR reranking benchmark evaluator for CrossEncoder. Downloads small BEIR-derived datasets (corpus,
+# queries, relevance judgments and precomputed BM25 rankings) from the Hugging Face Hub, reranks the BM25
+# top candidates per query with the CrossEncoder via one reranking evaluator per dataset, and aggregates
+# metrics across datasets. Defines the allowed short dataset names and their capitalized display names.
 from __future__ import annotations
 
 import logging
@@ -51,6 +56,12 @@ DATASET_NAME_TO_HUMAN_READABLE = {
 
 
 class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # Evaluator holding dataset names (default: all except arguana and touche2020), the Hub dataset id, number of
+    # BM25 candidates to rerank, cutoff k, always-rerank-positives flag, prompt name, batch size, progress bar,
+    # CSV flag, an aggregation function (default mean) and its key. Its name is "NanoBEIR_R<rerank_k>_<key>".
+    # Builds the per-dataset reranking evaluators at construction. CSV file is
+    # "NanoBEIR_evaluation_<key>_results.csv"; primary metric NDCG@k.
     """
     This class evaluates a CrossEncoder model on the NanoBEIR collection of Information Retrieval datasets.
 
@@ -208,6 +219,11 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
         aggregate_fn: Callable[[list[float]], float] = np.mean,
         aggregate_key: str = "mean",
     ):
+        # [FUNCTION DOC]
+        # Store settings, default the dataset names, set the name, validate names (ValueError), and load each
+        # dataset into a reranking evaluator (network I/O, progress bar) with the shared reranking options. Sets CSV
+        # file, headers and primary metric.
+        # KNOWN ISSUE: The docstring says batch_size defaults to 64, but the signature default is 32.
         super().__init__()
         if dataset_names is None:
             # We exclude arguana and touche2020 because their Argument Retrieval meaningfully task differs from the others
@@ -250,6 +266,14 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
     def __call__(
         self, model: CrossEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1, *args, **kwargs
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Evaluate the model on each dataset. Runs every sub-evaluator, and splits each returned metric key into
+        # dataset, rerank tag and metric name (on the first two underscores), collecting per-dataset results renamed
+        # to "<dataset>_R<rerank_k>_<metric>" and lists of values per metric. Aggregates each metric with the
+        # aggregation function. Appends a CSV row with epoch, steps and aggregated MAP, MRR@k and NDCG@k (writing
+        # headers to a new file) when enabled. Logs base versus reranked aggregates and stores model-card metrics
+        # formatted with deltas from base (requires the base metrics, which exist because samples use "documents").
+        # Returns per-dataset results plus aggregates prefixed with the evaluator name.
         per_metric_results = {}
         per_dataset_results = {}
         if epoch != -1:
@@ -325,11 +349,20 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
         return per_dataset_results
 
     def _get_human_readable_name(self, dataset_name: DatasetNameType | str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Return the display name for a dataset: "Nano" plus its capitalized name plus "_R" and rerank k.
         return f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}_R{self.rerank_k}"
 
     def _load_dataset(
         self, dataset_name: DatasetNameType | str, **ir_evaluator_kwargs
     ) -> CrossEncoderRerankingEvaluator:
+        # [FUNCTION DOC]
+        # HELPER: Build the reranking evaluator for one dataset. Raises ValueError for unknown names. Loads the
+        # corpus, queries, qrels and bm25 subsets from the split named "Nano<DisplayName>" (validated columns), builds
+        # id-to-text maps and a query-id to set-of-relevant-ids map (accepting single ids or lists). Maps each BM25
+        # row to a sample with the query text, all positive texts, and the texts of the first rerank-k BM25 candidate
+        # ids as documents. Returns a reranking evaluator over those samples with the display name and kwargs.
+        # Raises KeyError if an id is missing from the maps.
         if dataset_name.lower() not in DATASET_NAME_TO_HUMAN_READABLE:
             raise ValueError(f"Dataset '{dataset_name}' is not a valid NanoBEIR dataset.")
         human_readable = DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]
@@ -360,6 +393,9 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
             qrels_mapping: dict[str, set[str]],
             rerank_k: int,
         ):
+            # [FUNCTION DOC]
+            # HELPER: Map one BM25 row to a reranking sample dict with "query" (text), "positive" (texts of all
+            # relevant ids) and "documents" (texts of the first rerank-k candidate ids). Raises KeyError on unknown ids.
             query = query_mapping[sample["query-id"]]
             positives = [corpus_mapping[positive_id] for positive_id in qrels_mapping[sample["query-id"]]]
             documents = [corpus_mapping[document_id] for document_id in sample["corpus-ids"][:rerank_k]]
@@ -387,6 +423,9 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
         )
 
     def _load_dataset_subset_split(self, subset: str, split: str, required_columns: list[str]):
+        # [FUNCTION DOC]
+        # HELPER: Load one subset split from the Hub dataset. Raises ValueError if the datasets library is missing,
+        # if loading fails (chaining the original error), or if required columns are absent. Returns the dataset.
         if not is_datasets_available():
             raise ValueError(
                 "datasets is not available. Please install it to use the CrossEncoderNanoBEIREvaluator via `pip install datasets`."
@@ -407,6 +446,8 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
         return dataset
 
     def _validate_dataset_names(self):
+        # [FUNCTION DOC]
+        # HELPER: Raise ValueError if dataset names are empty or any name (case-insensitive) is unknown.
         if len(self.dataset_names) == 0:
             raise ValueError("dataset_names cannot be empty. Use None to evaluate on all datasets.")
         missing_datasets = [
@@ -421,6 +462,8 @@ class CrossEncoderNanoBEIREvaluator(BaseEvaluator):
             )
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Return the evaluator config: dataset names and id, rerank k, k and the always-rerank-positives flag.
         return {
             "dataset_names": self.dataset_names,
             "dataset_id": self.dataset_id,

@@ -1,3 +1,5 @@
+# [MODULE DOC] Reranking evaluator: for each query with a list of positive and negative documents, ranks the documents by
+# embedding similarity and reports MAP, MRR@k and NDCG@k. Optionally appends results to a CSV.
 from __future__ import annotations
 
 import csv
@@ -25,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 class RerankingEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator state: samples (list of dicts with "query", "positive" list and "negative" list; a dict of samples
+    # is converted to its values; samples with empty positives or negatives are dropped), at_k, name, write_csv,
+    # similarity_fct (defaults to cosine similarity), batch_size, show_progress_bar, use_batched_encoding,
+    # truncate_dim, CSV file name (includes name and at_k) and headers. Primary metric is "ndcg@<at_k>".
     """
     This class evaluates a SentenceTransformer model for the task of re-ranking.
 
@@ -101,6 +107,8 @@ class RerankingEvaluator(BaseEvaluator):
         truncate_dim: int | None = None,
         mrr_at_k: int | None = None,
     ):
+        # [FUNCTION DOC] Store settings; the deprecated mrr_at_k overrides at_k with a logged warning when given. Normalize and filter
+        # samples, build CSV file name and headers, and set the primary metric.
         super().__init__()
         self.samples = samples
         self.name = name
@@ -139,6 +147,9 @@ class RerankingEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Log a header, compute MAP, MRR and NDCG via the batched or individual path, log dataset statistics
+        # (query count, min/mean/max positives and negatives) and the metrics, optionally write/append a CSV row, and
+        # return name-prefixed metrics "map", "mrr@<k>", "ndcg@<k>" after storing them in model card data.
         """
         Evaluates the model on the dataset and returns the evaluation metrics.
 
@@ -201,6 +212,7 @@ class RerankingEvaluator(BaseEvaluator):
         return metrics
 
     def compute_metrics(self, model: SentenceTransformer):
+        # [FUNCTION DOC] Dispatch to the batched computation when use_batched_encoding is set, else the per-sample computation.
         """
         Computes the evaluation metrics for the given model.
 
@@ -217,6 +229,12 @@ class RerankingEvaluator(BaseEvaluator):
         )
 
     def compute_metrics_batched(self, model: SentenceTransformer):
+        # [FUNCTION DOC] Encode all queries at once (query encoder) and all documents of all samples concatenated in order (document
+        # encoder). For each sample, slice its documents' embeddings, score them against the query with
+        # similarity_fct (taking the first row if 2-D), and compute: MRR as the reciprocal rank of the first positive
+        # within the top at_k by descending score (0 if none); NDCG@at_k with scikit-learn using binary relevance
+        # (positives first in the list); and average precision with scikit-learn over all documents. Returns a dict
+        # with the means under "map", "mrr" and "ndcg".
         """
         Computes the evaluation metrics in a batched way, by batching all queries and all documents together.
 
@@ -290,6 +308,8 @@ class RerankingEvaluator(BaseEvaluator):
         return {"map": mean_ap, "mrr": mean_mrr, "ndcg": mean_ndcg}
 
     def compute_metrics_individual(self, model: SentenceTransformer):
+        # [FUNCTION DOC] Same metrics as the batched path, but encodes each sample's query and documents separately (lower memory,
+        # progress bar over samples optional).
         """
         Computes the evaluation metrics individually by embedding every (query, positive, negative) tuple individually.
 
@@ -357,6 +377,9 @@ class RerankingEvaluator(BaseEvaluator):
         show_progress_bar: bool | None = None,
         **kwargs,
     ) -> Tensor:
+        # [FUNCTION DOC] HELPER: Encode inputs with the model's generic, query or document encoder (encode_fn_name None, "query",
+        # "document") as a tensor, using the batch size, the given progress bar flag and truncation.
+        # KNOWN ISSUE: Any other encode_fn_name leaves the encoder unassigned and raises UnboundLocalError.
         if encode_fn_name is None:
             encode_fn = model.encode
         elif encode_fn_name == "query":
@@ -373,6 +396,7 @@ class RerankingEvaluator(BaseEvaluator):
         )
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict with at_k and truncate_dim if set.
         config_dict = {"at_k": self.at_k}
         if self.truncate_dim is not None:
             config_dict["truncate_dim"] = self.truncate_dim

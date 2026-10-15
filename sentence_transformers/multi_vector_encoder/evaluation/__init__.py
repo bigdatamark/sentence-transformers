@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Evaluators for MultiVectorEncoder models: information retrieval over a corpus, the NanoBEIR benchmark
+# collection, triplet accuracy, distillation agreement against teacher scores, and reranking of candidate
+# lists. Each scores queries against documents with the model's late-interaction similarity.
+# Only re-exports; no side effects.
 from __future__ import annotations
 
 from .distillation import MultiVectorDistillationEvaluator

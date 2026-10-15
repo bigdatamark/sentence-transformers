@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Example script: LoRA finetuning of google/embeddinggemma-300m with Unsloth on the MIRIAD medical QA dataset.
+# Adds LoRA (r 32, alpha 64, attention and MLP projections) and casts to bfloat16. Streams the first 10,000 train and
+# 2,000 eval rows into in-memory Datasets and prints a sample. IR evaluator: eval questions vs. a corpus of the eval
+# passages plus 2,000 train passages, with question i relevant only to passage i. Trains with
+# MultipleNegativesRankingLoss (batch 64, gradient accumulation 2, lr 2e-5, 3% warmup, linear schedule, eval/save every
+# 20%, NO_DUPLICATES, bf16 when supported), applying the model's "query" prompt to the question column and its
+# "document" prompt to passage_text. Prints GPU memory and runtime statistics (requires CUDA), evaluates after training,
+# ranks four clinical candidate passages for an example query and prints scores, saves the LoRA adapters to
+# models/<run_name>/final and tries a Hub push. Side effects: network, disk, GPU, stdout/logging.
 import logging
 import traceback
 

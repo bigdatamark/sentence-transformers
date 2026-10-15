@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilbert-base-uncased, or first CLI arg) on STSb scored pairs with
+# MatryoshkaLoss wrapping CoSENTLoss at dims 768/512/256/128/64. Batch 16, 4 epochs, fp16, eval/save every 100 steps
+# using a SequentialEvaluator of per-dim STSb validation evaluators (main score = first). Afterwards reloads the
+# STSb test split, evaluates per dim, saves to output/matryoshka_sts_<model>-<timestamp>/final and attempts a Hub
+# push of "<model>-sts-matryoshka", logging manual instructions on failure. Side effects: network, disk, INFO logging.
 """
 This examples trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) for the STSbenchmark from scratch.
 It uses MatryoshkaLoss with the powerful CoSENTLoss to train models that perform well at output dimensions [768, 512, 256, 128, 64].

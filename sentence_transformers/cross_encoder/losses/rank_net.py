@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# RankNet pairwise learning-to-rank loss for CrossEncoder, implemented as LambdaLoss with no weighting.
 from __future__ import annotations
 
 from typing import Literal
@@ -9,6 +11,10 @@ from sentence_transformers.cross_encoder.losses import LambdaLoss, NoWeightingSc
 
 
 class RankNetLoss(LambdaLoss):
+    # [CLASS DOC]
+    # LambdaLoss subclass fixed to the no-weighting scheme, which reduces LambdaLoss to the RankNet objective:
+    # for every pair of documents of a query where one has a higher label, apply a logistic loss on the scaled
+    # score difference. Inputs are queries with lists of documents and per-document labels (binary or graded).
     def __init__(
         self,
         model: CrossEncoder,
@@ -19,6 +25,11 @@ class RankNetLoss(LambdaLoss):
         activation_fn: nn.Module | None = nn.Identity(),
         mini_batch_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Forward all parameters (model, optional top-k cutoff, sigma scale, eps, log base for the reduction,
+        # activation, mini-batch size) to LambdaLoss with a no-weighting scheme.
+        # KNOWN ISSUE: The docstring does not document the k and reduction_log parameters, which are accepted and
+        # forwarded to LambdaLoss.
         """
         RankNet loss implementation for learning to rank. This loss function implements the RankNet algorithm,
         which learns a ranking function by optimizing pairwise document comparisons using a neural network.
@@ -100,6 +111,8 @@ class RankNetLoss(LambdaLoss):
         )
 
     def get_config_dict(self) -> dict[str, float | int | str | None]:
+        # [FUNCTION DOC]
+        # Return the parent LambdaLoss config with the weighting scheme entry removed (it is fixed).
         """
         Get configuration parameters for this loss function.
 
@@ -112,6 +125,8 @@ class RankNetLoss(LambdaLoss):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation string for Burges et al. 2005 (RankNet).
         return """
 @inproceedings{burges2005learning,
   title={Learning to Rank using Gradient Descent},

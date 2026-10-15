@@ -1,3 +1,5 @@
+# [MODULE DOC] Margin-MSE distillation loss: regresses the student's score margin between a query's positive and each negative
+# document onto the teacher's margin given in the labels.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,7 +14,10 @@ from sentence_transformers.util import pairwise_dot_score, similarity_fct_name
 
 
 class MarginMSELoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model (student), similarity_fct (pairwise score of aligned rows, default dot product),
+    # loss_fct (mean squared error).
     def __init__(self, model: SentenceTransformer, similarity_fct=pairwise_dot_score) -> None:
+        # [FUNCTION DOC] Store the model, similarity function and an MSE criterion.
         """
         Compute the MSE loss between the predicted margin ``sim(Query, Pos) - sim(Query, Neg)`` and the gold margin
         ``gold_sim(Query, Pos) - gold_sim(Query, Neg)``.
@@ -172,11 +177,18 @@ class MarginMSELoss(nn.Module):
         self.loss_fct = nn.MSELoss()
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared helper and compute the loss with the labels.
         embeddings = embed_columns(self.model, sentence_features)
 
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Columns are query, positive, then one or more negatives. Student positive scores are query-vs-positive
+        # similarities. Labels may be teacher margins (batch,) or (batch, negatives), or raw teacher scores
+        # (batch, negatives + 1) which are converted to positive-minus-negative margins; a 1-D label is made a column.
+        # Raises ValueError if the final label shape is not (batch, negatives). Labels are detached. Predicted margins are
+        # positive score minus each negative's score, shaped (batch, negatives). Returns the MSE between predicted and
+        # teacher margins.
         # sentence_features: query, positive passage, negative passage(s)
         embeddings_query = embeddings[0]
         embeddings_pos = embeddings[1]
@@ -217,12 +229,14 @@ class MarginMSELoss(nn.Module):
             return self.loss_fct(margins, labels)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the similarity function's name.
         return {
             "similarity_fct": similarity_fct_name(self.similarity_fct),
         }
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the Margin-MSE paper (Hofstaetter et al.).
         return """
 @misc{hofstätter2021improving,
     title={Improving Efficient Neural Ranking Models with Cross-Architecture Knowledge Distillation},

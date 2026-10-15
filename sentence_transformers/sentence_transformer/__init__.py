@@ -1,3 +1,6 @@
+# [PACKAGE DOC] Sentence Transformer package: the dense single-vector embedding model and its training stack.
+# Re-exports the SentenceTransformer model, its model card data class, data collator, trainer and training
+# arguments, and lists them in the public names list. Importing has no side effects beyond loading these modules.
 from __future__ import annotations
 
 from .data_collator import SentenceTransformerDataCollator

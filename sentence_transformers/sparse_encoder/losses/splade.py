@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# SpladeLoss: the wrapper loss for training SPLADE-style sparse encoders. It embeds all input
+# columns once, computes a main ranking/similarity loss on the embeddings, and adds weighted
+# sparsity regularizers (FLOPS by default) on document and optionally query embeddings.
 from __future__ import annotations
 
 import logging
@@ -14,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class SpladeLoss(nn.Module):
+    # [CLASS DOC]
+    # Loss module holding the model, the main loss (which must offer compute_loss_from_embeddings), the
+    # document and query regularizer modules and weights, and use_document_regularizer_only (treat all
+    # columns as documents). Returns a dict of loss components that the trainer sums.
     def __init__(
         self,
         model: SparseEncoder,
@@ -26,6 +34,14 @@ class SpladeLoss(nn.Module):
         query_regularizer_threshold: int | None = None,
         use_document_regularizer_only: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Stores model, main loss, weights and flag. Uses the given document regularizer or a FlopsLoss
+        # with document_regularizer_threshold; uses the given query regularizer, or a FlopsLoss with
+        # query_regularizer_threshold unless use_document_regularizer_only (then no query_regularizer
+        # attribute is created). Logs a warning when the query weight is None without document-only mode
+        # (no query regularization), and when a query weight is given in document-only mode, in which case
+        # the weight is reset to None. Raises ValueError if the main loss lacks compute_loss_from_embeddings.
+        # KNOWN ISSUE: Warnings go to the root logging module rather than this module's logger.
         """
         SpladeLoss implements the loss function for the SPLADE (Sparse Lexical and Expansion) model,
         which combines a main loss function with regularization terms to control efficiency.
@@ -138,6 +154,13 @@ class SpladeLoss(nn.Module):
     def forward(
         self, sentence_features: Iterable[dict[str, torch.Tensor]], labels: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Embeds every input column with the model (keeping the first, query, column on its own forward
+        # pass unless in document-only mode). Computes the main loss from the embeddings and labels; a dict
+        # result is merged in, otherwise stored as "base_loss". Adds "document_regularizer_loss": the
+        # document regularizer on all columns concatenated (document-only mode) or on all columns but the
+        # first, times its weight; and, if a query weight is set, "query_regularizer_loss": the query
+        # regularizer on the first column times its weight. Returns the dict.
         # Compute embeddings using the model. With use_document_regularizer_only every column is a
         # document, so there is no narrow query column to keep on its own forward.
         embeddings = embed_columns(
@@ -166,6 +189,9 @@ class SpladeLoss(nn.Module):
         return losses
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Returns the config dict for the model card: the main loss object, document weight, query weight
+        # if set, regularizer class names when they are not FlopsLoss, and their thresholds when set.
         """
         Get the configuration dictionary.
 
@@ -194,6 +220,8 @@ class SpladeLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Property returning the BibTeX citation of the SPLADE hard-negative distillation paper.
         return """
 @misc{formal2022distillationhardnegativesampling,
       title={From Distillation to Hard Negative Sampling: Making Sparse Neural IR Models More Effective},

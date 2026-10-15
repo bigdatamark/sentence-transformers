@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Slow regression tests that many pretrained CrossEncoder rerankers from the Hub still produce known scores. Defines
+# flags for transformers v5 and v5.6 or newer, a fixed query about the Red Planet with four candidate documents (and
+# their query-document pairs), and a mapping from model id to expected scores for the four pairs plus constructor
+# keyword overrides. Some entries exist only for older transformers versions (trust-remote-code models incompatible
+# with v5, and XLM-R based Polish rankers broken by v5.6 tokenizer changes), and some expected scores differ between
+# v4 and v5. Several models override to bfloat16 with eager attention. Optional dependencies such as unidic-lite,
+# sentencepiece, fugashi, accelerate and protobuf are needed. Downloads large models.
 from __future__ import annotations
 
 import gc
@@ -26,6 +34,11 @@ PAIRS = [(QUERY, doc) for doc in DOCUMENTS]
 
 @pytest.fixture(autouse=True)
 def restore_cross_encoder_class():
+    # [FUNCTION DOC]
+    # HELPER: Autouse generator fixture protecting the CrossEncoder class from monkeypatching by remote code (e.g. a
+    # model that replaces the class's to and predict methods). Snapshots the class attribute dict before the test;
+    # afterwards deletes any attributes added during the test and resets any attribute whose value changed. Mutates
+    # global class state.
     """trust_remote_code models may patch the CrossEncoder class itself at import time
     (zeroentropy/zerank-1-small replaces CrossEncoder.to and CrossEncoder.predict),
     which poisons every CrossEncoder created later in the process."""
@@ -149,6 +162,11 @@ MODELS_TO_PREDICTIONS_BF16_SDPA: dict[str, tuple[list[float], dict[str, Any]]] =
 @pytest.mark.parametrize("model_name, expected_config", MODELS_TO_PREDICTIONS_BF16_SDPA.items())
 @pytest.mark.slow
 def test_pretrained_model_bf16_sdpa(model_name: str, expected_config: tuple[list[float], dict[str, Any]]) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over the expected-score mapping (marked slow). Loads the model with bfloat16 and SDPA attention by
+    # default, with the per-model overrides applied on top (an override containing model kwargs replaces the default
+    # model kwargs entirely), predicts the four pairs, converts to a list if needed, and asserts the scores are within
+    # 0.01 of the expected ones. Then deletes the model, runs garbage collection and empties the CUDA cache.
     expected_score, kwargs_override = expected_config
     kwargs = {"model_kwargs": {"torch_dtype": torch.bfloat16, "attn_implementation": "sdpa"}}
     kwargs.update(kwargs_override)

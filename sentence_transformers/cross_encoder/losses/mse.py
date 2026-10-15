@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pointwise MSE loss for CrossEncoder regression/distillation against target scores.
 from __future__ import annotations
 
 from torch import Tensor, nn
@@ -7,7 +9,14 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class MSELoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, an activation function
+    # applied to logits (identity default), and an inner torch MSE loss built from extra kwargs. Expects two
+    # text columns and a float target score per pair (gold label or teacher score).
     def __init__(self, model: CrossEncoder, activation_fn: nn.Module = nn.Identity(), **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Store model, activation, and build the inner MSE loss. Raises ValueError if the model is not a
+        # CrossEncoder or if it has more than or fewer than one output label.
         """
         Computes the MSE loss between the computed query-document score and a target query-document score. This loss
         is used to distill a cross-encoder model from a teacher cross-encoder model or gold labels.
@@ -88,6 +97,11 @@ class MSELoss(nn.Module):
     def forward(
         self, inputs: list[list[str]], labels: Tensor, prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss for one batch. Inputs: exactly two text columns, a target tensor, and optional
+        # prompt/task. Zips columns into pairs, tokenizes and moves to device, runs the model, flattens the
+        # "scores" to one value per pair, applies the activation, and returns the mean squared error against the
+        # detached float targets. Raises ValueError unless there are exactly two columns.
         if len(inputs) != 2:
             raise ValueError(
                 f"MSELoss expects a dataset with two non-label columns, but got a dataset with {len(inputs)} columns."
@@ -102,6 +116,8 @@ class MSELoss(nn.Module):
         return loss
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Return the loss config for model cards: the activation function's fully qualified name.
         return {
             "activation_fn": fullname(self.activation_fn),
         }

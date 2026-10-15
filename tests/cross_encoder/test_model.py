@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Pytest tests for the CrossEncoder model class: loading options (classifier dropout, revision, device, dtype,
+# deprecated argument names), predict and rank behaviour (input shapes, output types, softmax, low precision, empty
+# and NumPy inputs, per-call processing kwargs), serialization, number of labels and default activation for module
+# stacks without a Transformer, Hub pushing with mocked HfApi, argument-renaming decorators, activation function
+# persistence, chat-template handling for query/document pair roles, Qwen3 reranker parity (CUDA only), and conversion
+# from a SentenceTransformer checkpoint. Many tests download tiny models from the Hub; fixtures come from the root and
+# cross-encoder conftests. Module constants include a ChatML template that echoes roles, a structured-content rerank
+# template, two Berlin query/document pairs, and the error substring used when a chat template cannot carry the pair
+# roles.
 from __future__ import annotations
 
 import json
@@ -28,18 +38,27 @@ from tests.utils import GENERIC_INSTRUCT_TEMPLATE, RERANKER_TEMPLATE, skip_bfloa
 
 
 def test_classifier_dropout_is_set() -> None:
+    # [FUNCTION DOC]
+    # Loads the tiny reranker with a classifier dropout of 0.1234 and asserts it is set on both the CrossEncoder
+    # config and the underlying transformer config.
     model = CrossEncoder("cross-encoder-testing/reranker-bert-tiny-gooaq-bce", classifier_dropout=0.1234)
     assert model.config.classifier_dropout == 0.1234
     assert model.model.config.classifier_dropout == 0.1234
 
 
 def test_classifier_dropout_default_value(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts the tiny reranker fixture has no classifier dropout set (None) on both configs.
     model = reranker_bert_tiny_model
     assert model.config.classifier_dropout is None
     assert model.model.config.classifier_dropout is None
 
 
 def test_load_with_revision() -> None:
+    # [FUNCTION DOC]
+    # Loads the tiny STSB BERT checkpoint (one label, randomly initialised classifier) at revision main, at a commit
+    # equal to main, and at an older commit; copies main's classifier weight and bias into the other two, then asserts
+    # predictions on one pair are identical for main and the equal commit and different for the older commit.
     model_name = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
     main_model = CrossEncoder(model_name, num_labels=1, revision="main")
@@ -76,6 +95,11 @@ def test_load_with_revision() -> None:
     ids=["return-docs", "no-return-docs"],
 )
 def test_rank(return_documents: bool, request: FixtureRequest) -> None:
+    # [FUNCTION DOC]
+    # Parametrised on returning documents. Ranks nine sentences against the query "A man is eating pasta." with the
+    # pretrained stsb-distilroberta-base cross-encoder and asserts the corpus id order equals the expected ranking;
+    # when documents are returned (identified via the parametrize id), also asserts the returned texts are exactly the
+    # corpus.
     model = CrossEncoder("cross-encoder/stsb-distilroberta-base")
     # We want to compute the similarity between the query sentence
     query = "A man is eating pasta."
@@ -104,6 +128,8 @@ def test_rank(return_documents: bool, request: FixtureRequest) -> None:
 
 
 def test_rank_scores_are_floats(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts rank results contain plain Python float scores and are JSON serialisable.
     ranks = reranker_bert_tiny_model.rank("A man is eating pasta.", ["A man is eating food.", "A monkey is playing."])
     assert [type(rank["score"]) for rank in ranks] == [float, float]
     json.dumps(ranks)
@@ -111,6 +137,9 @@ def test_rank_scores_are_floats(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 @pytest.mark.parametrize("kwarg", ["convert_to_numpy", "convert_to_tensor"])
 def test_rank_convert_kwargs_deprecated(reranker_bert_tiny_model: CrossEncoder, kwarg: str, caplog) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over the removed convert-to-numpy and convert-to-tensor keywords. Asserts passing one to rank logs
+    # a warning naming it and still returns float scores.
     # Annotated as Any so type checkers don't match the removed kwarg against every remaining parameter
     deprecated_kwargs: dict[str, Any] = {kwarg: True}
     with caplog.at_level(logging.WARNING):
@@ -121,6 +150,9 @@ def test_rank_convert_kwargs_deprecated(reranker_bert_tiny_model: CrossEncoder, 
 
 
 def test_rank_multiple_labels(nli_minilm_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts rank on the three-label NLI model raises ValueError stating rank only works with one label and
+    # suggesting predict.
     model = nli_minilm_model
     with pytest.raises(
         ValueError,
@@ -140,6 +172,9 @@ def test_rank_multiple_labels(nli_minilm_model: CrossEncoder):
 
 
 def test_predict_softmax(nli_minilm_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # On the NLI model, asserts that with softmax applied each pair's three scores sum to 1, and that without softmax
+    # they do not all sum to 1.
     model = nli_minilm_model
     query = "A man is eating pasta."
 
@@ -158,6 +193,10 @@ def test_predict_softmax(nli_minilm_model: CrossEncoder):
 
 @skip_bfloat16_cpu_crash
 def test_predict_low_precision_logits_upcast_to_float32(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Skipped where bfloat16 CPU crashes; xfails on CPU with torch 2.5.0 or older. Predicts two pairs in float32 as
+    # reference, casts the underlying transformer to bfloat16, predicts again, and asserts the result is still float32
+    # and within 1e-2 of the reference (activation applied after upcasting logits).
     """The activation over cross-encoder logits must run in float32 for low-precision models (HPS).
 
     Applying sigmoid/softmax to float16/bfloat16 logits buckets the (0, 1) probability range
@@ -182,6 +221,10 @@ def test_predict_low_precision_logits_upcast_to_float32(reranker_bert_tiny_model
 
 @pytest.mark.parametrize("model_fixture", ["reranker_bert_tiny_model", "nli_minilm_model"])
 def test_predict_single_input(model_fixture: str, request: FixtureRequest):
+    # [FUNCTION DOC]
+    # Parametrised over the tiny reranker and the NLI model (resolved via the fixture request). Asserts a list
+    # containing one pair returns an array of shape one (or one by the label count), and a bare pair returns a NumPy
+    # float32 scalar for one label or a vector of label-count length otherwise.
     model = request.getfixturevalue(model_fixture)
     nested_pair_score = model.predict([["A man is eating pasta.", "A man is eating food."]])
     assert isinstance(nested_pair_score, np.ndarray)
@@ -199,21 +242,30 @@ def test_predict_single_input(model_fixture: str, request: FixtureRequest):
 
 
 def test_is_singular_input_numpy_1d_pair(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a 1-D NumPy string array is considered a single input.
     """A 1D numpy string array represents a single (query, document) pair."""
     assert reranker_bert_tiny_model.is_singular_input(np.array(["query", "document"])) is True
 
 
 def test_is_singular_input_numpy_2d_pairs(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a 2-D NumPy string array is considered a batch, not a single input.
     """A 2D numpy string array is a batch of pairs."""
     assert reranker_bert_tiny_model.is_singular_input(np.array([["q1", "d1"], ["q2", "d2"]])) is False
 
 
 def test_is_singular_input_numpy_empty(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts an empty NumPy string array is considered an empty batch, not a single input.
     """An empty 1D string ndarray is an empty batch, not a singular pair, matching ``predict([])``."""
     assert reranker_bert_tiny_model.is_singular_input(np.array([], dtype=str)) is False
 
 
 def test_predict_numpy_empty(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts predicting an empty NumPy string array returns an empty array of shape zero equal to predicting an empty
+    # list.
     """Predicting on an empty string ndarray should return an empty array, like ``predict([])``."""
     scores = reranker_bert_tiny_model.predict(np.array([], dtype=str), show_progress_bar=False)
     expected = reranker_bert_tiny_model.predict([], show_progress_bar=False)
@@ -222,6 +274,8 @@ def test_predict_numpy_empty(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_predict_numpy_1d_pair(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts predicting a 1-D NumPy pair returns a float32 scalar close to predicting the equivalent tuple.
     """Predicting on a 1D numpy string array (a single pair) should match the tuple equivalent
     and return a scalar score. Exercises the singular-branch .tolist() conversion."""
     model = reranker_bert_tiny_model
@@ -233,6 +287,8 @@ def test_predict_numpy_1d_pair(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_predict_numpy_2d_pairs(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts predicting a 2-D NumPy array of two pairs returns two scores matching the nested-list equivalent.
     """Predicting on a 2D numpy string array should match predicting on the equivalent nested list."""
     pairs = np.array([["what is AI?", "AI is artificial intelligence."], ["what is ML?", "ML is machine learning."]])
     scores = reranker_bert_tiny_model.predict(pairs, show_progress_bar=False)
@@ -242,6 +298,10 @@ def test_predict_numpy_2d_pairs(reranker_bert_tiny_model: CrossEncoder) -> None:
 
 
 def test_predict_batch_size_1(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Regression test: replaces the model's forward with a wrapper that squeezes the trailing dimension of the
+    # "scores" output (mimicking models that return one-dimensional scores), predicts two pairs with batch size 1, and
+    # asserts a NumPy array of shape two (no zero-dimensional collapse).
     """Regression test: batch_size=1 with num_labels=1 used to fail because squeeze produced a 0-d tensor.
 
     Some models (e.g. jinaai/jina-reranker-m0) return scores with shape [batch_size] instead of [batch_size, 1].
@@ -257,6 +317,9 @@ def test_predict_batch_size_1(reranker_bert_tiny_model: CrossEncoder) -> None:
     original_forward = model.forward
 
     def forward_without_trailing_dim(features, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Calls the original forward, removes the last dimension of the "scores" tensor in the output dict,
+        # and returns the dict.
         out = original_forward(features, **kwargs)
         # Simulate models that return [batch_size] instead of [batch_size, 1]
         out["scores"] = out["scores"].squeeze(-1)
@@ -272,6 +335,10 @@ def test_predict_batch_size_1(reranker_bert_tiny_model: CrossEncoder) -> None:
 @pytest.mark.parametrize("convert_to_numpy", [True, False])
 @pytest.mark.parametrize("convert_to_tensor", [True, False])
 def test_empty_predict(reranker_bert_tiny_model: CrossEncoder, convert_to_numpy: bool, convert_to_tensor: bool):
+    # [FUNCTION DOC]
+    # Parametrised over convert-to-NumPy and convert-to-tensor. Asserts predicting an empty list returns an empty
+    # tensor on the model's device when tensors are requested, else an empty NumPy array when NumPy is requested, else
+    # an empty list.
     model = reranker_bert_tiny_model
     result = model.predict([], convert_to_numpy=convert_to_numpy, convert_to_tensor=convert_to_tensor)
 
@@ -291,6 +358,9 @@ def test_empty_predict(reranker_bert_tiny_model: CrossEncoder, convert_to_numpy:
 def test_predict_output_types(
     reranker_bert_tiny_model: CrossEncoder, convert_to_tensor: bool, convert_to_numpy: bool
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over the same flags. Predicts one pair and asserts a float32 tensor when tensors are requested,
+    # else a float32 NumPy array when NumPy is requested, else a list whose first element is a float32 tensor.
     model = reranker_bert_tiny_model
     embeddings = model.predict(
         [["One sentence", "Another sentence"]],
@@ -310,6 +380,10 @@ def test_predict_output_types(
 
 @pytest.mark.parametrize("safe_serialization", [True, False, None])
 def test_safe_serialization(reranker_bert_tiny_model: CrossEncoder, safe_serialization: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over safe serialization true, false and unset. Saves into a temporary directory and asserts exactly
+    # one safetensors file when true or unset; when false, only on transformers older than 5.0 asserts exactly one
+    # PyTorch bin file (v5 ignores the option, so nothing is checked).
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as cache_folder:
         model = reranker_bert_tiny_model
         if safe_serialization:
@@ -329,6 +403,9 @@ def test_safe_serialization(reranker_bert_tiny_model: CrossEncoder, safe_seriali
 
 
 def test_bfloat16() -> None:
+    # [FUNCTION DOC]
+    # Skips on Windows without CUDA. Loads the tiny reranker with the deprecated automodel argument setting bfloat16,
+    # and asserts predict returns a NumPy array and rank returns a list.
     if sys.platform == "win32" and not torch.cuda.is_available():
         pytest.skip(
             "bfloat16 CPU matmul can hard-crash (0xc000001d) on some Windows machines. Skipping to avoid CI failures."
@@ -346,12 +423,17 @@ def test_bfloat16() -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test moving devices effectively.")
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_device_assignment(device):
+    # [FUNCTION DOC]
+    # Requires CUDA; parametrised over cpu and cuda. Asserts loading with that device reports it.
     model = CrossEncoder("cross-encoder-testing/reranker-bert-tiny-gooaq-bce", device=device)
     assert model.device.type == device
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test moving devices effectively.")
 def test_device_switching():
+    # [FUNCTION DOC]
+    # Requires CUDA. Loads on CPU, asserts the model and underlying transformer are on CPU, moves to CUDA and asserts
+    # both report CUDA, then frees the model and empties the CUDA cache.
     # test assignment using .to
     model = CrossEncoder("cross-encoder-testing/reranker-bert-tiny-gooaq-bce", device="cpu")
     assert model.device.type == "cpu"
@@ -367,6 +449,9 @@ def test_device_switching():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test moving devices effectively.")
 def test_target_device_backwards_compat():
+    # [FUNCTION DOC]
+    # Requires CUDA. Asserts the legacy private target-device attribute reads as CPU and that assigning "cuda" to it
+    # moves the model to CUDA.
     model = CrossEncoder("cross-encoder-testing/reranker-bert-tiny-gooaq-bce", device="cpu")
     assert model.device.type == "cpu"
 
@@ -376,6 +461,8 @@ def test_target_device_backwards_compat():
 
 
 def test_num_labels_fresh_model():
+    # [FUNCTION DOC]
+    # Asserts a fresh CrossEncoder from a checkpoint without a classification head defaults to one label.
     model = CrossEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
     assert model.num_labels == 1
 
@@ -386,6 +473,9 @@ def test_num_labels_fresh_model():
 # Transformer + Pooling + Dense(scores) usable as rerankers.
 @pytest.mark.parametrize("out_features", [1, 3, 7])
 def test_num_labels_from_dense_scores_module(static_embedding: StaticEmbedding, out_features: int):
+    # [FUNCTION DOC]
+    # Parametrised over output sizes 1, 3 and 7. Builds a CrossEncoder from the static embedding plus a Dense layer
+    # whose output name is "scores" and asserts the label count equals the Dense output size.
     """A Dense module with ``module_output_name="scores"`` should dictate ``num_labels``."""
     from sentence_transformers.base.modules import Dense
 
@@ -400,6 +490,9 @@ def test_num_labels_from_dense_scores_module(static_embedding: StaticEmbedding, 
 
 
 def test_num_labels_ignores_dense_without_scores_output(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Builds a CrossEncoder from the static embedding plus a 64-unit Dense layer with the default output name and
+    # asserts the label count falls back to 1.
     """A trailing Dense whose ``module_output_name`` is not ``"scores"`` must not be
     treated as the classification head by ``num_labels``.
     """
@@ -417,6 +510,9 @@ def test_num_labels_ignores_dense_without_scores_output(static_embedding: Static
 
 
 def test_config_and_model_none_without_transformer(static_embedding: StaticEmbedding):
+    # [FUNCTION DOC]
+    # Asserts that for a stack without a Transformer (static embedding plus a scores Dense), the config and model
+    # properties are None rather than raising.
     """``.config`` and ``.model`` must degrade to ``None`` when the module stack has no
     underlying HuggingFace Transformer rather than raising AttributeError on ``self[0].model``.
     """
@@ -436,6 +532,9 @@ def test_config_and_model_none_without_transformer(static_embedding: StaticEmbed
 def test_default_activation_fn_without_transformer(
     static_embedding: StaticEmbedding, out_features: int, expected_activation_cls: type
 ):
+    # [FUNCTION DOC]
+    # Parametrised over one output (expects Sigmoid) and three outputs (expects Identity). Asserts the default
+    # activation for a Transformer-less stack with a scores Dense is chosen from the label count.
     """``get_default_activation_fn`` must pick Sigmoid/Identity based on ``num_labels`` even
     when there's no Transformer (and thus no ``config``) to inspect for a saved activation.
     """
@@ -454,14 +553,26 @@ def test_default_activation_fn_without_transformer(
 def test_push_to_hub(
     reranker_bert_tiny_model: CrossEncoder, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches HfApi repository creation, folder upload and branch creation with fakes, then pushes the tiny
+    # reranker three times and asserts the repository id passed to upload and the returned URL: a commit URL with hash
+    # 123456 for a plain push, hash 678901 and the revision forwarded when a revision is given, and the discussion URL
+    # when creating a pull request.
     model = reranker_bert_tiny_model
 
     def mock_create_repo(self, repo_id, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake repository creation returning a repo URL for the id.
         return RepoUrl(f"https://huggingface.co/{repo_id}")
 
     mock_upload_folder_kwargs = {}
 
     def mock_upload_folder(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake folder upload: stores the keyword arguments in the enclosing variable and returns commit info
+        # with commit URL using hash 123456 when no revision is given else 678901, plus a pull request URL ending in
+        # discussion 123. Retries construction with an extra endpoint argument for newer huggingface_hub versions that
+        # require it.
         nonlocal mock_upload_folder_kwargs
         mock_upload_folder_kwargs = kwargs
         commit_hash = "123456" if kwargs.get("revision") is None else "678901"
@@ -479,6 +590,8 @@ def test_push_to_hub(
             return CommitInfo(**commit_info_kwargs, _endpoint=None)
 
     def mock_create_branch(self, repo_id, branch, revision=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake branch creation that does nothing and returns None.
         return None
 
     monkeypatch.setattr(HfApi, "create_repo", mock_create_repo)
@@ -595,11 +708,21 @@ def test_push_to_hub(
 def test_init_args_decorator(
     monkeypatch: pytest.MonkeyPatch, in_args: tuple, in_kwargs: dict, out_args: tuple, out_kwargs: dict
 ):
+    # [FUNCTION DOC]
+    # Parametrised with input positional/keyword arguments and expected outputs. Replaces the CrossEncoder constructor
+    # with a dummy wrapped by the init-argument decorator that records what it receives, constructs a CrossEncoder,
+    # and asserts the decorator mapped deprecated names: model name to model name or path, classifier dropout into
+    # config kwargs, automodel args to model kwargs, tokenizer args to processor kwargs, config args to config kwargs,
+    # cache dir to cache folder, and default activation function to activation fn; when both an old and new name are
+    # given the new one wins; empty inputs pass through.
     decorated_out_args = None
     decorated_out_kwargs = None
 
     @cross_encoder_init_args_decorator
     def mock_init(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Dummy constructor decorated with the init-argument decorator; stores the positional and keyword
+        # arguments it receives in the enclosing variables.
         nonlocal decorated_out_args
         nonlocal decorated_out_kwargs
         decorated_out_args = args
@@ -637,11 +760,17 @@ def test_init_args_decorator(
 def test_predict_rank_args_decorator(
     reranker_bert_tiny_model: CrossEncoder, monkeypatch: pytest.MonkeyPatch, caplog, in_kwargs: dict, out_kwargs: dict
 ):
+    # [FUNCTION DOC]
+    # Parametrised with input and expected keyword arguments. Replaces predict with a dummy wrapped by the
+    # predict/rank argument decorator, calls it, and asserts a warning was logged and that the decorator dropped num
+    # workers, dropped the old activation keyword when the new one is present, and renamed sentences to inputs.
     model = reranker_bert_tiny_model
     decorated_out_kwargs = None
 
     @cross_encoder_predict_rank_args_decorator
     def mock_predict(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Dummy predict decorated with the predict/rank decorator; stores the keyword arguments it receives.
         nonlocal decorated_out_kwargs
         decorated_out_kwargs = kwargs
         return None
@@ -655,6 +784,9 @@ def test_predict_rank_args_decorator(
 
 
 def test_logger_warning(caplog):
+    # [FUNCTION DOC]
+    # Asserts loading with classifier dropout, automodel args, tokenizer args or config args each logs the
+    # corresponding deprecation/rename warning.
     model_name = "cross-encoder-testing/reranker-bert-tiny-gooaq-bce"
     with caplog.at_level(logging.WARNING):
         CrossEncoder(model_name, classifier_dropout=0.1234)
@@ -709,6 +841,12 @@ def test_logger_warning(caplog):
     ],
 )
 def test_load_activation_fn_from_kwargs(num_labels: int, activation_fn: str, saved_activation_fn: str, tmp_path: Path):
+    # [FUNCTION DOC]
+    # Parametrised over label count, activation passed to the constructor (Sigmoid, Identity, Tanh, Softmax or None)
+    # and the expected saved full class path (None gives Sigmoid for one label, Identity for three). Asserts the
+    # model's activation has that path, that saving writes it to the Sentence Transformers config, that reloading
+    # restores it, that a per-call activation in predict does not change the stored one, and that passing an
+    # activation when reloading overrides it.
     model = CrossEncoder(
         "sentence-transformers-testing/stsb-bert-tiny-safetensors", num_labels=num_labels, activation_fn=activation_fn
     )
@@ -739,6 +877,9 @@ def test_load_activation_fn_from_kwargs(num_labels: int, activation_fn: str, sav
     ],
 )
 def test_load_activation_fn_from_config(tanh_model_name: str, tmp_path):
+    # [FUNCTION DOC]
+    # Parametrised over two tiny checkpoints saved with a Tanh activation in v3 and v4 formats. Asserts the activation
+    # loads as Tanh, is written back on save, and is restored on reload.
     saved_activation_fn = "torch.nn.modules.activation.Tanh"
 
     model = CrossEncoder(tanh_model_name)
@@ -754,6 +895,10 @@ def test_load_activation_fn_from_config(tanh_model_name: str, tmp_path):
 
 
 def test_load_activation_fn_from_config_custom(reranker_bert_tiny_model: CrossEncoder, tmp_path: Path, caplog):
+    # [FUNCTION DOC]
+    # Saves the tiny reranker, rewrites its config to name an untrusted custom activation path, asserts loading logs
+    # that the path is not trusted and the default is used, and asserts loading with trust remote code raises
+    # ModuleNotFoundError because the module does not exist.
     model = reranker_bert_tiny_model
 
     model.save_pretrained(tmp_path)
@@ -776,6 +921,9 @@ def test_load_activation_fn_from_config_custom(reranker_bert_tiny_model: CrossEn
 
 
 def test_default_activation_fn(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts the tiny reranker's activation is Sigmoid and that the deprecated default activation property returns
+    # the same while emitting a DeprecationWarning.
     model = reranker_bert_tiny_model
     assert fullname(model.activation_fn) == "torch.nn.modules.activation.Sigmoid"
     with pytest.warns(
@@ -785,6 +933,9 @@ def test_default_activation_fn(reranker_bert_tiny_model: CrossEncoder):
 
 
 def test_bge_reranker_max_length():
+    # [FUNCTION DOC]
+    # Loads BAAI/bge-reranker-base and asserts max length and tokenizer max length are 512; after setting max length
+    # to 256 both report 256.
     model = CrossEncoder("BAAI/bge-reranker-base")
     assert model.max_length == 512
     assert model.tokenizer.model_max_length == 512
@@ -795,6 +946,8 @@ def test_bge_reranker_max_length():
 
 
 def test_predict_with_dataset_column(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts predicting a Hugging Face Dataset column holding two text pairs (as tensors) returns two scores.
     """Test that predict can handle a dataset column as input."""
     model = reranker_bert_tiny_model
     from datasets import Dataset
@@ -817,6 +970,9 @@ def test_predict_with_dataset_column(reranker_bert_tiny_model: CrossEncoder) -> 
 
 
 def test_predict_per_call_processing_kwargs(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts predicting one pair with per-call processing kwargs that truncate text to 4 tokens gives a different
+    # score than predicting without them, proving the kwargs reach preprocessing.
     """Per-call ``processing_kwargs`` should be accepted by ``predict`` and reach ``preprocess``.
 
     If the kwarg were silently dropped, truncated and full predictions on the same pair would
@@ -851,6 +1007,10 @@ PAIR_ROLES_DROPPED = "cannot carry a 'query'/'document' pair"
 
 
 def test_replacing_a_rejected_chat_template_takes_effect() -> None:
+    # [FUNCTION DOC]
+    # Loads the tiny reranker with a generic instruct chat template that cannot render query/document roles and
+    # asserts predicting pairs raises ValueError about the pair roles; then sets the processor's chat template to the
+    # reranker template and asserts preprocessing a pair now renders the query text.
     """The error names a remedy, so applying it to a loaded model has to work."""
     model = CrossEncoder(
         "cross-encoder-testing/reranker-bert-tiny-gooaq-bce",
@@ -867,6 +1027,9 @@ def test_replacing_a_rejected_chat_template_takes_effect() -> None:
 
 
 def test_preprocess_raises_on_non_text_pair_without_pair_roles() -> None:
+    # [FUNCTION DOC]
+    # With the generic instruct template, asserts preprocessing an (image, text) pair raises the pair-roles
+    # ValueError, also when a text pair shares the batch.
     """Non-text pairs reach the roles by a different route, and are dropped just the same."""
     model = CrossEncoder(
         "cross-encoder-testing/reranker-bert-tiny-gooaq-bce",
@@ -881,6 +1044,10 @@ def test_preprocess_raises_on_non_text_pair_without_pair_roles() -> None:
 
 
 def test_predict_raises_on_chat_template_without_pair_roles() -> None:
+    # [FUNCTION DOC]
+    # With the generic instruct template, asserts the transformer has a message modality and reports a pair-roles
+    # failure, that predicting pairs raises the pair-roles ValueError, and that single texts still preprocess and
+    # decode containing the input.
     """A chat template that drops the pair roles must be reported, not worked around.
 
     Backbones such as the Qwen3 instruct models carry a template that only branches on
@@ -906,6 +1073,9 @@ def test_predict_raises_on_chat_template_without_pair_roles() -> None:
 
 
 def test_predict_raises_on_mixed_batch_containing_a_pair() -> None:
+    # [FUNCTION DOC]
+    # With the generic instruct template, asserts a batch mixing a single text and a pair raises the pair-roles
+    # ValueError.
     """One pair in a batch is enough, its content would be dropped just the same."""
     model = CrossEncoder(
         "cross-encoder-testing/reranker-bert-tiny-gooaq-bce",
@@ -916,6 +1086,9 @@ def test_predict_raises_on_mixed_batch_containing_a_pair() -> None:
 
 
 def test_predict_applies_chat_template_with_pair_roles() -> None:
+    # [FUNCTION DOC]
+    # With the reranker template, asserts no pair-roles failure is reported and that the decoded preprocessed pair
+    # contains the query and document sections.
     """A template that does reference the ``query``/``document`` roles must still be applied."""
     model = CrossEncoder(
         "cross-encoder-testing/reranker-bert-tiny-gooaq-bce",
@@ -931,6 +1104,9 @@ def test_predict_applies_chat_template_with_pair_roles() -> None:
 
 
 def test_predict_applies_chat_template_that_only_echoes_the_role() -> None:
+    # [FUNCTION DOC]
+    # With the ChatML template that echoes roles, asserts no pair-roles failure is reported and the decoded pair
+    # contains both role names and both texts.
     """A template that carries unknown roles through must keep working, not raise.
 
     Pass-through ChatML templates such as SmolLM2's emit ``message['role']`` verbatim, so they never
@@ -951,6 +1127,9 @@ def test_predict_applies_chat_template_that_only_echoes_the_role() -> None:
 
 
 def test_message_input_with_a_single_pair_role_is_not_checked() -> None:
+    # [FUNCTION DOC]
+    # With a template that renders only the query role, asserts a hand-written message using only the query role
+    # preprocesses and decodes with the instruct prefix (no pair-roles check applies).
     """A hand-written message may use one pair role alone, and that is not a pair.
 
     The check guards the pair mapping, which always produces both roles in one conversation, so a
@@ -968,6 +1147,10 @@ def test_message_input_with_a_single_pair_role_is_not_checked() -> None:
 
 
 def test_probe_uses_the_configured_chat_template_kwargs() -> None:
+    # [FUNCTION DOC]
+    # With a dict of named templates (default generic instruct, plus "reranker" structured template), asserts
+    # preprocessing a pair raises the pair-roles ValueError whose remedy mentions structured content access; then
+    # selects the "reranker" template via processing kwargs and asserts the pair renders the query section.
     """A model may select a named rerank template via processing kwargs, as Qwen3-VL-Reranker does.
 
     The probe must measure the selected template rather than the default one, since rejecting the
@@ -993,6 +1176,10 @@ def test_probe_uses_the_configured_chat_template_kwargs() -> None:
 
 # Test suite converted from demo_3406_simple_og.py
 def format_queries(query, instruction=None):
+    # [FUNCTION DOC]
+    # HELPER: Formats a query for the Qwen3 reranker: a fixed system prompt asking for a yes/no relevance judgement,
+    # then a user turn containing an Instruct line (default web search instruction when none is given) and a Query
+    # line. Returns the string.
     """Helper function to format queries with the template."""
     prefix = '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'
     if instruction is None:
@@ -1001,6 +1188,9 @@ def format_queries(query, instruction=None):
 
 
 def format_document(document):
+    # [FUNCTION DOC]
+    # HELPER: Formats a document for the Qwen3 reranker as a Document line followed by the end-of-user and
+    # start-of-assistant tokens with an empty think block. Returns the string.
     """Helper function to format documents with the template."""
     suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
     return f"<Document>: {document}{suffix}"
@@ -1008,6 +1198,10 @@ def format_document(document):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_qwen3_reranker_formatted_pairs():
+    # [FUNCTION DOC]
+    # Requires CUDA. Loads the sequence-classification conversion of Qwen3-Reranker-0.6B with identity activation,
+    # predicts four manually formatted query/document pairs, and asserts the scores match fixed expected logits within
+    # 1e-4.
     """Test Qwen3 Reranker with manually formatted query-document pairs."""
     model = CrossEncoder("tomaarsen/Qwen3-Reranker-0.6B-seq-cls", activation_fn=torch.nn.Identity())
     task = "Given a web search query, retrieve relevant passages that answer the query"
@@ -1036,6 +1230,9 @@ def test_qwen3_reranker_formatted_pairs():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_qwen3_reranker_with_chat_template():
+    # [FUNCTION DOC]
+    # Requires CUDA. Same model and expected scores, but with a chat template rendering the system/query/document
+    # roles, a "web_search" prompt set as default, and plain pairs.
     """Test Qwen3 Reranker with Chat template."""
     chat_template = """\
 <|im_start|>system
@@ -1073,6 +1270,10 @@ Judge whether the Document meets the requirements based on the Query and the Ins
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_qwen3_reranker_original_with_identity_activation():
+    # [FUNCTION DOC]
+    # Requires CUDA. Loads the original Qwen/Qwen3-Reranker-0.6B (converted on load to a logit-scoring CrossEncoder)
+    # in float32 with identity activation, the role-rendering chat template and the default web-search prompt; asserts
+    # float32 dtype and that scores on the four pairs match the same expected values.
     """Test original Qwen3 Reranker with Identity activation function."""
     chat_template = """\
 <|im_start|>system
@@ -1112,6 +1313,9 @@ Judge whether the Document meets the requirements based on the Query and the Ins
 
 
 def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Saves a SentenceTransformer with a query prompt set as default, loads the directory as a CrossEncoder
+    # (conversion adds a fresh head), and asserts the prompts are empty and no default prompt name is inherited.
     """Converting a SentenceTransformer save appends a fresh classification head, so the source's
     embedding prompts and default_prompt_name are not inherited: they would otherwise silently be
     prepended to every predict call."""
@@ -1130,6 +1334,9 @@ def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path: Pat
 
 
 def test_predict_routes_through_module_call(reranker_bert_tiny_model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Registers a forward hook on the CrossEncoder that records calls, predicts one pair, removes the hook, and
+    # asserts the hook fired (prediction goes through the module call so compilation applies).
     """predict() must run the forward pass via __call__ so that model.compile() applies to inference."""
     model = reranker_bert_tiny_model
     calls = []
@@ -1143,6 +1350,11 @@ def test_predict_routes_through_module_call(reranker_bert_tiny_model: CrossEncod
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_qwen3_reranker_original_without_prompt():
+    # [FUNCTION DOC]
+    # Requires CUDA. Same as the original Qwen3 test but without any prompt; relies on the chat template's default
+    # instruction and asserts the same expected scores.
+    # KNOWN ISSUE: The docstring is copied from the identity-activation test and does not mention that this variant
+    # omits the prompt.
     """Test original Qwen3 Reranker with Identity activation function."""
     chat_template = """\
 <|im_start|>system

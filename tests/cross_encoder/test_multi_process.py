@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pytest tests (all marked slow) for CrossEncoder multi-process prediction, either via an explicit pool from the
+# start/stop multi-process pool methods or by passing a list of devices to predict. Notes that importing optimum
+# intel/OpenVINO in the same session can break pickling and thus these tests. Uses the tiny reranker fixture; spawns
+# worker processes on CPU (and CUDA in one test).
 from __future__ import annotations
 
 import numpy as np
@@ -17,6 +22,10 @@ from sentence_transformers import CrossEncoder
 def test_predict_multi_process(
     reranker_bert_tiny_model: CrossEncoder, convert_to_tensor: bool, apply_softmax: bool
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over convert-to-tensor and apply-softmax. Predicts 40 pairs with a two-CPU pool and stops the pool,
+    # asserts the result is a tensor or NumPy array (according to the flag) with one score per pair and a non-zero
+    # sum, and that it matches single-process prediction within 1e-3.
     model = reranker_bert_tiny_model
     pairs = [[f"This is sentence {i}", f"This is another sentence {i}"] for i in range(40)]
 
@@ -47,6 +56,8 @@ def test_predict_multi_process(
 
 @pytest.mark.slow
 def test_multi_process_predict_same_as_standard_predict(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts predicting 15 pairs by passing two CPU devices gives scores matching standard prediction within 1e-6.
     model = reranker_bert_tiny_model
     # Test that multi-process prediction gives the same result as standard prediction
     pairs = [
@@ -67,6 +78,9 @@ def test_multi_process_predict_same_as_standard_predict(reranker_bert_tiny_model
 
 @pytest.mark.slow
 def test_multi_process_pool(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Predicts 15 pairs with an explicitly started two-CPU pool (stopped in a finally block) and asserts a NumPy array
+    # with the same shape and values (within 1e-6) as standard prediction.
     # Test the start_multi_process_pool and stop_multi_process_pool functions
     model = reranker_bert_tiny_model
     pairs = [
@@ -94,6 +108,8 @@ def test_multi_process_pool(reranker_bert_tiny_model: CrossEncoder):
 
 @pytest.mark.slow
 def test_multi_process_chunk_size(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts predicting 30 pairs on two CPU devices with chunk size 5 returns a NumPy array with one score per pair.
     # Test explicit chunk_size parameter for predict
     model = reranker_bert_tiny_model
     pairs = [
@@ -116,6 +132,10 @@ def test_multi_process_chunk_size(reranker_bert_tiny_model: CrossEncoder):
 def test_multi_process_with_empty_pairs(
     reranker_bert_tiny_model: CrossEncoder, convert_to_tensor: bool, convert_to_numpy: bool
 ):
+    # [FUNCTION DOC]
+    # Parametrised over convert-to-tensor and convert-to-NumPy. Asserts predicting an empty list with and without two
+    # CPU devices returns the same type: an empty tensor if tensors were requested, else an empty NumPy array if NumPy
+    # was requested, else an empty list.
     # Test predicting with empty pairs
     model = reranker_bert_tiny_model
     pairs: list[list[str]] = []
@@ -148,6 +168,10 @@ def test_multi_process_with_empty_pairs(
 def test_multi_process_with_single_pair(
     reranker_bert_tiny_model: CrossEncoder, convert_to_tensor: bool, convert_to_numpy: bool
 ):
+    # [FUNCTION DOC]
+    # Parametrised over the same flags. Predicts a single pair (not wrapped in a list) with and without two CPU
+    # devices and asserts the same result type, with equal shapes for arrays/tensors or values close within 1e-6 for
+    # scalars.
     # Test predicting with a single pair
     model = reranker_bert_tiny_model
     pair = ["This is a single sentence.", "This is another sentence."]
@@ -172,6 +196,8 @@ def test_multi_process_with_single_pair(
 
 @pytest.mark.slow
 def test_multi_process_more_workers_than_pairs(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts predicting two pairs with three CPU workers returns a NumPy array with two scores.
     # Test with more workers than pairs
     model = reranker_bert_tiny_model
     pairs = [["First sentence.", "Second sentence."], ["Second sentence.", "Third sentence."]]
@@ -185,6 +211,8 @@ def test_multi_process_more_workers_than_pairs(reranker_bert_tiny_model: CrossEn
 
 @pytest.mark.slow
 def test_multi_process_with_large_chunk_size(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts predicting 20 pairs with chunk size 30 on two CPU devices returns a NumPy array with 20 scores.
     # Test with a large chunk size
     model = reranker_bert_tiny_model
     pairs = [["First sentence.", "Second sentence."]] * 20  # 20 pairs
@@ -202,6 +230,9 @@ def test_multi_process_with_large_chunk_size(reranker_bert_tiny_model: CrossEnco
     not torch.cuda.is_available(), reason="CUDA must be available to experiment with 2 separate devices"
 )
 def test_multi_process_output_tensors_two_devices(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Requires CUDA. Predicts two pairs on a CPU plus CUDA device list: with convert-to-tensor asserts a tensor on CPU
+    # with two scores; by default asserts a NumPy array with two scores.
     # Test with two separate devices
     model = reranker_bert_tiny_model
     pairs = [["First sentence.", "Second sentence."], ["Second sentence.", "Third sentence."]]

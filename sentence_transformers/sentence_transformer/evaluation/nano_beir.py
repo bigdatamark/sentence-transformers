@@ -1,3 +1,6 @@
+# [MODULE DOC] NanoBEIR evaluator: runs the information retrieval evaluator on several small BEIR-derived datasets
+# loaded from the Hugging Face Hub and aggregates the per-dataset metrics (mean by default). Also defines the
+# literal type of valid dataset short names and a mapping from short name to human-readable name.
 from __future__ import annotations
 
 import logging
@@ -55,6 +58,13 @@ DATASET_NAME_TO_HUMAN_READABLE = {
 
 
 class NanoBEIREvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator that owns one information retrieval evaluator per NanoBEIR dataset. Attributes: dataset_names
+    # (short names, defaults to all), dataset_id (Hub repo), aggregate_fn and aggregate_key, write_csv, query and
+    # corpus prompts (normalized to dicts keyed by dataset name), show_progress_bar, score_functions and their
+    # sorted names, main_score_function, truncate_dim, metric k lists, name ("NanoBEIR_<aggregate_key>" plus
+    # "_<truncate_dim>" if set), evaluators list, CSV file name and headers. The class attribute
+    # information_retrieval_class selects which per-dataset evaluator class is instantiated (overridable by subclasses).
+    # KNOWN ISSUE: The docstring says score_functions defaults to cosine and dot; the code defaults to the model's own similarity function at call time.
     """
     This class evaluates the performance of a SentenceTransformer Model on the NanoBEIR collection of Information Retrieval datasets.
 
@@ -232,6 +242,11 @@ class NanoBEIREvaluator(BaseEvaluator):
         corpus_prompts: str | dict[str, str] | None = None,
         write_predictions: bool = False,
     ):
+        # [FUNCTION DOC] Store configuration, validate dataset names and prompts (ValueError on problems), then build one per-dataset
+        # evaluator for every dataset name (downloading datasets via the Hub, with a transient progress bar), forwarding
+        # the metric k lists, progress bar, batch size, CSV, truncation, score functions, main score function and
+        # write_predictions settings. Finally build the aggregated CSV file name and headers.
+        # KNOWN ISSUE: main_score_function is stored as given (not converted to a SimilarityFunction), so passing a plain string makes the primary-metric selection in the call fail when it reads its value attribute.
         super().__init__()
         if dataset_names is None:
             dataset_names = list(DATASET_NAME_TO_HUMAN_READABLE.keys())
@@ -286,6 +301,8 @@ class NanoBEIREvaluator(BaseEvaluator):
         self._append_csv_headers(self.score_function_names)
 
     def _append_csv_headers(self, score_function_names):
+        # [FUNCTION DOC] HELPER: Append "<score>-<Metric>@k" CSV headers for each score function across accuracy, precision, recall,
+        # MRR, NDCG and MAP k lists. Mutates csv_headers.
         for score_name in score_function_names:
             for k in self.accuracy_at_k:
                 self.csv_headers.append(f"{score_name}-Accuracy@{k}")
@@ -312,6 +329,14 @@ class NanoBEIREvaluator(BaseEvaluator):
         *args,
         **kwargs,
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Run all per-dataset evaluators and aggregate. Logs a header; adopts the model's similarity function if none
+        # configured. For each evaluator (optional progress bar) calls it with the model, output path, epoch and
+        # steps; each returned key is split on underscores (up to the number in this evaluator's name) to strip the
+        # dataset prefix, and the value is collected per metric suffix and also kept per dataset. Each metric list is
+        # reduced with aggregate_fn. Optionally writes/appends a CSV row of aggregated values. Chooses the primary
+        # metric once (main function's NDCG at largest k, or the best function by that NDCG). Logs average query and
+        # corpus counts and aggregated metrics. Prefixes aggregated keys with this evaluator's name, stores them in
+        # model card data (only when more than one dataset), and returns per-dataset results merged with aggregates.
         per_metric_results = {}
         per_dataset_results = {}
         if epoch != -1:
@@ -420,6 +445,8 @@ class NanoBEIREvaluator(BaseEvaluator):
         return per_dataset_results
 
     def _get_human_readable_name(self, dataset_name: DatasetNameType | str) -> str:
+        # [FUNCTION DOC] HELPER: Return "Nano<HumanReadable>" for a short dataset name (case-insensitive), with "_<truncate_dim>"
+        # appended when set. Raises KeyError for unknown names.
         human_readable_name = f"Nano{DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]}"
 
         if self.truncate_dim is not None:
@@ -429,6 +456,11 @@ class NanoBEIREvaluator(BaseEvaluator):
     def _load_dataset(
         self, dataset_name: DatasetNameType | str, **ir_evaluator_kwargs
     ) -> InformationRetrievalEvaluator:
+        # [FUNCTION DOC] HELPER: Build the information retrieval evaluator for one dataset. Raises ValueError for an unknown name.
+        # Loads the corpus, queries and qrels subsets from the split "Nano<HumanReadable>", builds id-to-text dicts
+        # for non-empty corpus and query texts and a query-id to set-of-corpus-ids dict (corpus-id may be a single id
+        # or a list). Adds the dataset's query/corpus prompt to the kwargs when prompts are configured, then
+        # instantiates the configured evaluator class with the data and the human-readable name.
         if dataset_name.lower() not in DATASET_NAME_TO_HUMAN_READABLE:
             raise ValueError(f"Dataset '{dataset_name}' is not a valid NanoBEIR dataset.")
         human_readable = DATASET_NAME_TO_HUMAN_READABLE[dataset_name.lower()]
@@ -466,6 +498,9 @@ class NanoBEIREvaluator(BaseEvaluator):
         )
 
     def _load_dataset_subset_split(self, subset: str, split: str, required_columns: list[str]):
+        # [FUNCTION DOC] HELPER: Load one subset/split of the configured Hub dataset. Raises ValueError if the datasets library is
+        # missing, if loading fails (chained from the original error), or if any required column is missing.
+        # Returns the loaded dataset. Side effect: network/disk access via the datasets library.
         if not is_datasets_available():
             raise ValueError(
                 "datasets is not available. Please install it to use the NanoBEIREvaluator via `pip install datasets`."
@@ -486,6 +521,7 @@ class NanoBEIREvaluator(BaseEvaluator):
         return dataset
 
     def _validate_dataset_names(self):
+        # [FUNCTION DOC] HELPER: Raise ValueError if dataset_names is empty or contains names (case-insensitive) not in the known mapping.
         if len(self.dataset_names) == 0:
             raise ValueError("dataset_names cannot be empty. Use None to evaluate on all datasets.")
         missing_datasets = [
@@ -500,6 +536,9 @@ class NanoBEIREvaluator(BaseEvaluator):
             )
 
     def _validate_prompts(self):
+        # [FUNCTION DOC] HELPER: Normalize prompts: a single string prompt is expanded to a dict for all datasets; a dict must contain
+        # every dataset name, otherwise a ValueError listing the missing query and/or corpus prompts is raised.
+        # Mutates query_prompts / corpus_prompts.
         error_msg = ""
         if self.query_prompts is not None:
             if isinstance(self.query_prompts, str):
@@ -521,6 +560,8 @@ class NanoBEIREvaluator(BaseEvaluator):
             raise ValueError(error_msg.strip())
 
     def store_metrics_in_model_card_data(self, *args, **kwargs):
+        # [FUNCTION DOC] Forward to the base implementation only when more than one dataset is evaluated, to avoid duplicate model
+        # card entries.
         # Only store metrics in the model card data if there is more than one dataset.
         # Otherwise the e.g. mean scores for NanoBEIR are the same as the scores for
         # the single dataset, and we'd end up with duplicate entries.
@@ -528,6 +569,7 @@ class NanoBEIREvaluator(BaseEvaluator):
             super().store_metrics_in_model_card_data(*args, **kwargs)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with dataset_names, dataset_id, and truncate_dim / query_prompts / corpus_prompts when set.
         config_dict = {"dataset_names": self.dataset_names, "dataset_id": self.dataset_id}
         config_dict_candidate_keys = ["truncate_dim", "query_prompts", "corpus_prompts"]
         for key in config_dict_candidate_keys:

@@ -1,3 +1,5 @@
+# [MODULE DOC] Batch-hard soft-margin triplet loss: for each anchor uses the hardest positive and hardest negative in the
+# batch and applies a softplus instead of a hinge, so no margin is needed.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,9 +14,13 @@ from .batch_hard_triplet import BatchHardTripletLoss, BatchHardTripletLossDistan
 
 
 class BatchHardSoftMarginTripletLoss(BatchHardTripletLoss):
+    # [CLASS DOC] Subclass of BatchHardTripletLoss (reusing its mask helpers). Attributes: sentence_embedder and distance_metric
+    # (function from an embedding matrix to a pairwise distance matrix; default Euclidean).
+    # KNOWN ISSUE: The docstring says it computes the loss over all possible valid triplets and that SiameseDistanceMetric metrics can be used; the code uses only the hardest positive/negative per anchor and calls the metric on a single embedding matrix.
     def __init__(
         self, model: SentenceTransformer, distance_metric=BatchHardTripletLossDistanceFunction.euclidean_distance
     ) -> None:
+        # [FUNCTION DOC] Initialize the parent with the model (default margin unused) and store the model and distance metric.
         """
         BatchHardSoftMarginTripletLoss takes a batch with (input, label) pairs and computes the loss for all possible, valid
         triplets, i.e., anchor and positive must have the same label, anchor and negative a different label. The labels
@@ -91,15 +97,21 @@ class BatchHardSoftMarginTripletLoss(BatchHardTripletLoss):
         self.distance_metric = distance_metric
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed the first input column and compute the loss with the labels.
         rep = self.sentence_embedder(sentence_features[0])["sentence_embedding"]
         return self.compute_loss_from_embeddings([rep], labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute the soft-margin batch-hard loss from the first embedding tensor.
         return self.batch_hard_triplet_soft_margin_loss(labels, embeddings[0])
 
     # Hard Triplet Loss with Soft Margin
     # Paper: In Defense of the Triplet Loss for Person Re-Identification, https://huggingface.co/papers/1703.07737
     def batch_hard_triplet_soft_margin_loss(self, labels: Tensor, embeddings: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute pairwise distances. Hardest positive per anchor: max over distances masked to same-label, distinct
+        # items (invalid entries become 0). Hardest negative: min over distances where same-label entries are pushed up
+        # by adding the row maximum. Loss per anchor is log(1 + exp(hardest positive minus hardest negative)); returns
+        # the mean over anchors.
         """Build the triplet loss over a batch of embeddings.
         For each anchor, we get the hardest positive and hardest negative to form a triplet.
         Args:
@@ -141,12 +153,14 @@ class BatchHardSoftMarginTripletLoss(BatchHardTripletLoss):
         return triplet_loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric's name.
         return {
             "distance_metric": getattr(self.distance_metric, "__name__", str(self.distance_metric)),
         }
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for "In Defense of the Triplet Loss for Person Re-Identification".
         return """
 @misc{hermans2017defense,
     title={In Defense of the Triplet Loss for Person Re-Identification},

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests general behaviour of the SentenceTransformer class: loading (safetensors vs bin, revisions, local dirs, custom modules, remote-code
+# trust gate), devices and dtypes, Hub pushing (mocked), serialization, prompts, encode variants (truncation, precision/quantization,
+# output values, multi-process, empty input, modality handling), similarity functions, model-card data, module containers, PEFT adapters
+# and assorted regressions. Many tests download tiny models from the Hugging Face Hub. Defines a skip marker for torch versions that cannot
+# load pytorch_model.bin under transformers 5.
 """
 Tests general behaviour of the SentenceTransformer class
 """
@@ -50,6 +56,9 @@ skip_if_torch_cannot_load_bin = pytest.mark.skipif(
 
 
 def test_load_with_safetensors() -> None:
+    # [FUNCTION DOC]
+    # Loads the tiny safetensors model into a fresh temporary cache folder and asserts exactly one model.safetensors and no pytorch_model.bin
+    # were downloaded. Network and disk I/O.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as cache_folder:
         SentenceTransformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
@@ -65,6 +74,9 @@ def test_load_with_safetensors() -> None:
 
 @skip_if_torch_cannot_load_bin
 def test_load_with_pytorch_bin(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Skipped on old torch. Builds a Transformer with safetensors disabled plus Pooling into a temporary cache, asserts only pytorch_model.bin
+    # was downloaded, and that embeddings from this model exactly equal those of the safetensors-loaded fixture.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as cache_folder:
         transformer = Transformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
@@ -89,6 +101,9 @@ def test_load_with_pytorch_bin(stsb_bert_tiny_model: SentenceTransformer) -> Non
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test moving devices effectively.")
 def test_to() -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Asserts the model starts on CPU, moves to CUDA, stays there after encoding, that the legacy _target_device attribute mirrors
+    # the device, and that assigning _target_device to "cpu" moves the model back to CPU.
     model = SentenceTransformer("sentence-transformers-testing/stsb-bert-tiny-safetensors", device="cpu")
 
     test_device = torch.device("cuda")
@@ -109,6 +124,9 @@ def test_to() -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test fp16 and bf16 inference.")
 @pytest.mark.parametrize("torch_dtype", ["auto", "float16", "bfloat16", torch.float16, torch.bfloat16])
 def test_torch_dtype(torch_dtype) -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Parametrized over several torch_dtype values (strings and dtypes). Loads a model with that dtype on CUDA and asserts the
+    # encoded vector's last dimension equals the embedding dimension.
     model = SentenceTransformer(
         "sentence-transformers-testing/all-nli-bert-tiny-dense",
         device="cuda",
@@ -121,12 +139,24 @@ def test_torch_dtype(torch_dtype) -> None:
 def test_push_to_hub(
     stsb_bert_tiny_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches HfApi create_repo, upload_folder (capturing kwargs and returning a CommitInfo whose hash depends on whether a revision is
+    # given) and create_branch. Asserts push_to_hub returns the commit URL, or the PR URL with create_pr; asserts the deprecated save_to_hub logs
+    # a deprecation warning, rejects a conflicting organization with ValueError, accepts a matching or separate organization (logging an extra
+    # warning and joining it into the repo id), forwards local_model_path as folder_path, handles the deprecated repo_name keyword and legacy
+    # positional arguments (repo name, organization, private) with commit_message, and that push_to_hub with a revision returns that commit URL.
+    # No real network I/O; checks exact log messages via caplog.
     def mock_create_repo(self, repo_id, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake create_repo returning a RepoUrl for the repo id.
         return RepoUrl(f"https://huggingface.co/{repo_id}")
 
     mock_upload_folder_kwargs = {}
 
     def mock_upload_folder(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake upload_folder; stores its kwargs in the enclosing variable and returns a CommitInfo with commit hash 123456 (no revision) or
+        # 678901 (with revision), falling back to passing an extra _endpoint argument for newer huggingface_hub versions.
         nonlocal mock_upload_folder_kwargs
         mock_upload_folder_kwargs = kwargs
         commit_hash = "123456" if kwargs.get("revision") is None else "678901"
@@ -144,6 +174,8 @@ def test_push_to_hub(
             return CommitInfo(**commit_info_kwargs, _endpoint=None)
 
     def mock_create_branch(self, repo_id, branch, revision=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake create_branch that does nothing.
         return None
 
     monkeypatch.setattr(HfApi, "create_repo", mock_create_repo)
@@ -278,6 +310,9 @@ def test_push_to_hub(
 
 @pytest.mark.parametrize("safe_serialization", [True, False, None])
 def test_safe_serialization(stsb_bert_tiny_model: SentenceTransformer, safe_serialization: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over True, False and None. Saves the model to a temporary dir and asserts one model.safetensors for True/None; for False on
+    # transformers below 5 asserts one pytorch_model.bin (on transformers 5 nothing is checked since the option is ignored).
     model = stsb_bert_tiny_model
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as cache_folder:
         if safe_serialization:
@@ -297,6 +332,9 @@ def test_safe_serialization(stsb_bert_tiny_model: SentenceTransformer, safe_seri
 
 
 def test_load_with_revision() -> None:
+    # [FUNCTION DOC]
+    # Loads the tiny model at "main", at a pinned latest commit and at an older commit; asserts main and latest embeddings are equal and older ones
+    # differ. Network.
     main_model = SentenceTransformer("sentence-transformers-testing/stsb-bert-tiny-safetensors", revision="main")
     latest_model = SentenceTransformer(
         "sentence-transformers-testing/stsb-bert-tiny-safetensors", revision="f3cb857cba53019a20df283396bcca179cf051a4"
@@ -312,6 +350,9 @@ def test_load_with_revision() -> None:
 
 
 def test_load_local_without_normalize_directory(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Appends a Normalize module, saves the model, deletes the Normalize subdirectory and asserts reloading still works (parameterless module
+    # directories may be missing). Disk I/O; mutates the per-test model.
     model = stsb_bert_tiny_model
     model.add_module("Normalize", Normalize())
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_folder:
@@ -328,6 +369,10 @@ def test_load_local_without_normalize_directory(stsb_bert_tiny_model: SentenceTr
 
 
 def test_prompts(stsb_bert_tiny_model: SentenceTransformer, caplog: pytest.LogCaptureFixture) -> None:
+    # [FUNCTION DOC]
+    # Asserts default prompts are empty for query and document with no default name. For three spellings of "query:" with varying trailing spaces,
+    # asserts encoding with an explicit prompt or a configured prompt_name equals encoding manually prefixed text, that giving both logs one warning
+    # and uses the prompt, and that an unknown prompt_name raises ValueError listing the keys. Mutates model.prompts.
     model = stsb_bert_tiny_model
     assert model.prompts == {"query": "", "document": ""}
     assert model.default_prompt_name is None
@@ -365,6 +410,9 @@ def test_prompts(stsb_bert_tiny_model: SentenceTransformer, caplog: pytest.LogCa
 
 
 def test_save_load_prompts() -> None:
+    # [FUNCTION DOC]
+    # Asserts an invalid default_prompt_name raises ValueError at load. Loads with a query prompt as default, asserts the document prompt is filled
+    # in as empty, saves to a temporary dir and asserts the config JSON stores prompts and default name, and that a reload restores them. Network and disk.
     with pytest.raises(
         ValueError,
         match=re.escape(
@@ -401,6 +449,9 @@ def test_save_load_prompts() -> None:
 
 
 def test_prompt_output_value_None(stsb_bert_tiny_model) -> None:
+    # [FUNCTION DOC]
+    # Encodes two texts with a prompt and output_value None; asserts a list of two dicts each with exactly the keys input_ids, token_type_ids,
+    # attention_mask, sentence_embedding, token_embeddings, prompt_length and modality.
     model = stsb_bert_tiny_model
     outputs = model.encode(
         ["Text one", "Text two"],
@@ -427,6 +478,11 @@ def test_prompt_output_value_None(stsb_bert_tiny_model) -> None:
 def test_prompt_length_calculation(
     stsb_bert_tiny_model: SentenceTransformer, has_bos_token: bool, has_eos_token: bool
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over whether the tokenizer adds a BOS (CLS) and/or EOS (SEP) token. Sets a query prompt, disables prompt inclusion, overrides the
+    # special token ids with dummy ids and installs a matching TemplateProcessing post-processor, verifying via preprocess that the first/last ids
+    # reflect the configuration. After encode_query, asserts the transformer's prompt-length cache maps the prompt (keyed without task) to the
+    # prompt's token count plus one when a BOS token exists. Mutates the per-test model's tokenizer.
     # This test checks that the prompt length is calculated correctly, regardless of whether the tokenizer has a
     # beginning-of-sequence or end-of-sequence token.
     model = stsb_bert_tiny_model
@@ -488,6 +544,9 @@ def test_prompt_length_calculation(
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test float16 support.")
 def test_load_with_torch_dtype(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Asserts float32 output, converts the model to half precision, saves it to a temporary dir, reloads with torch_dtype "auto",
+    # and asserts the reloaded output is float16.
     model = stsb_bert_tiny_model
 
     assert model.encode(["Hello there!"], convert_to_tensor=True).dtype == torch.float32
@@ -506,10 +565,15 @@ def test_load_with_torch_dtype(stsb_bert_tiny_model: SentenceTransformer) -> Non
 
 
 def test_load_with_model_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches Transformer's initializer to record its keyword arguments, loads the tiny model with model_kwargs for attention implementation
+    # and low_cpu_mem_usage, and asserts both reached the Transformer's model_kwargs unchanged.
     transformer_kwargs = {}
     original_transformer_init = Transformer.__init__
 
     def transformers_init(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the keyword arguments in the enclosing variable and calls the original initializer.
         nonlocal transformer_kwargs
         nonlocal original_transformer_init
         transformer_kwargs = kwargs
@@ -531,6 +595,9 @@ def test_load_with_model_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.skip("Released peft reloads injected-adapter saves with reset weights, fixed on peft main")
 @pytest.mark.skipif(not is_peft_available(), reason="PEFT must be available to test PEFT support.")
 def test_load_checkpoint_with_peft_and_lora(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Unconditionally skipped (released peft bug) and requires peft. Adds a LoRA adapter on query/key/value, saves, encodes two sentences, reloads,
+    # and asserts the reloaded auto model is a BertModel with a loaded PEFT config, active adapter "default", and identical embeddings.
     model = stsb_bert_tiny_model
     from peft import LoraConfig, TaskType
 
@@ -560,6 +627,8 @@ def test_load_checkpoint_with_peft_and_lora(stsb_bert_tiny_model: SentenceTransf
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA must be available to test float16 support.")
 def test_encode_fp16(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Converts the model to half precision and asserts encoded tensors are float16.
     tiny_model = stsb_bert_tiny_model
     tiny_model.half()
     embeddings = tiny_model.encode(["Hello there!"], convert_to_tensor=True)
@@ -589,6 +658,10 @@ def test_encode_quantization(
     expected_numpy_dtype,
     raises: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over convert_to_tensor, convert_to_numpy and precision (None, float32, int8, uint8, binary, ubinary, and an invalid value).
+    # Asserts an invalid precision raises ValueError; otherwise checks the element dtype and container: a tensor when convert_to_tensor (it wins),
+    # else a numpy array when convert_to_numpy, else a list of tensors; binary precisions map to int8/uint8 dtypes.
     tiny_model = stsb_bert_tiny_model
     with pytest.raises(ValueError, match=f"Precision '{precision}' is not supported") if raises else nullcontext():
         embeddings = tiny_model.encode(
@@ -623,12 +696,22 @@ def test_encode_truncate(
     normalize_embeddings: bool,
     output_value: Literal["sentence_embedding"] | None,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over a single string vs a list, tensor/numpy conversion, normalization and output_value. Uses untruncated tensor embeddings as
+    # reference and checks via the inner helper: the fixture model without truncation, a freshly loaded model with truncate_dim a quarter of the
+    # dimension, after raising truncate_dim to half, inside the truncate_embeddings context manager at an eighth (and restored after exit), and with
+    # truncate_dim larger than the dimension (no truncation). Downloads a model.
     model = stsb_bert_tiny_model
     embeddings_full_unnormalized: torch.Tensor = model.encode(
         sentences, convert_to_numpy=False, convert_to_tensor=True
     )  # These are raw embeddings which serve as the reference to test against
 
     def test(model: SentenceTransformer, expected_dim: int):
+        # [FUNCTION DOC]
+        # HELPER: Encodes with the outer test's settings, extracts sentence embeddings (from the dict or list of dicts when output_value is None),
+        # asserts the shape (vector for one string, matrix for a list) and that get_embedding_dimension equals expected_dim. Converts to a tensor and,
+        # unless normalization was requested with raw outputs (which are not normalized), asserts values equal the reference truncated to expected_dim,
+        # L2-normalized when requested.
         outputs = model.encode(
             sentences,
             output_value=output_value,
@@ -709,6 +792,11 @@ def test_encode_truncate(
     [v for v in SimilarityFunction.possible_values() if v in SentenceTransformer.SUPPORTED_SIMILARITY_FN_NAMES],
 )
 def test_similarity_score(stsb_bert_tiny_model: SentenceTransformer, similarity_fn_name: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over every similarity function supported by SentenceTransformer (MaxSim excluded). Encodes four normalized sentences (two about
+    # weather, two about cinema), asserts a 4x4 score matrix whose diagonal is 1 for cosine/dot and 0 for distance-based (negated) functions, that
+    # same-topic pairs score higher than cross-topic ones, and that pairwise scoring of alternating sentences yields two scores, above 0.5 for
+    # cosine/dot. Mutates model.similarity_fn_name.
     model = stsb_bert_tiny_model
     model.similarity_fn_name = similarity_fn_name
     sentences = [
@@ -737,6 +825,10 @@ def test_similarity_score(stsb_bert_tiny_model: SentenceTransformer, similarity_
 
 
 def test_similarity_score_save(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts the default similarity is cosine and remains so after computing similarities. Sets euclidean, saves to and reloads from a temporary
+    # dir, asserts the loaded model reports euclidean, and that the model's new scores differ elementwise from the cosine scores.
+    # KNOWN ISSUE: The variable holding the post-change scores is named dot_scores, but the similarity function in use is euclidean, not dot.
     model = stsb_bert_tiny_model
     embeddings = model.encode(["Sentence 1", "Sentence 2"])
     assert model.similarity_fn_name == "cosine"
@@ -754,6 +846,8 @@ def test_similarity_score_save(stsb_bert_tiny_model: SentenceTransformer) -> Non
 
 
 def test_similarity_fn_name_set_via_enum(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts assigning SimilarityFunction enum members to similarity_fn_name stores their string values (euclidean, dot).
     model = stsb_bert_tiny_model
     model.similarity_fn_name = SimilarityFunction.EUCLIDEAN
     assert model.similarity_fn_name == "euclidean"
@@ -764,6 +858,8 @@ def test_similarity_fn_name_set_via_enum(stsb_bert_tiny_model: SentenceTransform
 def test_similarity_fn_name_constructor_overrides_saved(
     stsb_bert_tiny_model: SentenceTransformer, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Saves the model with euclidean similarity to tmp_path and asserts loading with similarity_fn_name "manhattan" overrides the saved value.
     stsb_bert_tiny_model.similarity_fn_name = "euclidean"
     stsb_bert_tiny_model.save(str(tmp_path))
     model = SentenceTransformer(str(tmp_path), similarity_fn_name="manhattan")
@@ -771,6 +867,9 @@ def test_similarity_fn_name_constructor_overrides_saved(
 
 
 def test_model_card_save_update_model_id(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Clears the stored model card text so saving generates a fresh README; asserts it uses the placeholder model id. Reloads, re-saves with
+    # model_name "test_user/test_model", and asserts the new README uses that id. Disk I/O in temporary dirs.
     model = stsb_bert_tiny_model
     # Removing the saved model card will cause a fresh one to be generated when we save
     model._model_card_text = ""
@@ -828,6 +927,10 @@ def test_safetensors(
     avg_word_embeddings_levy: SentenceTransformer,
     modules: Callable[[], list[nn.Module] | SentenceTransformer],
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over module lists built from the tiny BERT and averaged-word-embedding fixtures (BERT with Pooling+Dense, CNN, LayerNorm,
+    # WeightedLayerPooling; word embeddings with LSTM; and the word model itself). Enables hidden-state output for WeightedLayerPooling, encodes a
+    # string, saves to a temporary dir, asserts only safetensors weight files exist, reloads, and asserts embeddings match within tolerance.
     modules = modules(stsb_bert_tiny_model, avg_word_embeddings_levy)  # Call the lambda to get the actual modules
     if isinstance(modules, SentenceTransformer):
         model = modules
@@ -863,6 +966,9 @@ def test_empty_encode(
     precision: str | None,
     truncate_dim: int | None,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over conversion flags, normalization, precision and truncate_dim. Encodes an empty list and asserts an empty tensor on the model
+    # device when convert_to_tensor, an empty numpy array when only convert_to_numpy, otherwise an empty list.
     model = stsb_bert_tiny_model
     embeddings = model.encode(
         [],
@@ -891,6 +997,11 @@ def test_empty_encode(
 def test_multiple_adapters(
     stsb_bert_tiny_model: SentenceTransformer, avg_word_embeddings_levy: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Requires peft, skipped in CI. Adds a randomly initialized LoRA adapter, loads one from the Hub as "hub_adapter", adds a second random one
+    # named "my_adapter", and checks peft's model status (adapters listed, enabled, my_adapter active). Encodes with my_adapter, with "default"
+    # set active, and with adapters disabled; asserts all three vectors differ pairwise and the disabled one equals the original. Finally asserts
+    # adding an adapter to the word-embedding model raises ValueError. Network.
     text = "Hello, World!"
     model = stsb_bert_tiny_model
     vec_initial = model.encode(text)
@@ -959,6 +1070,8 @@ def test_multiple_adapters(
     is_ci(), reason="huggingface_hub & PEFT incorrectly set the user agent in the CI, leading to failures."
 )
 def test_load_adapter_with_revision():
+    # [FUNCTION DOC]
+    # Requires peft, skipped in CI. Loads a LoRA adapter repo at a pinned revision as a SentenceTransformer and asserts a 128-D embedding. Network.
     model = SentenceTransformer(
         "sentence-transformers-testing/stsb-bert-tiny-lora", revision="3b4f75bcb3dec36a7e05da8c44ee2f7f1d023b1a"
     )
@@ -969,6 +1082,9 @@ def test_load_adapter_with_revision():
 # The default openai/clip-vit-base-patch32 repository only provides pytorch_model.bin weights
 @skip_if_torch_cannot_load_bin
 def test_clip():
+    # [FUNCTION DOC]
+    # Skipped on old torch. Builds the default CLIPModel (downloads openai CLIP), asserts max_seq_length and tokenizer max length are 77 and a short
+    # text tokenizes to 7 ids; sets max_seq_length to 5 and asserts the tokenizer limit follows and tokenization truncates to 5.
     model = CLIPModel()
     assert model.max_seq_length == 77
     assert model.processor.tokenizer.model_max_length == 77
@@ -998,6 +1114,10 @@ def test_encode_query(
     convert_to_tensor: bool,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # [FUNCTION DOC]
+    # Parametrized over inputs, prompt_name, prompt and conversion flags. Sets query/custom prompts and replaces encode with a spy, calls
+    # encode_query, and asserts encode was called once with inputs unchanged, prompt passed through, prompt_name equal to the given one, else None
+    # when a prompt was given, else "query", the conversion flags forwarded, and task "query".
     model = stsb_bert_tiny_model
     # Create a mock model with required prompts
     model.prompts = {"query": "query: ", "custom": "custom: "}
@@ -1005,6 +1125,8 @@ def test_encode_query(
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the positional and keyword arguments of each call; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -1056,6 +1178,8 @@ def test_encode_document(
     convert_to_tensor: bool,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # [FUNCTION DOC]
+    # Same as the encode_query test for encode_document: expected prompt_name defaults to "document" and task is "document".
     # Create a mock model with required prompts
     model = stsb_bert_tiny_model
     model.prompts = {"document": "document: ", "passage": "passage: ", "corpus": "corpus: ", "custom": "custom: "}
@@ -1063,6 +1187,8 @@ def test_encode_document(
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records call arguments; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -1100,6 +1226,9 @@ def test_encode_document(
 
 
 def test_encode_document_prompt_priority(stsb_bert_tiny_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch):
+    # [FUNCTION DOC]
+    # With encode replaced by a spy, asserts encode_document without a prompt picks the first available prompt name in priority order document,
+    # passage, corpus, and None when none of these exist.
     """Test that proper prompt priority is respected when multiple options are available"""
     model = stsb_bert_tiny_model
     model.prompts = {
@@ -1111,6 +1240,8 @@ def test_encode_document_prompt_priority(stsb_bert_tiny_model: SentenceTransform
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records call arguments; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -1145,12 +1276,17 @@ def test_encode_document_prompt_priority(stsb_bert_tiny_model: SentenceTransform
 
 
 def test_encode_advanced_parameters(stsb_bert_tiny_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch):
+    # [FUNCTION DOC]
+    # With encode replaced by a spy, calls encode_query with many options (including an arbitrary custom keyword) and asserts every one is
+    # forwarded to encode unchanged.
     """Test that additional parameters are correctly passed to encode"""
     model = stsb_bert_tiny_model
 
     encode_calls = []
 
     def spy_encode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records call arguments; returns None.
         encode_calls.append((args, kwargs))
 
     monkeypatch.setattr(model, "encode", spy_encode)
@@ -1181,6 +1317,11 @@ def test_encode_advanced_parameters(stsb_bert_tiny_model: SentenceTransformer, m
 
 @pytest.mark.parametrize("inputs", ["test sentence", ["test sentence"]])
 def test_encode_query_document_vs_encode(stsb_bert_tiny_model: SentenceTransformer, inputs: str | list[str]):
+    # [FUNCTION DOC]
+    # Parametrized over a string and a one-element list. With query/document prompts set, asserts encode_query and encode_document equal encode with
+    # the corresponding prompt_name, and that plain encode (no prompt) differs from both.
+    # KNOWN ISSUE: The two "without prompt" embeddings are computed by the same plain encode call, so they are identical; the comment suggesting
+    # they differ from each other is misleading (only the comparisons against the prompted embeddings are meaningful).
     """Test the actual integration with encode vs encode_query/encode_document"""
     # This test requires a real model, but we'll use a small one
     model = stsb_bert_tiny_model
@@ -1210,6 +1351,8 @@ def test_encode_query_document_vs_encode(stsb_bert_tiny_model: SentenceTransform
 
 
 def test_encode_with_dataset_column(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Builds a datasets Dataset with a text column and asserts encoding that column yields a tensor of shape 2 by the embedding dimension.
     """Test that encode can handle a dataset column as input."""
     model = stsb_bert_tiny_model
     from datasets import Dataset
@@ -1225,6 +1368,9 @@ def test_encode_with_dataset_column(stsb_bert_tiny_model: SentenceTransformer) -
 
 
 def test_encode_per_call_processing_kwargs(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts per-call processing_kwargs for the text modality (max length 4 with truncation) are honoured: the truncated encoding has the same
+    # shape but different values than the full encoding.
     """Per-call ``processing_kwargs`` should be accepted by ``encode`` and reach ``preprocess``.
 
     If the kwarg were silently dropped (or rejected by encode's allowlist), truncated and full
@@ -1243,6 +1389,12 @@ def test_encode_per_call_processing_kwargs(stsb_bert_tiny_model: SentenceTransfo
 
 
 def test_get_model_kwargs(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts the plain model reports no extra model kwargs and that an unknown encode keyword raises ValueError saying none are accepted. Sets
+    # forward_kwargs on the transformer and pooling modules and asserts they are aggregated, that unknown keywords raise ValueError listing them,
+    # and declared ones are accepted. Replaces the pooling module with a query/document Router of pooling copies with their own forward_kwargs and
+    # asserts the aggregate also includes task and modality and the router branches' keywords, with the same rejection/acceptance behaviour.
+    # Mutates the per-test model.
     """Test that get_model_kwargs returns the correct keyword arguments."""
     model = stsb_bert_tiny_model
 
@@ -1323,6 +1475,8 @@ def test_get_model_kwargs(stsb_bert_tiny_model: SentenceTransformer) -> None:
 
 
 def test_transformers_model_property(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts the transformers_model property returns the underlying BertModel.
     """Test that the transformers_model property returns the underlying transformers model."""
     model = stsb_bert_tiny_model
     # The underlying model should be a BertModel
@@ -1334,6 +1488,8 @@ def test_transformers_model_property(stsb_bert_tiny_model: SentenceTransformer) 
 def test_router_transformers_model_property(
     stsb_bert_tiny_model: SentenceTransformer, static_embedding_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Builds a Router with a static-embedding query branch and a BERT document branch, and asserts transformers_model finds the BertModel.
     """Test that the transformers_model property works with a Router."""
     # Create a Router with mixed modules
     router = Router(
@@ -1361,6 +1517,9 @@ def test_router_transformers_model_property(
     ],
 )
 def test_default_pooling_mode(model_name: str, expected_pooling_mode: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over a tiny causal LM (expects lasttoken pooling) and a tiny BERT LM-head model (expects mean; skipped on old torch). Loads the
+    # model into a temporary cache and asserts the second module is Pooling with the expected mode. Network.
     """CausalLM models should default to last-token pooling, while encoder models default to mean pooling."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
         model = SentenceTransformer(model_name, cache_folder=tmp_dir)
@@ -1370,10 +1529,15 @@ def test_default_pooling_mode(model_name: str, expected_pooling_mode: str) -> No
 
 
 def test_default_pooling_mode_causal_lm_with_is_causal_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches Transformer's initializer to set is_causal False on the config after construction, loads the tiny causal LM, and asserts the
+    # default pooling mode is mean.
     """A CausalLM model with is_causal=False should default to mean pooling."""
     original_init = Transformer.__init__
 
     def patched_init(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Calls the original initializer, then sets the config's is_causal flag to False.
         original_init(self, *args, **kwargs)
         self.config.is_causal = False
 
@@ -1387,6 +1551,8 @@ def test_default_pooling_mode_causal_lm_with_is_causal_false(monkeypatch: pytest
 
 
 def test_similarity_fn_name_rejects_multi_vector_names(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts setting the multi-vector similarity "maxsim" on a dense model raises ValueError mentioning MultiVectorEncoder.
     """MaxSim scores ragged token embeddings: setting it on a dense model would produce wrong shapes
     silently, so it must fail loud with a pointer to MultiVectorEncoder."""
     with pytest.raises(ValueError, match="MultiVectorEncoder"):
@@ -1394,6 +1560,9 @@ def test_similarity_fn_name_rejects_multi_vector_names(stsb_bert_tiny_model: Sen
 
 
 def test_parse_model_config_ignores_multi_vector_similarity(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Temporarily clears the private similarity name and asserts parsing a config with "maxsim" leaves it unset, while "dot" is applied; restores
+    # the original value in a finally block.
     """A saved multi-vector similarity (e.g. converting a MultiVectorEncoder save) falls through to
     the default instead of raising in the strict setter during config parsing."""
     model = stsb_bert_tiny_model
@@ -1409,6 +1578,9 @@ def test_parse_model_config_ignores_multi_vector_similarity(stsb_bert_tiny_model
 
 
 def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a CrossEncoder with a query prompt as default to tmp_path, loads it as a SentenceTransformer, and asserts the prompts reset to empty
+    # query/document with no default; re-saving and reloading keeps that; explicitly passed prompts still apply. Network and disk.
     """Converting a CrossEncoder save rebuilds this family's default modules, so the source's
     prompts and default_prompt_name no longer describe the loaded model. Inheriting them would
     silently prepend the reranker prompt to every encode call and persist it on save."""
@@ -1436,6 +1608,9 @@ def test_conversion_ignores_source_prompts_and_default_prompt_name(tmp_path) -> 
 
 
 def test_conversion_ignores_source_similarity_fn_name(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a SparseEncoder (dot similarity) to tmp_path, loads it as a SentenceTransformer and asserts cosine similarity, unless dot is passed
+    # explicitly. Network and disk.
     """A SparseEncoder save carries similarity_fn_name="dot", chosen for sparse embeddings. The
     converted dense model scores with the dense default instead, unless the user pins one."""
     from sentence_transformers import SparseEncoder

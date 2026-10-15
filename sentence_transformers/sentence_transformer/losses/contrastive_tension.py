@@ -1,3 +1,6 @@
+# [MODULE DOC] Contrastive Tension (CT) losses for unsupervised training: two copies of the encoder are trained so that
+# identical inputs score high and different inputs score low. Contains the pairwise binary cross-entropy
+# variant, the in-batch negatives variant, and a legacy data loader producing CT pair batches.
 from __future__ import annotations
 
 import copy
@@ -16,6 +19,10 @@ from sentence_transformers.util import cos_sim, similarity_fct_name
 
 
 class ContrastiveTensionLoss(nn.Module):
+    # [CLASS DOC] Loss module with two encoders: model2 (the original model, used at inference) and model1 (an independent deep
+    # copy made at construction). Attribute criterion is binary cross-entropy with logits summed over the batch.
+    # Expects two input columns (pairs).
+    # KNOWN ISSUE: The docstring opens by saying the loss expects only single inputs, but the code requires exactly two input columns (pairs).
     """
     This loss expects only single inputs, without any labels. Positive and negative pairs are automatically created via random sampling,
     such that a positive pair consists of two identical inputs and a negative pair consists of two different inputs. An independent
@@ -128,12 +135,17 @@ class ContrastiveTensionLoss(nn.Module):
     """
 
     def __init__(self, model: SentenceTransformer) -> None:
+        # [FUNCTION DOC] Store the model as model2, deep-copy it into model1 (doubling parameter memory), and create the summed BCE criterion.
         super().__init__()
         self.model2 = model  # This will be the final model used during the inference time.
         self.model1 = copy.deepcopy(model)
         self.criterion = nn.BCEWithLogitsLoss(reduction="sum")
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor | None = None) -> Tensor:
+        # [FUNCTION DOC] Unpack exactly two feature dicts (ValueError otherwise). Embed the first with model1 and the second with
+        # model2; the logit per pair is their dot product. When labels are not given, derive them: 1 if the two
+        # inputs' token ids are identical (comparing only non-padded tokens when both attention masks exist, else
+        # comparing full id rows), otherwise 0. Returns the summed BCE-with-logits loss.
         sentence_features1, sentence_features2 = tuple(sentence_features)
         reps_1 = self.model1(sentence_features1)["sentence_embedding"]  # (bsz, hdim)
         reps_2 = self.model2(sentence_features2)["sentence_embedding"]
@@ -168,10 +180,12 @@ class ContrastiveTensionLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return an empty config dict.
         return {}
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for Semantic Re-tuning with Contrastive Tension.
         return """
 @inproceedings{carlsson2021semantic,
     title={Semantic Re-tuning with Contrastive Tension},
@@ -184,7 +198,10 @@ class ContrastiveTensionLoss(nn.Module):
 
 
 class ContrastiveTensionLossInBatchNegatives(nn.Module):
+    # [CLASS DOC] In-batch negatives CT loss. Attributes: model2 (original model), model1 (deep copy), similarity_fct (default
+    # cosine), cross_entropy_loss, logit_scale (learnable parameter initialized to the log of scale).
     def __init__(self, model: SentenceTransformer, scale: float = 20.0, similarity_fct=cos_sim) -> None:
+        # [FUNCTION DOC] Store the model, deep-copy it, store the similarity function and create the learnable log-scale parameter.
         """
         This loss expects only single inputs, without any labels. Positive and negative pairs are automatically created via random sampling,
         such that a positive pair consists of two identical inputs and a negative pair consists of two different inputs. An independent
@@ -259,6 +276,9 @@ class ContrastiveTensionLossInBatchNegatives(nn.Module):
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(scale))
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Use only the first input column: embed it with both encoders, compute the full similarity matrix times the
+        # exponentiated learnable scale, and return the average of cross-entropy over rows and over columns with the
+        # diagonal as targets. The passed labels are ignored.
         sentence_features = sentence_features[0]
         embeddings_a = self.model1(sentence_features)["sentence_embedding"]  # (bsz, hdim)
         embeddings_b = self.model2(sentence_features)["sentence_embedding"]
@@ -268,6 +288,7 @@ class ContrastiveTensionLossInBatchNegatives(nn.Module):
         return (self.cross_entropy_loss(scores, labels) + self.cross_entropy_loss(scores.t(), labels)) / 2
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: current scale (exponentiated parameter) and similarity function name.
         return {
             "scale": self.logit_scale.exp().item(),
             "similarity_fct": similarity_fct_name(self.similarity_fct),
@@ -275,6 +296,7 @@ class ContrastiveTensionLossInBatchNegatives(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for Semantic Re-tuning with Contrastive Tension.
         return """
 @inproceedings{carlsson2021semantic,
     title={Semantic Re-tuning with Contrastive Tension},
@@ -293,7 +315,11 @@ class ContrastiveTensionLossInBatchNegatives(nn.Module):
 
 
 class ContrastiveTensionDataLoader:
+    # [CLASS DOC] Legacy iterable data loader yielding batches of CT InputExample pairs where every pos_neg_ratio-th example is
+    # an identical (positive, label 1) pair and the rest are pairs of consecutive different sentences (label 0).
+    # Attributes: sentences, batch_size, pos_neg_ratio, collate_fn (set externally; None yields raw lists).
     def __init__(self, sentences, batch_size, pos_neg_ratio=8):
+        # [FUNCTION DOC] Store settings. Raises ValueError if batch_size is not divisible by pos_neg_ratio.
         self.sentences = sentences
         self.batch_size = batch_size
         self.pos_neg_ratio = pos_neg_ratio
@@ -305,6 +331,10 @@ class ContrastiveTensionDataLoader:
             )
 
     def __iter__(self):
+        # [FUNCTION DOC] Shuffle the sentence list in place (global random), then walk it: at positions where the batch length is a
+        # multiple of pos_neg_ratio, pair the current sentence with itself (label 1) and advance by one; otherwise pair
+        # it with the next sentence (label 0) and advance by two. Yield each full batch (collated if collate_fn is set);
+        # a trailing partial batch is dropped.
         random.shuffle(self.sentences)
         sentence_idx = 0
         batch = []
@@ -327,4 +357,5 @@ class ContrastiveTensionDataLoader:
                 batch = []
 
     def __len__(self):
+        # [FUNCTION DOC] Return the approximate number of batches: floor of sentence count divided by twice the batch size.
         return math.floor(len(self.sentences) / (2 * self.batch_size))

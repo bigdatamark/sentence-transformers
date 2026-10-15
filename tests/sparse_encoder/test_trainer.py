@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for SparseEncoderTrainer: model card update on trainer construction, a short training run (with
+# regular or streaming datasets) that changes parameters, and an extensive slow matrix checking how prompts
+# (none, a single string, per-dataset, per-column, or nested per-dataset-per-column) are applied to the texts
+# the model preprocesses for single datasets versus dataset dicts, with optional transforms, streaming and
+# per-dataset losses. Skipped at module level without the training extras.
 from __future__ import annotations
 
 import tempfile
@@ -23,6 +29,9 @@ if not is_training_available():
 
 @pytest.fixture
 def dummy_train_eval_datasets_for_trainer() -> tuple[Dataset, Dataset]:
+    # [FUNCTION DOC]
+    # Fixture returning a 20-row train and 10-row eval in-memory dataset with sentence1, sentence2 and a
+    # float score column alternating 0 and 1.
     # Create minimal datasets for trainer tests
     train_data = {
         "sentence1": [f"train_s1_{i}" for i in range(20)],
@@ -40,6 +49,9 @@ def dummy_train_eval_datasets_for_trainer() -> tuple[Dataset, Dataset]:
 
 
 def test_model_card_reuse(splade_bert_tiny_model: SparseEncoder):
+    # [FUNCTION DOC]
+    # Records the model's initial card text, constructs a trainer with a SpladeLoss, saves the model to a temp
+    # directory and asserts the written README differs from the initial card text (or exists when there was none).
     model = splade_bert_tiny_model
 
     initial_card_text = model._model_card_text
@@ -73,6 +85,10 @@ def test_trainer(
     dummy_train_eval_datasets_for_trainer: tuple[Dataset, Dataset],
     streaming: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over streaming. Optionally converts the fixture datasets to iterable datasets, snapshots the
+    # parameters, trains two steps (batch 2, eval every 2 steps, no reporting) in a temp directory with SpladeLoss,
+    # and asserts some parameter changed and that encoding still works afterwards.
     model = splade_bert_tiny_model
     train_dataset, eval_dataset = dummy_train_eval_datasets_for_trainer
 
@@ -156,6 +172,17 @@ def test_trainer_prompts(
     streaming: bool,
     prompts: dict[str, dict[str, str]] | dict[str, str] | str | None,
 ):
+    # [FUNCTION DOC]
+    # Slow; parametrized over train/eval dataset dicts, a per-dataset loss dict, a transform, streaming and prompt
+    # configurations. Skips loss dicts unless both train and eval are dicts. Builds two tiny train and eval
+    # datasets, wraps model preprocessing to record each text with its prompt prepended, assembles regular or
+    # iterable datasets or dataset dicts, optionally applies an uppercase transform (via map for streaming, set
+    # transform otherwise), and optionally maps each dataset name to the loss. Expects a ValueError about nested
+    # prompts when nested prompts are used without both dicts. Trains briefly while wrapping compute_loss to record
+    # collated batch keys. Then asserts "dataset_name" is in the batch keys exactly when a dict dataset is used
+    # together with a loss dict or dict prompts, and that the recorded texts equal the expected set of (prompted,
+    # possibly uppercased) texts for the configuration. Per-dataset prompts with plain datasets are treated as
+    # column names and thus not applied.
     if loss_dict and (not train_dict or not eval_dict):
         pytest.skip(
             "Skipping test because loss_dict=True requires train_dict=True and eval_dict=True; already tested via test_trainer."
@@ -199,6 +226,9 @@ def test_trainer_prompts(
     old_preprocess = model.preprocess
 
     def preprocess_tracker(texts, prompt=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the texts (with the prompt prepended when given) into the tracked list, then calls the
+        # original preprocess.
         if prompt:
             tracked_texts.extend([prompt + text for text in texts])
         else:
@@ -230,6 +260,8 @@ def test_trainer_prompts(
             eval_dataset = eval_dataset_1
 
     def upper_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: Uppercases every text in every column of the batch in place and returns the batch.
         for column_name, column in batch.items():
             batch[column_name] = [text.upper() for text in column]
         return batch
@@ -320,6 +352,8 @@ def test_trainer_prompts(
         old_compute_loss = trainer.compute_loss
 
         def compute_loss_tracker(model, inputs, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Adds the batch's keys to the tracked key set and delegates to the original compute_loss.
             datacollator_keys.update(set(inputs.keys()))
             return old_compute_loss(model, inputs, **kwargs)
 

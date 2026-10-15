@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Batch samplers used by the trainers. Defines string enums naming the single-dataset samplers (default,
+# no-duplicates, no-duplicates with precomputed hashes, group-by-label) and multi-dataset samplers (round robin,
+# proportional); a mixin storing the epoch so samplers can reseed their generator each epoch; DefaultBatchSampler (the
+# plain torch batch sampler plus label columns, generator and seed); GroupByLabelBatchSampler (batches mixing several
+# labels with pairs per label, for triplet mining); NoDuplicatesBatchSampler (batches with no shared values across rows,
+# for in-batch negatives), with optional xxhash-based precomputed row hashes; and multi-dataset samplers that combine
+# per-dataset batch samplers over a ConcatDataset. Module constants: int64/uint64 bounds for hash conversion and the
+# set of columns excluded from duplicate checks ("dataset_name"). Optionally imports xxhash and datasets.
 from __future__ import annotations
 
 import hashlib
@@ -33,6 +42,9 @@ _EXCLUDE_DATASET_COLUMNS = {"dataset_name"}
 
 
 class BatchSamplers(ExplicitEnum):
+    # [CLASS DOC]
+    # String enum of batch sampler identifiers: "batch_sampler" (default), "no_duplicates", "no_duplicates_hashed" and
+    # "group_by_label".
     """
     Stores the acceptable string identifiers for batch samplers.
 
@@ -108,6 +120,8 @@ class BatchSamplers(ExplicitEnum):
 
 
 class MultiDatasetBatchSamplers(ExplicitEnum):
+    # [CLASS DOC]
+    # String enum of multi-dataset sampler identifiers: "round_robin" and "proportional" (default).
     """
     Stores the acceptable string identifiers for multi-dataset batch samplers.
 
@@ -179,20 +193,30 @@ class MultiDatasetBatchSamplers(ExplicitEnum):
 
 
 class SetEpochMixin:
+    # [CLASS DOC]
+    # HELPER: mixin adding an epoch attribute (starts at 0) that the trainer updates each epoch so samplers can reseed.
     """
     Required for a BatchSampler as the Trainer will call set_epoch on the BatchSampler at the beginning of each epoch.
     The BatchSampler can then set the generator seed accordingly.
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # HELPER: passes all arguments to the next initialiser and sets epoch to 0.
         super().__init__(*args, **kwargs)
         self.epoch = 0
 
     def set_epoch(self, epoch: int) -> None:
+        # [FUNCTION DOC]
+        # HELPER: stores the epoch number.
         self.epoch = epoch
 
 
 class DefaultBatchSampler(SetEpochMixin, BatchSampler):
+    # [CLASS DOC]
+    # Default sampler: identical to the torch batch sampler over the dataset (used as the sampler, so it yields index
+    # lists in dataset order in consecutive batch_size chunks), plus attributes valid_label_columns, generator and seed for
+    # use by subclasses, and the epoch from the mixin.
     """
     This sampler is the default batch sampler used in the SentenceTransformer library.
     It is equivalent to the PyTorch BatchSampler.
@@ -219,6 +243,9 @@ class DefaultBatchSampler(SetEpochMixin, BatchSampler):
         generator: torch.Generator | None = None,
         seed: int = 0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initialises the torch batch sampler with the dataset as the underlying sampler, batch size and drop_last, and stores
+        # the label columns, generator and seed.
         super().__init__(dataset, batch_size=batch_size, drop_last=drop_last)
         self.valid_label_columns = valid_label_columns
         self.generator = generator
@@ -226,6 +253,11 @@ class DefaultBatchSampler(SetEpochMixin, BatchSampler):
 
 
 class GroupByLabelBatchSampler(DefaultBatchSampler):
+    # [CLASS DOC]
+    # Sampler for in-batch triplet mining. Attributes: dataset, groups (label to sample indices, keeping only labels with
+    # at least 2 samples, each list trimmed to an even length) and the precomputed stream length. Each epoch, indices are
+    # shuffled within labels and labels take turns (in a freshly shuffled order every round) emitting 2 samples each
+    # until fewer than 2 labels have samples left; the resulting stream is cut into batches of exactly batch_size.
     """
     Batch sampler that groups samples by label for in-batch triplet mining.
 
@@ -266,6 +298,11 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
         generator: torch.Generator | None = None,
         seed: int = 0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initialises the base sampler, stores the dataset, raises ValueError unless batch_size is even and at least 4, reads
+        # the labels from the first valid label column, groups sample indices by label, keeps qualifying labels (raising
+        # ValueError if fewer than 2 qualify), and computes the stream length as twice the sum over labels of the minimum of
+        # that label's pair count and the second-largest pair count.
         super().__init__(
             dataset,
             batch_size=batch_size,
@@ -302,6 +339,9 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
 
     @staticmethod
     def _determine_labels_to_use(dataset: Dataset, valid_label_columns: list[str] | None) -> list[Any]:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns the values of the first valid label column present in the dataset; raises ValueError if none
+        # is present.
         for column_name in valid_label_columns or []:
             if column_name in dataset.column_names:
                 return dataset[column_name]
@@ -311,6 +351,14 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
         )
 
     def __iter__(self) -> Iterator[list[int]]:
+        # [FUNCTION DOC]
+        # Generator of batches. Reseeds the generator with seed plus epoch if a generator is set. Shuffles each label's indices
+        # into a queue, then repeatedly shuffles the remaining labels and pops 2 indices per label into a buffer, yielding a
+        # batch whenever the buffer reaches batch_size (keeping the overflow), and dropping exhausted labels after each round.
+        # At the end, a leftover buffer of at least 4 indices is yielded unless drop_last is set.
+        # KNOWN ISSUE: the claimed guarantee that every batch holds at least 2 distinct labels is not strict: because the label
+        # order is reshuffled each round, the last pair of one round and the first pair of the next can come from the same
+        # label, so e.g. with batch_size 4 a batch (or the final leftover) may contain a single label.
         if self.generator and self.seed is not None:
             self.generator.manual_seed(self.seed + self.epoch)
 
@@ -341,6 +389,9 @@ class GroupByLabelBatchSampler(DefaultBatchSampler):
             yield batch
 
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of full batches in the stream, plus one when drop_last is false and the remainder has at least 4
+        # indices.
         n = self._stream_length // self.batch_size
         if not self.drop_last and self._stream_length % self.batch_size >= 4:
             n += 1
@@ -351,6 +402,11 @@ _PLAIN_VALUE_TYPES = (str, int, float, bool, bytes, type(None), np.integer, np.f
 
 
 def _sample_value_str(value: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns a string key used to compare sample values for duplicates. Plain scalars (str, numbers, bools,
+    # bytes, None, numpy scalars) and lists/tuples of them use their string form; other lists/tuples and dicts are rendered
+    # recursively; other objects (media) use the "_hf_encoded" source if present and are digested as the SHA-256 of their
+    # pickled form, falling back to their string form if pickling fails.
     # Plain python values keep their exact str(), the historical dedup key. Other objects (PIL
     # images, audio arrays, media decoders) often embed a memory address in str(), fresh on every
     # dataset access, so their pickled content is digested instead. Values that fail to pickle
@@ -375,6 +431,8 @@ def _sample_value_str(value: Any) -> str:
 
 
 def _xxhash_int64(value: str) -> int:
+    # [FUNCTION DOC]
+    # HELPER: returns the 64-bit xxhash of the UTF-8 string, converted from unsigned to signed int64 range.
     # Convert uint64 -> int64 to keep values compatible with Arrow int64 storage.
     hashed = xxhash.xxh64_intdigest(value.encode("utf-8"))
     if hashed >= _XXHASH_INT64_MAX:
@@ -385,6 +443,10 @@ def _xxhash_int64(value: str) -> int:
 def _hash_batch(
     batch: dict[str, list[Any]], columns: list[str], exclude_columns: set[str]
 ) -> dict[str, list[list[int]]]:
+    # [FUNCTION DOC]
+    # HELPER: batched mapping function (module level so it can be pickled for multiprocessing). For a batch dict of column
+    # lists, returns {"__hashes": list per row of the signed xxhash of each non-excluded column's value key}; rows get empty
+    # lists when no columns remain.
     # Must be defined at module scope because datasets.map with num_proc pickles this function.
     # Build per-row hash lists so we can later do fast overlap checks without re-reading the dataset.
     active_columns = [column for column in columns if column not in exclude_columns]
@@ -404,6 +466,10 @@ def _hash_batch(
 
 
 class NoDuplicatesBatchSampler(DefaultBatchSampler):
+    # [CLASS DOC]
+    # Sampler ensuring no value appears twice within a batch, across all columns (label columns are removed from the
+    # dataset used for comparison, and "dataset_name" is ignored). Attributes: dataset (without label columns),
+    # precompute_hashes, precompute_num_proc, precompute_batch_size and the lazily built dense row hash matrix.
     def __init__(
         self,
         dataset: Dataset,
@@ -416,6 +482,10 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
         precompute_num_proc: int | None = None,
         precompute_batch_size: int = 1000,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initialises the base sampler, removes the valid label columns from the dataset, and stores the hashing options. With
+        # precompute_hashes, raises ImportError if xxhash is missing and defaults the worker count to the CPU count minus one,
+        # clamped between 1 and 8.
         """
         This sampler creates batches such that each batch contains samples where the values are unique,
         even across columns. This is useful when losses consider other samples in a batch to be in-batch
@@ -483,6 +553,12 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
                 self.precompute_num_proc = default_workers
 
     def _build_hashes(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: builds the row hash matrix once (no-op if disabled or already built). Maps the dataset in batches (parallel
+        # processes, progress description) to per-row hash lists, reads the resulting Arrow list column, and stores it as a
+        # dense int64 matrix of rows by columns (an empty 0 by 0 matrix for an empty dataset). Raises ValueError if the column is
+        # not a list column, rows have different lengths, or the value buffer size is inconsistent. Releases the temporary
+        # dataset afterwards.
         # Build once lazily on first iteration, then reuse across epochs.
         # Hashes depend on dataset content, not epoch seed/order.
         if not self.precompute_hashes or self._row_hashes is not None:
@@ -529,6 +605,14 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
             del hash_ds
 
     def __iter__(self) -> Iterator[list[int]]:
+        # [FUNCTION DOC]
+        # Generator of duplicate-free batches. Reseeds the generator with seed plus epoch if set. Each row's values are its hash
+        # row (hash mode, after building hashes) or the set of value keys of its non-excluded columns (reading the row). Takes a
+        # random permutation of row indices and keeps the not-yet-used positions in a singly linked list. Each pass walks the
+        # list from its head: a row whose values overlap the batch's values is skipped (kept for later passes); otherwise it is
+        # added to the batch and unlinked, and the batch is yielded once it reaches batch_size. A pass that ends without filling
+        # the batch yields the partial batch unless drop_last is set. Passes repeat until every row has been used. Yields
+        # nothing for an empty dataset.
         """
         Iterate over the remaining non-yielded indices. For each index, check if the sample values are already in the
         batch. If not, add the sample values to the batch keep going until the batch is full. If the batch is full, yield
@@ -542,11 +626,15 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
             row_hashes: np.ndarray = self._row_hashes
 
             def get_sample_values(index: int) -> set[str] | np.ndarray:
+                # [FUNCTION DOC]
+                # HELPER: returns the precomputed hash row of a sample.
                 return row_hashes[index]
 
         else:
 
             def get_sample_values(index: int) -> set[str] | np.ndarray:
+                # [FUNCTION DOC]
+                # HELPER: returns the set of value keys of a sample's columns, excluding "dataset_name".
                 return {
                     _sample_value_str(value)
                     for key, value in self.dataset[index].items()
@@ -554,6 +642,8 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
                 }
 
         def _has_overlap(sample_values: set[str] | np.ndarray, batch_values: set[str | np.int64]) -> bool:
+            # [FUNCTION DOC]
+            # HELPER: returns True if any of the sample's values (set or hash row) is already among the batch's values.
             # Non-hash path with set[str] allows for disjoint overlap checks
             if isinstance(sample_values, set):
                 return not sample_values.isdisjoint(batch_values)
@@ -611,6 +701,10 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
                     yield batch_indices
 
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of batches implied by the dataset size and batch size (floor with drop_last, ceiling otherwise).
+        # KNOWN ISSUE: the docstring calls this an upper bound, but when duplicates are deferred, later passes can each yield a
+        # small partial batch (when drop_last is false), so the iterator can yield more batches than this count.
         """Return the approximate number of batches.
 
         .. note::
@@ -627,6 +721,10 @@ class NoDuplicatesBatchSampler(DefaultBatchSampler):
 
 
 class MultiDatasetDefaultBatchSampler(SetEpochMixin, BatchSampler, ABC):
+    # [CLASS DOC]
+    # Abstract base for samplers over a ConcatDataset that combine one batch sampler per sub-dataset. Attributes: dataset,
+    # batch_samplers, generator, seed, and batch_size / drop_last taken from the first sub-sampler. Subclasses implement
+    # iteration and length; yielded indices are offset into the concatenated dataset.
     """
     Abstract base batch sampler that yields batches from multiple batch samplers.
     This class must be subclassed to implement specific sampling strategies, and
@@ -646,6 +744,9 @@ class MultiDatasetDefaultBatchSampler(SetEpochMixin, BatchSampler, ABC):
         generator: torch.Generator | None = None,
         seed: int = 0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Raises ValueError if the number of batch samplers differs from the number of sub-datasets; initialises the torch batch
+        # sampler with the first sub-sampler's batch size and drop_last, and stores dataset, samplers, generator and seed.
         if len(dataset.datasets) != len(batch_samplers):
             raise ValueError("The number of batch samplers must match the number of datasets in the ConcatDataset.")
         super().__init__(dataset, batch_size=batch_samplers[0].batch_size, drop_last=batch_samplers[0].drop_last)
@@ -656,16 +757,23 @@ class MultiDatasetDefaultBatchSampler(SetEpochMixin, BatchSampler, ABC):
 
     @abstractmethod
     def __iter__(self) -> Iterator[list[int]]:
+        # [FUNCTION DOC]
+        # Abstract: must yield batches of global indices.
         """Yield batches from the underlying datasets in a specific order."""
         pass
 
     @abstractmethod
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Abstract: must return the number of batches.
         """Return the number of batches in the sampler."""
         pass
 
 
 class RoundRobinBatchSampler(MultiDatasetDefaultBatchSampler):
+    # [CLASS DOC]
+    # Multi-dataset sampler alternating between sub-datasets in fixed cyclic order, one batch each, stopping as soon as the
+    # sub-sampler whose turn it is is exhausted.
     """
     Batch sampler that yields batches in a round-robin fashion from multiple batch samplers, until one is exhausted.
     With this sampler, it's unlikely that all samples from each dataset are used, but we do ensure that each dataset
@@ -679,6 +787,10 @@ class RoundRobinBatchSampler(MultiDatasetDefaultBatchSampler):
     """
 
     def __iter__(self) -> Iterator[list[int]]:
+        # [FUNCTION DOC]
+        # Reseeds the generator with seed plus epoch if set, computes each sub-dataset's start offset in the concatenation,
+        # and cycles over the sub-samplers yielding each next batch shifted by its offset; stops at the first exhausted
+        # sub-sampler.
         if self.generator and self.seed is not None:
             self.generator.manual_seed(self.seed + self.epoch)
 
@@ -695,10 +807,17 @@ class RoundRobinBatchSampler(MultiDatasetDefaultBatchSampler):
                 break
 
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the smallest sub-sampler length times the number of sub-samplers.
+        # KNOWN ISSUE: this undercounts when the shortest sub-sampler is not the first one: e.g. with lengths 3 and 2 the
+        # iterator yields 5 batches (it stops only when the second sampler is asked for a third batch) while this returns 4.
         return min(len(sampler) for sampler in self.batch_samplers) * len(self.batch_samplers)
 
 
 class ProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
+    # [CLASS DOC]
+    # Multi-dataset sampler that uses every batch of every sub-sampler, visiting sub-datasets in a random order where each
+    # appears as many times as it has batches.
     """
     Batch sampler that samples from each dataset in proportion to its size, until all are exhausted simultaneously.
     With this sampler, all samples from each dataset are used and larger datasets are sampled from more frequently.
@@ -711,6 +830,10 @@ class ProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
     """
 
     def __iter__(self) -> Iterator[list[int]]:
+        # [FUNCTION DOC]
+        # Reseeds the generator with seed plus epoch if set, computes sub-dataset offsets, builds a list repeating each
+        # sub-dataset index once per batch of its sampler, draws it in random order (using the generator), and yields the next
+        # batch of the drawn sub-sampler shifted by its offset (skipping exhausted ones).
         if self.generator and self.seed is not None:
             self.generator.manual_seed(self.seed + self.epoch)
 
@@ -730,6 +853,8 @@ class ProportionalBatchSampler(MultiDatasetDefaultBatchSampler):
                 continue
 
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the total number of batches over all sub-samplers.
         return sum([len(sampler) for sampler in self.batch_samplers])
 
 

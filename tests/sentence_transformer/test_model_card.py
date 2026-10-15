@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for SentenceTransformer model card generation: trainer-populated card content for 1 to 50 datasets with
+# a GISTEmbedLoss (including the guide model's repr), per-task maximum length rendering, IR versus non-IR usage
+# snippets (encode_query/encode_document, default examples, shape comments, similarities, display examples),
+# multimodal usage example selection for IR models, and dataset transforms. Skipped at module level without the
+# training extras; PIL and datasets Image are optional.
 from __future__ import annotations
 
 from copy import deepcopy
@@ -31,6 +37,9 @@ if not is_training_available():
 
 @pytest.fixture(scope="session")
 def dummy_dataset():
+    # [FUNCTION DOC]
+    # Session-scoped fixture returning an in-memory dataset with anchor, positive and negative columns of ten
+    # numbered strings each.
     """
     Dummy dataset for testing purposes. The dataset looks as follows:
     {
@@ -120,6 +129,11 @@ def test_model_card_base(
     num_datasets: int,
     expected_substrings: list[str],
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over dataset count (0 meaning one unnamed dataset, otherwise a dict of "train_i" copies) and
+    # expected substrings. Disables Hub lookups, builds a GISTEmbedLoss whose guide is a deep copy of the model
+    # flagged as trusting remote code (temperature 0.05, relative margin 0.05), constructs a trainer to fill card
+    # data, generates the card and asserts all substrings are present and no triple newline occurs.
     model = stsb_bert_tiny_model
 
     # Let's avoid requesting the Hub for e.g. checking if a base model exists there
@@ -160,6 +174,9 @@ def test_model_card_base(
 
 
 def test_model_card_renders_query_and_document_lengths(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts no query length line by default; after setting the first module's query length 32 and document
+    # length 180, asserts both are rendered nested under the maximum sequence length line, with no triple newline.
     # Per-task caps are rare outside ColBERT-style models but they apply here too, so the card must
     # not present the tokenizer's model_max_length as the effective cap.
     model = stsb_bert_tiny_model
@@ -181,6 +198,9 @@ def test_model_card_renders_query_and_document_lengths(stsb_bert_tiny_model: Sen
 
 
 def _reset_for_snippet(model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Clears the model card data's usage examples, display examples, similarities and IR flag (mutates the
+    # model's card data).
     """Reset model_card_data fields to ensure a clean snippet test."""
     model.model_card_data.usage_examples = None
     model.model_card_data.usage_examples_display = None
@@ -189,9 +209,14 @@ def _reset_for_snippet(model: SentenceTransformer) -> None:
 
 
 class TestGenerateUsageSnippetIR:
+    # [CLASS DOC]
+    # Groups tests for the IR-model usage snippet, which uses separate query and document encoding.
     """Verify IR-model snippet with encode_query / encode_document."""
 
     def test_ir_snippet_structure(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # With the IR flag and one query plus two documents, asserts the snippet defines queries and documents lists,
+        # calls encode_query and encode_document, and quotes each example.
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
         model.model_card_data.ir_model = True
@@ -207,6 +232,8 @@ class TestGenerateUsageSnippetIR:
         assert "'doc B'" in snippet
 
     def test_ir_default_examples(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # With the IR flag and no examples, asserts default "Red Planet" examples and encode_query appear.
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
         model.model_card_data.ir_model = True
@@ -216,6 +243,8 @@ class TestGenerateUsageSnippetIR:
         assert "encode_query" in snippet
 
     def test_ir_snippet_shapes(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # With one query and three documents, asserts shape comments for the embeddings and the 1x3 similarity matrix.
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
         model.model_card_data.ir_model = True
@@ -227,6 +256,8 @@ class TestGenerateUsageSnippetIR:
         assert "# [1, 3]" in snippet
 
     def test_ir_with_similarities(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # Asserts given similarity text is printed in the snippet.
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
         model.model_card_data.ir_model = True
@@ -238,6 +269,8 @@ class TestGenerateUsageSnippetIR:
         assert "# tensor([[0.42]])" in snippet
 
     def test_non_ir_falls_through_to_base(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # Without the IR flag, asserts the generic sentences-based snippet is produced with no encode_query.
         """When ir_model is None, SentenceTransformerModelCardData uses the base snippet."""
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
@@ -248,6 +281,8 @@ class TestGenerateUsageSnippetIR:
         assert "encode_query" not in snippet
 
     def test_display_precedence(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # Asserts display examples are rendered instead of the original usage examples.
         """usage_examples_display takes precedence over usage_examples for rendering."""
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
@@ -261,6 +296,8 @@ class TestGenerateUsageSnippetIR:
 
 
 def _make_pil_image(width: int = 64, height: int = 64) -> PILModule.Image:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new red RGB PIL image of the given width and height (default 64x64).
     """Create a small dummy PIL image."""
     return PILModule.new("RGB", (width, height), color=(255, 0, 0))
 
@@ -270,9 +307,15 @@ def _make_pil_image(width: int = 64, height: int = 64) -> PILModule.Image:
     reason="PIL, datasets, or datasets.Image not available",
 )
 class TestSetMultimodalPredictExampleIR:
+    # [CLASS DOC]
+    # Groups tests (skipped without PIL or datasets Image support) for selecting multimodal usage examples for IR
+    # models from an evaluation dataset dict, with the model's modalities patched to text and image.
     """Test multimodal usage_examples for IR models sources query and documents from different columns."""
 
     def test_ir_cross_column_sourcing(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # With a query text column and an image column of five images, asserts the examples are the first query
+        # followed by three images.
         """IR model should source query from first column and documents from second column."""
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
@@ -301,6 +344,9 @@ class TestSetMultimodalPredictExampleIR:
             assert isinstance(img, PILModule.Image)
 
     def test_ir_cross_column_deduplicates_documents(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # With three identical images followed by three distinct sizes, asserts the three document examples are
+        # deduplicated to three distinct image sizes.
         """IR model should deduplicate documents from the second column."""
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
@@ -331,6 +377,8 @@ class TestSetMultimodalPredictExampleIR:
         assert len(sizes) == 3
 
     def test_non_ir_delegates_to_base(self, stsb_bert_tiny_model: SentenceTransformer) -> None:
+        # [FUNCTION DOC]
+        # Without the IR flag, asserts the base implementation picks a single non-text modality (all images).
         """Non-IR model falls through to the base implementation (single-modality examples)."""
         model = stsb_bert_tiny_model
         _reset_for_snippet(model)
@@ -356,12 +404,17 @@ class TestSetMultimodalPredictExampleIR:
 
 
 def test_model_card_set_transform(stsb_bert_tiny_model: SentenceTransformer, dummy_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # Copies the session dataset, sets a transform producing uppercased "new_" columns, constructs a trainer with
+    # a MultipleNegativesRankingLoss, and asserts the card shows post-transform column names and not the originals.
     model = stsb_bert_tiny_model
 
     # Let's avoid requesting the Hub for e.g. checking if a base model exists there
     model.model_card_data.local_files_only = True
 
     def dummy_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: Transform returning new_anchor, new_positive and new_negative columns with uppercased texts.
         return {
             "new_anchor": [text.upper() for text in batch["anchor"]],
             "new_positive": [text.upper() for text in batch["positive"]],

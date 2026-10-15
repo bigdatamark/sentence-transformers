@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Regression tests for GISTEmbedLoss (in-batch negatives filtered by a guide model's similarities). Covers the positive-column mask
+# offset when embeddings are gathered across devices on a non-zero rank, and the relative margin strategy with negative positive-pair
+# scores. Losses are built without real models: both model and guide are fakes that return precomputed embeddings from the feature dicts.
 from __future__ import annotations
 
 import math
@@ -10,6 +14,10 @@ from sentence_transformers.sentence_transformer.losses import GISTEmbedLoss
 
 
 def _make_loss(margin: float) -> GISTEmbedLoss:
+    # [FUNCTION DOC]
+    # HELPER: Creates a GISTEmbedLoss bypassing its constructor and sets attributes directly: temperature 0.01, cosine similarity, absolute
+    # margin strategy with the given margin, contrasting of anchors and positives enabled, cross-device gathering enabled, no retokenizing,
+    # and a cross-entropy criterion. Model and guide are both a function returning the feature's own "sentence_embedding".
     """Build a GISTEmbedLoss without loading real models.
 
     ``forward`` encodes via ``self.model`` / ``self.guide``. We replace both with a fake
@@ -35,12 +43,17 @@ def _make_loss(margin: float) -> GISTEmbedLoss:
 
 @pytest.fixture
 def simulate_rank1_world2(monkeypatch):
+    # [FUNCTION DOC]
+    # HELPER: Fixture simulating rank 1 of a world of size 2 in one process. Monkeypatches the loss module's all_gather_with_grad to prepend
+    # a seeded random block of 3 rows (rank 0's data) to the given tensor, and get_rank to return 1. Returns the per-rank batch size 3.
     """Run the rank=1/world=2 gather path in a single process: ``all_gather_with_grad``
     prepends a deterministic rank-0 block, and the rank is reported as 1 (offset = batch_size).
     """
     per = 3
 
     def fake_gather(tensor: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Returns a seeded random 3-row block with the tensor's width concatenated before the tensor along rows.
         g = torch.Generator().manual_seed(1234)
         rank0_block = torch.randn(per, tensor.size(1), generator=g)
         return torch.cat([rank0_block, tensor], dim=0)
@@ -51,6 +64,8 @@ def simulate_rank1_world2(monkeypatch):
 
 
 def _features(per: int, dim: int = 16, seed: int = 7):
+    # [FUNCTION DOC]
+    # HELPER: Returns anchor and positive feature dicts with seeded random embeddings of shape per by dim.
     g = torch.Generator().manual_seed(seed)
     anchors = torch.randn(per, dim, generator=g)
     positives = torch.randn(per, dim, generator=g)
@@ -58,6 +73,8 @@ def _features(per: int, dim: int = 16, seed: int = 7):
 
 
 def test_gather_rank1_positive_not_masked_with_margin(simulate_rank1_world2):
+    # [FUNCTION DOC]
+    # With simulated rank 1 and margin 0.1, asserts the loss is finite (each anchor's positive at the offset column must not be masked to -inf).
     """Regression for the rank>0 positive-mask offset bug in the non-cached GISTEmbedLoss.
 
     The old ``torch.eye(*shape)`` mask protects columns [0..batch-1], but on rank 1 each
@@ -71,6 +88,8 @@ def test_gather_rank1_positive_not_masked_with_margin(simulate_rank1_world2):
 
 
 def test_gather_rank1_margin_zero_baseline(simulate_rank1_world2):
+    # [FUNCTION DOC]
+    # Baseline with simulated rank 1 and margin 0: asserts the loss is finite.
     """Sanity baseline: with margin=0 the positive equals its own threshold and is not
     suppressed regardless of the mask, so the loss is finite both before and after the fix.
     """
@@ -80,6 +99,10 @@ def test_gather_rank1_margin_zero_baseline(simulate_rank1_world2):
 
 
 def test_positive_mask_protects_ce_target_column(simulate_rank1_world2):
+    # [FUNCTION DOC]
+    # With simulated rank 1 and margin 0.1, replaces the cross-entropy child module by a capturing wrapper (deleting the registered module
+    # first), runs the loss, and asserts cross-entropy was called and that for every call the logit at each row's target column is finite,
+    # and the loss is finite.
     """Drive the real loss and assert it protects exactly the CE-target column.
 
     We capture the (masked) score matrix the loss feeds to cross-entropy and check that every
@@ -93,6 +116,8 @@ def test_positive_mask_protects_ce_target_column(simulate_rank1_world2):
     real_ce = loss_fn.cross_entropy_loss
 
     def capturing_ce(scores, labels):
+        # [FUNCTION DOC]
+        # HELPER: Records the scores and labels, then returns the real cross-entropy of them.
         captured.append((scores, labels))
         return real_ce(scores, labels)
 
@@ -112,6 +137,8 @@ def test_positive_mask_protects_ce_target_column(simulate_rank1_world2):
 
 
 def _make_relative_loss(margin: float) -> GISTEmbedLoss:
+    # [FUNCTION DOC]
+    # HELPER: Like the absolute-margin builder but with the relative margin strategy and no anchor/positive contrasting or gathering.
     """relative-margin GISTEmbedLoss with no gather/contrast, fed precomputed embeddings (#3819)."""
     obj = GISTEmbedLoss.__new__(GISTEmbedLoss)
     torch.nn.Module.__init__(obj)
@@ -132,6 +159,9 @@ def _make_relative_loss(margin: float) -> GISTEmbedLoss:
 
 
 def _negative_score_features():
+    # [FUNCTION DOC]
+    # HELPER: Returns two anchors and two positives (3-D unit vectors) where anchor 0's positive has cosine -0.50 while the other positive
+    # has cosine -0.49 with it (closer than its own positive); anchor 1 equals positive 1.
     """anchor0's positive has a negative cosine (-0.50). A non-paired candidate (column 1) is
     *more* similar (-0.49). anchor1 is paired with that candidate (diagonal cosine 1.0)."""
     a0 = [1.0, 0.0, 0.0]
@@ -144,6 +174,9 @@ def _negative_score_features():
 
 
 def test_relative_margin_negative_positive_score_suppresses_closer_negative():
+    # [FUNCTION DOC]
+    # With relative margin 0.05, captures the score matrix passed to cross-entropy and asserts the candidate closer than anchor 0's negative-scored
+    # positive is masked to -inf, while the true positive and the overall loss remain finite.
     """Regression for #3819 in GISTEmbedLoss: with ``margin_strategy="relative"`` and a negative
     positive-pair score, a candidate more similar to the anchor than the positive must still be
     suppressed. The old ``positive * (1 - margin)`` threshold rises for negative scores and lets
@@ -154,6 +187,8 @@ def test_relative_margin_negative_positive_score_suppresses_closer_negative():
     real_ce = loss_fn.cross_entropy_loss
 
     def capturing_ce(scores, labels):
+        # [FUNCTION DOC]
+        # HELPER: Records the scores, then returns the real cross-entropy.
         captured.append(scores)
         return real_ce(scores, labels)
 

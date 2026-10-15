@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# Example script: multilingual knowledge distillation. A monolingual teacher (paraphrase-distilroberta-base-v2)
+# produces English embeddings; a student (xlm-roberta-base, max length 128) is trained with MSELoss so that its
+# embeddings of both the English sentence and its translation match the teacher's English embedding.
+# Loads en-<lang> subsets (de, es, it, fr, ar, tr) of parallel-sentences-talks: train capped at 500k rows, dev capped
+# at 1000 (if no dev split, 1000 rows are split off train); subsets failing to load are logged and skipped.
+# Builds per-subset MSEEvaluator, TranslationEvaluator and, when available, an STS17 cross-lingual
+# EmbeddingSimilarityEvaluator (scores divided by 5, trying the reversed language pair as fallback), combined in a
+# SequentialEvaluator whose main score is the mean. Trains 5 epochs (batch 64, lr 2e-5, fp16, eval/save every 5000
+# steps) on the multi-dataset dicts, saves to output/make-multilingual-...-<timestamp>/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: the "Prepared datasets for training:" log call passes the dataset as an extra argument without a format placeholder, so logging reports a formatting error instead of printing it.
 """
 This script contains an example how to extend an existent sentence embedding model to new languages.
 
@@ -127,6 +139,9 @@ logging.info(train_dataset_dict)
 # We want the student EN embeddings to be similar to the teacher EN embeddings and
 # the student non-EN embeddings to be similar to the teacher EN embeddings
 def prepare_dataset(batch):
+    # [FUNCTION DOC]
+    # HELPER: batched map function. Input: batch with "english" and "non_english" lists. Returns the same two columns plus
+    # "label", the teacher's embeddings of the English sentences (encoded with the inference batch size, no progress bar).
     return {
         "english": batch["english"],
         "non_english": batch["non_english"],

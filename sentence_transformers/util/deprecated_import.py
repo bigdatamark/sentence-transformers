@@ -1,3 +1,14 @@
+# [MODULE DOC]
+# Backward-compatible aliasing of deprecated import paths.
+# DEPRECATED_MODULE_PATHS maps old dotted module paths (from moves/renames in versions 4.0, 5.4
+# and 6.0) to their new module paths. A custom meta path finder intercepts imports of the old
+# paths, emits a DeprecationWarning attributed to the user's import site, imports the new module
+# and registers it under the old name. Because importing "parent.Child" makes Python set
+# attribute "Child" on the parent module, which would clobber a class of the same name exported
+# by the parent package, module-level registries (keyed by id of the parent module) remember the
+# original attribute and the parent's original class, and the parent is temporarily switched to a
+# protecting module subclass. A sentinel object distinguishes "attribute missing".
+# Side effects: global state in sys.meta_path and these registries; warnings.
 from __future__ import annotations
 
 import importlib
@@ -155,6 +166,10 @@ _ORIGINAL_MODULE_CLASSES: dict[int, type] = {}
 
 
 class _ProtectedModule(types.ModuleType):
+    # [CLASS DOC]
+    # HELPER: Module type temporarily assigned as the class of a parent package whose attributes
+    # must not be overwritten by the import system. Relies on the global protected-attribute and
+    # original-class registries keyed by id of the module.
     """Module subclass that prevents the import machinery from overwriting class attributes with modules.
 
     When Python imports a submodule ``parent.Child``, it does ``setattr(parent, 'Child', child_module)``.
@@ -164,6 +179,12 @@ class _ProtectedModule(types.ModuleType):
     """
 
     def __setattr__(self, name: str, value: object) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Attribute setter override. If the module has protected attributes and name is one of
+        # them, the incoming value is ignored: the stored original is popped and re-set instead. When no
+        # protected names remain, the registry entry is deleted and the module's class reverts to its
+        # recorded original class (falling back to the plain module type). Otherwise sets normally.
+        # Returns nothing.
         protected = _PROTECTED_ATTRS.get(id(self))
         if protected is not None and name in protected:
             original = protected.pop(name)
@@ -180,6 +201,8 @@ class _ProtectedModule(types.ModuleType):
 
 
 class _DeprecatedModuleLoader(importlib.abc.Loader):
+    # [CLASS DOC]
+    # HELPER: Import loader that hands back an already imported module object instead of executing code.
     """Loader that returns an already-loaded module without re-executing it.
 
     We save the original ``__spec__`` and restore it in ``exec_module`` as a safety measure,
@@ -188,18 +211,27 @@ class _DeprecatedModuleLoader(importlib.abc.Loader):
     """
 
     def __init__(self, module: types.ModuleType) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stores the module and its current __spec__ (or None) for later restoration.
         self._module = module
         self._original_spec = getattr(module, "__spec__", None)
 
     def create_module(self, spec):
+        # [FUNCTION DOC]
+        # HELPER: Returns the stored module, ignoring the spec.
         return self._module
 
     def exec_module(self, module):
+        # [FUNCTION DOC]
+        # HELPER: Does not execute anything; just restores the module's original __spec__ if one was saved,
+        # undoing any spec overwrite done by the import machinery for the alias name.
         if self._original_spec is not None:
             module.__spec__ = self._original_spec
 
 
 class _DeprecatedModuleFinder(importlib.abc.MetaPathFinder):
+    # [CLASS DOC]
+    # HELPER: Meta path finder that resolves deprecated module names to their new modules.
     """Meta path finder that intercepts imports of deprecated module paths.
 
     Issues a DeprecationWarning on first import and returns a spec whose loader provides the
@@ -210,6 +242,15 @@ class _DeprecatedModuleFinder(importlib.abc.MetaPathFinder):
     """
 
     def find_spec(self, fullname, path=None, target=None):
+        # [FUNCTION DOC]
+        # HELPER: Called by the import system for each module name. Returns None for names not in the
+        # deprecation map. Otherwise: walks up the call stack from its caller, skipping frames whose
+        # filename contains "importlib" or is this file, and issues a DeprecationWarning (old and new path
+        # in the message) at that frame's file/line/module via warn_explicit, or a plain warning if no frame
+        # found. Imports the new module. If the parent package is already loaded and has a non-module
+        # attribute named like the child, registers that attribute as protected and switches the parent's
+        # class to the protecting module subclass (remembering the original class once). Returns a module
+        # spec for the old name whose loader returns the new module.
         new_path = DEPRECATED_MODULE_PATHS.get(fullname)
         if new_path is None:
             return None
@@ -261,6 +302,9 @@ class _DeprecatedModuleFinder(importlib.abc.MetaPathFinder):
 
 
 def setup_deprecated_module_imports() -> None:
+    # [FUNCTION DOC]
+    # Installs the deprecated-module finder at the front of sys.meta_path, unless an instance is
+    # already present (idempotent). Returns nothing; mutates global import state.
     """Install a meta path finder that issues deprecation warnings for deprecated import paths
     and aliases them to their new locations in ``sys.modules``.
     """

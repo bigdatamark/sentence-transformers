@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: run SparseNanoBEIREvaluator on all NanoBEIR datasets (dataset_names None) with a SPLADE model (batch 16),
+# reporting per-dataset and aggregated IR metrics plus sparsity/FLOPS, then print the primary metric (mean dot NDCG@10)
+# and its value. Side effects: network, INFO logging, stdout.
 import logging
 
 from sentence_transformers import SparseEncoder

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Script: evaluate one or more SentenceTransformer models on the STS benchmark test set (mteb/stsbenchmark-sts,
+# scores divided by 5 to lie in [0,1]) with embeddings truncated to several dimensions, then plot the results.
+# CLI: positional plot_filename; --model_names (default: a Matryoshka-trained mpnet and its baseline);
+# --dimensions (default 768 512 256 128 64). For each model and dimension it sets the evaluator's truncate_dim,
+# writes evaluator results to "<model_name>/dim-<dim>" and collects the main score, then saves a two-panel figure.
+# Side effects: downloads models/datasets, creates directories, writes CSV results and the plot image, prints paths.
+# KNOWN ISSUE: os.makedirs is called without exist_ok, so re-running for the same model/dimension raises FileExistsError.
 """
 This script evaluates embedding models truncated at different dimensions on the STS
 benchmark.
@@ -18,6 +26,13 @@ from sentence_transformers.sentence_transformer.evaluation import EmbeddingSimil
 
 # Dimension plot
 def _grouped_barplot_ratios(group_name_to_x_to_y: dict[str, dict[int, float]], ax: plt.Axes | None = None) -> plt.Axes:
+    # [FUNCTION DOC]
+    # HELPER: draw a grouped bar chart of each group's y values relative to that group's maximum.
+    # Inputs: mapping group name -> (x -> y) and an optional matplotlib Axes. Sorts each group by x, verifies all groups
+    # share identical x keys (raises ValueError naming the offending group otherwise), computes each ratio y / max_y,
+    # places num_groups bars per x centered on the tick with width equal to the smallest x gap divided by (num_groups+1),
+    # labels bars by group, sets ticks, dashed grid, and y-limits from min(0.95, smallest ratio) to 1. Returns the Axes.
+    # KNOWN ISSUE: when ax is None it assigns the (figure, axes) tuple returned by plt.subplots to ax, so subsequent ax.bar calls fail.
     # To save a pandas dependency, do from scratch in matplotlib
     if ax is None:
         ax: plt.Axes = plt.subplots()
@@ -72,6 +87,12 @@ def plot_across_dimensions(
     figsize: tuple[float, float] = (7, 7),
     title: str = "STSB test score for various embedding dimensions (via truncation),\nwith and without Matryoshka loss",
 ) -> None:
+    # [FUNCTION DOC]
+    # Save a figure comparing models across embedding dimensions. Inputs: mapping model name -> (dimension -> score),
+    # output filename, figure size (default 7x7) and title. Sorts dimensions, then creates two stacked subplots:
+    # top is a line plot of Spearman correlation per dimension per model with legend; bottom is the ratio-of-maximum
+    # grouped bar chart from the helper. Sets labels and the suptitle, applies tight layout and writes the figure to
+    # filename. Returns None. X ticks are taken from the first model's dimensions.
     # Sort each by key
     model_name_to_dim_to_score = {
         model_name: dict(sorted(dim_to_score.items(), key=lambda x: x[0]))

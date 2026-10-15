@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the triplet evaluator: checks how often an anchor's sparse embedding is more
+# similar to its positive than to its negative (optionally by a margin), plus sparsity statistics
+# for anchors, positives and negatives.
 from __future__ import annotations
 
 import logging
@@ -21,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 class SparseTripletEvaluator(TripletEvaluator):
+    # [CLASS DOC]
+    # Subclass of TripletEvaluator for SparseEncoder models. Adds max_active_dims and sparsity_stats
+    # (keys prefixed anchor_, positive_, negative_).
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.TripletEvaluator` but is specifically designed for sparse encoder models.
 
@@ -110,6 +117,10 @@ class SparseTripletEvaluator(TripletEvaluator):
         similarity_fn_names: list[Literal["cosine", "dot", "euclidean", "manhattan"]] | None = None,
         main_distance_function: str | SimilarityFunction | None = "deprecated",
     ):
+        # [FUNCTION DOC]
+        # Stores max_active_dims and empty statistics and delegates anchors, positives, negatives, main
+        # similarity function, margin, name, batch size, progress bar, CSV flag, similarity function names
+        # and the deprecated main_distance_function to the parent constructor.
         self.max_active_dims = max_active_dims
         self.sparsity_stats = defaultdict(list)
         return super().__init__(
@@ -127,6 +138,9 @@ class SparseTripletEvaluator(TripletEvaluator):
         )
 
     def _append_csv_headers(self, similarity_fn_names):
+        # [FUNCTION DOC]
+        # Extends the parent's CSV headers with active_dims and sparsity_ratio columns for each of anchor,
+        # positive and negative.
         super()._append_csv_headers(similarity_fn_names)
         for prefix in ["anchor", "positive", "negative"]:
             self.csv_headers.extend([f"{prefix}_active_dims", f"{prefix}_sparsity_ratio"])
@@ -134,6 +148,12 @@ class SparseTripletEvaluator(TripletEvaluator):
     def __call__(
         self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation: resets statistics, runs the parent evaluation (which encodes anchors,
+        # positives and negatives in that order through embed_inputs), averages each statistic, adds them
+        # (prefixed with name) to the metrics, stores the metrics in the model card data, logs the three
+        # sparsity summaries, and appends the statistics to the last CSV row when output_path is given and
+        # write_csv is set. Returns the metrics.
         self.sparsity_stats = defaultdict(list)
         metrics = super().__call__(model=model, output_path=output_path, epoch=epoch, steps=steps)
         for key, value in self.sparsity_stats.items():
@@ -165,6 +185,14 @@ class SparseTripletEvaluator(TripletEvaluator):
         encode_fn_name: str | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Encodes texts with encode_query ("query"), encode_document ("document") or encode (otherwise) as
+        # sparse CPU tensors with the batch size, progress bar, max_active_dims and extra kwargs. Records
+        # sparsity statistics under a prefix derived from how many statistic keys exist so far (anchor,
+        # then positive, then negative). Returns the embeddings.
+        # KNOWN ISSUE: The prefix is inferred from the number of keys already collected, assuming exactly two
+        # statistics per call and exactly three calls in order; any extra call raises IndexError and other
+        # call orders mislabel the statistics.
         if encode_fn_name == "query":
             encode_fn = model.encode_query
         elif encode_fn_name == "document":
@@ -189,9 +217,13 @@ class SparseTripletEvaluator(TripletEvaluator):
     def store_metrics_in_model_card_data(
         self, model: SparseEncoder, metrics: dict[str, Any], epoch: int = 0, step: int = 0
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the metrics in the model's model card data for this evaluator at the given epoch and step.
         model.model_card_data.set_evaluation_metrics(self, metrics, epoch=epoch, step=step)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims

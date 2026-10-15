@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train microsoft/mpnet-base on 100k GooAQ question/answer pairs (10k held out, split seed 12) with a
+# combined InfoNCE (MultipleNegativesRankingLoss) plus Global Orthogonal Regularization loss. Evaluates with an
+# InformationRetrievalEvaluator where each eval question's only relevant doc is its own answer (corpus = eval answers)
+# before and after training; batch 64, lr 2e-5, 10% warmup, bf16, NO_DUPLICATES, eval/save every 100 steps.
+# The temporary "id" column is removed before training. Saves to models/<run_name>/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
 """
 This script trains a sentence transformer using a combination of InfoNCE (via MultipleNegativesRankingLoss)
 and Global Orthogonal Regularization (GOR) loss. The combination helps learn embeddings that are both
@@ -41,6 +48,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Define a custom loss that combines InfoNCE and Global Orthogonal Regularization
 class InfoNCEGORLoss(torch.nn.Module):
+    # [CLASS DOC]
+    # Torch loss module combining MultipleNegativesRankingLoss and GlobalOrthogonalRegularizationLoss over one shared
+    # forward pass. Attributes: model, info_nce_loss, gor_loss.
     """
     Combines MultipleNegativesRankingLoss (InfoNCE) with Global Orthogonal Regularization Loss.
 
@@ -50,6 +60,9 @@ class InfoNCEGORLoss(torch.nn.Module):
     """
 
     def __init__(self, model: SentenceTransformer, similarity_fct=cos_sim, scale=20.0) -> None:
+        # [FUNCTION DOC]
+        # Store the model and build both component losses with the given similarity function (default cosine); the InfoNCE
+        # loss also uses the given scale (default 20). Returns None.
         super().__init__()
         self.model = model
         self.info_nce_loss = MultipleNegativesRankingLoss(model, similarity_fct=similarity_fct, scale=scale)
@@ -60,6 +73,9 @@ class InfoNCEGORLoss(torch.nn.Module):
         sentence_features: Iterable[dict[str, Tensor]],
         labels: Tensor | None = None,
     ) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Input: iterable of tokenized feature dicts and optional labels. Encodes each to "sentence_embedding" once and returns
+        # a dict merging "info_nce" (the MNRL loss) with the dict of named loss terms returned by the GOR loss.
         embeddings = [self.model(sentence_feature)["sentence_embedding"] for sentence_feature in sentence_features]
         info_nce_loss: dict[str, Tensor] = {
             "info_nce": self.info_nce_loss.compute_loss_from_embeddings(embeddings, labels)

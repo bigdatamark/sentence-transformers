@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Multi-class cross entropy loss for CrossEncoder classification training (e.g. NLI with 3 labels).
 from __future__ import annotations
 
 from torch import Tensor, nn
@@ -7,7 +9,15 @@ from sentence_transformers.util import batch_to_device
 
 
 class CrossEntropyLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a CrossEncoder. Attributes: the model, an activation function applied to the
+    # raw logits (identity by default), and an inner torch cross entropy loss built from extra keyword arguments.
+    # Expects two text columns plus integer class labels; the model's number of output labels should equal the
+    # number of classes.
     def __init__(self, model: CrossEncoder, activation_fn: nn.Module = nn.Identity(), **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Store model, activation function, and construct the inner cross entropy loss with the given kwargs.
+        # Raises ValueError if the model is not a CrossEncoder. Does not check the model's label count.
         """
         Computes the Cross Entropy Loss for a CrossEncoder model. This loss is used to train a model to predict the
         correct class label for a given pair of inputs. The number of classes should be equal to the number of model
@@ -68,6 +78,12 @@ class CrossEntropyLoss(nn.Module):
     def forward(
         self, inputs: list[list[str]], labels: Tensor, prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss for one batch. Inputs: a list of text columns (must be exactly two: first and second
+        # element of each pair), a label tensor of class indices, and optional prompt and router task forwarded to
+        # preprocessing. Zips the columns into pairs, tokenizes them with the model, moves tensors to the model
+        # device, runs the model, takes the "scores" logits (batch by num labels), applies the activation, and
+        # returns the scalar cross entropy against the labels. Raises ValueError if the column count is not two.
         if len(inputs) != 2:
             raise ValueError(
                 f"CrossEntropyLoss expects a dataset with two non-label columns, but got a dataset with {len(inputs)} columns."

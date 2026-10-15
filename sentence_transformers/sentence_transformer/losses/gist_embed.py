@@ -1,3 +1,5 @@
+# [MODULE DOC] GISTEmbed loss: in-batch-negatives contrastive loss (InfoNCE over cosine similarities divided by a temperature)
+# where a frozen guide model identifies likely false negatives, which are removed from the softmax.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -14,6 +16,11 @@ from sentence_transformers.util import all_gather_with_grad, get_rank
 
 
 class GISTEmbedLoss(nn.Module):
+    # [CLASS DOC] Loss module for (anchor, positive) pairs or (anchor, positive, negative) triplets. Attributes: model, guide,
+    # temperature (default 0.01), similarity_fct (cosine along the last dim), must_retokenize (true when tokenizer
+    # vocabularies differ or the guide's max sequence length is shorter), tokenizer (model tokenizer, only when
+    # retokenizing), margin_strategy ("absolute" or "relative"), margin, contrast_anchors, contrast_positives,
+    # gather_across_devices, cross_entropy_loss.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -25,6 +32,8 @@ class GISTEmbedLoss(nn.Module):
         contrast_positives: bool = True,
         gather_across_devices: bool = False,
     ) -> None:
+        # [FUNCTION DOC] Store settings. Raises ValueError if either model lacks a transformers tokenizer, if retokenization is needed but
+        # the model starts with a static embedding, or if margin_strategy is invalid.
         """
         This loss is used to train a SentenceTransformer model using the GISTEmbed algorithm.
         It takes a model and a guide model as input, and uses the guide model to guide the
@@ -135,9 +144,20 @@ class GISTEmbedLoss(nn.Module):
         self.cross_entropy_loss = nn.CrossEntropyLoss()
 
     def sim_matrix(self, embed1: Tensor, embed2: Tensor) -> Tensor:
+        # [FUNCTION DOC] HELPER: Return the matrix of cosine similarities between every row of the first and every row of the second
+        # embedding tensor.
         return self.similarity_fct(embed1.unsqueeze(1), embed2.unsqueeze(0))
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Make shallow copies of the feature dicts for the guide, embed all columns with the model, then without gradients
+        # embed with the guide (after decoding ids to text and re-preprocessing on the guide device when retokenizing).
+        # Raises ValueError unless there are 2 or 3 columns. When gathering across devices, positives and negatives (model
+        # and guide) are gathered with gradient support and the label offset is rank times local batch size. Computes
+        # anchor-positive similarity (model and guide); the guide's own positive similarity per anchor is the threshold.
+        # Entries whose guide similarity exceeds the threshold minus margin ("absolute") or minus absolute threshold times
+        # margin ("relative") are set to negative infinity, except each anchor's true positive. Optionally adds masked
+        # anchor-anchor and local-positive vs all-positive blocks, and a masked anchor-negative block. Concatenates along
+        # columns, divides by temperature and returns cross-entropy with targets offset plus row index. Labels are ignored.
         sentence_features = list(sentence_features)
         # Run the guide on shallow copies: it writes its outputs into the features it is given, and
         # loss decorators like MatryoshkaLoss reuse the dicts the model filled.
@@ -197,6 +217,9 @@ class GISTEmbedLoss(nn.Module):
 
         # This uses guided (teacher) similarity as a dynamic threshold to identify and suppress false negatives
         def mask_false_negatives(guided_sim_mat, sim_mat, positive_mask: Tensor | None = None):
+            # [FUNCTION DOC] HELPER: Mask false negatives in place: positions where the guide similarity exceeds the per-anchor positive
+            # threshold (adjusted by margin per strategy) get negative infinity, except those in the optional positive mask.
+            # Returns the mutated matrix.
             if self.margin_strategy == "absolute":
                 # Remove samples whose guided similarity is higher than (positive_sim - margin)
                 mask = guided_sim_mat > (guided_sim - self.margin)
@@ -248,6 +271,7 @@ class GISTEmbedLoss(nn.Module):
         return self.cross_entropy_loss(scores, range_labels)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: guide model object, temperature, margin strategy and value, contrast flags and gather flag.
         return {
             "guide": self.guide,
             "temperature": self.temperature,
@@ -260,6 +284,7 @@ class GISTEmbedLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the GISTEmbed paper.
         return """
 @misc{solatorio2024gistembed,
     title={GISTEmbed: Guided In-sample Selection of Training Negatives for Text Embedding Fine-tuning},

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: finetune all-distilroberta-v1 on the TREC question classification dataset (fine labels) with a
+# batch triplet loss (BatchAllTripletLoss; other variants are commented out), using the GROUP_BY_LABEL batch sampler,
+# batch 32, 1 epoch, 10% warmup, eval/save every 20%. The last 500 train rows form a dev set; dev and test are turned
+# into random (anchor, positive, negative) triplets for TripletEvaluator. Evaluates before training, during training,
+# and on test afterwards; saves to output/finetune-batch-hard-trec-<model>-<timestamp>/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: the docstring describes batch hard triplet loss and a local datasets/ download directory, but the code uses BatchAllTripletLoss and loads the dataset from the Hugging Face Hub cache.
 """
 This script trains sentence transformers with a batch hard loss function.
 
@@ -37,6 +45,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def trec_dataset(validation_dataset_nb=500):
+    # [FUNCTION DOC]
+    # HELPER: load omkar334/trec, drop coarse_label and rename fine_label to label. If validation_dataset_nb (default 500)
+    # is positive, the last that many train rows become the dev set and are removed from train. Seeds the random module
+    # with 42, then builds dev and test triplet datasets. Returns (train_set with text/label, dev_triplets, test_triplets).
+    # KNOWN ISSUE: if validation_dataset_nb is 0 or negative, dev_set is never assigned and a NameError is raised.
     dataset = load_dataset("omkar334/trec")
 
     train_set = dataset["train"].remove_columns(["coarse_label"]).rename_column("fine_label", "label")
@@ -56,6 +69,11 @@ def trec_dataset(validation_dataset_nb=500):
 
 
 def triplets_from_labeled_dataset(dataset):
+    # [FUNCTION DOC]
+    # HELPER: build a triplet Dataset from a dataset with text and label columns. Groups indices by label, ignores labels
+    # with fewer than two examples, and for every remaining example (as anchor) picks a random different example of the
+    # same label as positive and a random example of a random other valid label as negative, using the random module.
+    # Returns a Dataset with anchor, positive and negative columns. Raises IndexError if only one valid label exists.
     # Create triplets for a [(label, sentence), (label, sentence)...] dataset
     # by using each example as an anchor and selecting randomly a
     # positive instance with the same label and a negative instance with a different label

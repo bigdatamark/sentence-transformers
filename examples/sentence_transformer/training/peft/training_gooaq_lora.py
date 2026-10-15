@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: parameter-efficient finetuning. Loads a model (default bert-base-uncased, or first CLI arg), attaches
+# a LoRA adapter (feature extraction, r 64, alpha 128, dropout 0.1) and trains it on GooAQ question/answer pairs
+# (1,000,000 train rows after holding out 10k with seed 12) with CachedMultipleNegativesRankingLoss (mini-batch 32,
+# batch 1024, lr 2e-5, bf16, NO_DUPLICATES, eval/save every 100 steps). Evaluates the default NanoBEIR evaluator before
+# and after training, saves the adapter model to models/<model>-gooaq-peft/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
 import logging
 import sys
 import traceback

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Pytest tests for the CrossEncoder CachedMultipleNegativesRankingLoss (GradCache-style: scores query/candidate pairs
+# in mini-batches without gradients, computes the loss and caches logit gradients, and in a backward hook re-predicts
+# each mini-batch with the replayed RNG state to backpropagate). Each test compares it against the non-cached
+# MultipleNegativesRankingLoss or checks hook behaviour. Module constants: six queries, six matching answers, and six
+# hard negatives. Inputs to the losses are a list of text columns plus None labels. Uses the v5.4 tiny reranker
+# fixture and a dropout-disabling helper from the sentence-transformer loss tests.
 from __future__ import annotations
 
 import pytest
@@ -12,10 +19,17 @@ ANSWERS = ["answer a", "answer b", "answer c", "answer d", "answer e", "answer f
 
 
 def _gradients(model: CrossEncoder) -> dict[str, torch.Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a dict of parameter name to a clone of its gradient for every parameter of the underlying
+    # transformer that has a gradient.
     return {name: param.grad.clone() for name, param in model.model.named_parameters() if param.grad is not None}
 
 
 def _loss_and_grads(model: CrossEncoder, loss_fn: torch.nn.Module, seed: int = 12) -> tuple[float, dict]:
+    # [FUNCTION DOC]
+    # HELPER: Zeroes the model's gradients, seeds the global torch RNG (default 12, because in-batch negatives are
+    # sampled randomly), computes the loss on the query/answer columns, backpropagates, and returns the loss as a
+    # float together with the gradient dict.
     # The in-batch negatives are sampled randomly inside forward, so seed for comparability.
     model.model.zero_grad()
     torch.manual_seed(seed)
@@ -25,11 +39,18 @@ def _loss_and_grads(model: CrossEncoder, loss_fn: torch.nn.Module, seed: int = 1
 
 
 def _disable_dropout(model: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Disables dropout on the CrossEncoder via the shared helper, using two canary query/answer pairs to
+    # verify determinism.
     disable_dropout(model, canary_inputs=[["a canary query", "a canary answer"], ["another query", "another answer"]])
 
 
 @pytest.mark.parametrize("mini_batch_size", [2, 5, 64])
 def test_cached_ce_mnrl_matches_mnrl(reranker_bert_tiny_model_v54: CrossEncoder, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over mini-batch sizes 2, 5 and 64 (dividing, not dividing, and exceeding the six pairs). With
+    # dropout disabled and training mode on, asserts the cached loss and per-parameter gradients match the plain loss
+    # within tolerances and that some gradient is non-zero.
     """``mini_batch_size`` only bounds memory: the cached loss must reproduce MultipleNegativesRankingLoss's
     loss and gradient, whether or not it divides the pair count."""
     model = reranker_bert_tiny_model_v54
@@ -50,6 +71,12 @@ def test_cached_ce_mnrl_matches_mnrl(reranker_bert_tiny_model_v54: CrossEncoder,
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="the device RNG replay can only regress on an accelerator")
 def test_cached_ce_mnrl_replays_dropout_on_cuda(reranker_bert_tiny_model_v54: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Requires CUDA. Moves the model to GPU in training mode and asserts it has active dropout. Wraps the loss's
+    # mini-batch prediction method with a spy that records detached copies of the returned logits into a switchable
+    # list: forward-pass logits first, then (after switching before backward) the hook's re-predicted logits. Asserts
+    # both lists are equally long and non-empty and each re-predicted mini-batch's logits exactly equal the forward
+    # ones, i.e. dropout RNG was replayed on the device.
     """The backward pass must re-predict exactly the logits of the forward pass, dropout included.
 
     ``RandContext`` can only capture the RNG state of devices it sees tensors for. It used to be handed
@@ -74,6 +101,9 @@ def test_cached_ce_mnrl_replays_dropout_on_cuda(reranker_bert_tiny_model_v54: Cr
     predict_minibatch = loss_fn.predict_minibatch
 
     def spy(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Spy around the original mini-batch prediction: forwards keyword arguments, appends a detached clone
+        # of the logits to the current sink list, and returns the logits and random state unchanged.
         logits, random_state = predict_minibatch(**kwargs)
         sink.append(logits.detach().clone())
         return logits, random_state
@@ -93,6 +123,10 @@ def test_cached_ce_mnrl_replays_dropout_on_cuda(reranker_bert_tiny_model_v54: Cr
 
 
 def test_cached_ce_mnrl_two_forwards_before_one_backward(reranker_bert_tiny_model_v54: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Checks that two forward passes through the same loss instance before a single backward give the same gradients
+    # as two separate instances (the gradient cache must be per forward call, not stored on the module). Uses
+    # mini-batch size 2, the first three and last three pairs, and seeds 12 and 34.
     """Each forward pass must hand its own cached gradients to its own backward hook. The cache used to
     live on the loss module, where a second forward pass overwrote it."""
     model = reranker_bert_tiny_model_v54
@@ -100,6 +134,9 @@ def test_cached_ce_mnrl_two_forwards_before_one_backward(reranker_bert_tiny_mode
     model.model.train()
 
     def losses(loss_fn_first: torch.nn.Module, loss_fn_second: torch.nn.Module) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, computes the first loss on the first three pairs (seed 12) and the second on the
+        # last three (seed 34), backpropagates their sum, and returns the gradient dict.
         model.model.zero_grad()
         torch.manual_seed(12)
         first = loss_fn_first([QUERIES[:3], ANSWERS[:3]], None)
@@ -124,12 +161,19 @@ def test_cached_ce_mnrl_two_forwards_before_one_backward(reranker_bert_tiny_mode
 def test_cached_ce_mnrl_scales_with_the_outer_backward(
     reranker_bert_tiny_model_v54: CrossEncoder, grad_accum_steps: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over accumulation steps 2 and 4. Asserts that multiplying the cached loss by one over the step
+    # count before backward scales every gradient by the same factor (compared to an unscaled run), and that the
+    # unscaled gradient is non-zero.
     """Scaling the returned loss (gradient accumulation, fp16 loss scaling) must scale the whole gradient."""
     model = reranker_bert_tiny_model_v54
     _disable_dropout(model)
     model.model.train()
 
     def grads(scale: float) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, seeds 12, computes a fresh cached loss (mini-batch 2) on all pairs, multiplies it
+        # by the given scale, backpropagates, and returns the gradient dict.
         model.model.zero_grad()
         torch.manual_seed(12)
         (CachedMultipleNegativesRankingLoss(model, mini_batch_size=2)([QUERIES, ANSWERS], None) * scale).backward()
@@ -144,6 +188,9 @@ def test_cached_ce_mnrl_scales_with_the_outer_backward(
 
 
 def test_cached_ce_mnrl_under_no_grad(reranker_bert_tiny_model_v54: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts that in eval mode under no-grad, the cached loss (mini-batch 2) can be computed and equals the plain
+    # loss with the same seed.
     """The loss must be computable under ``torch.no_grad``, as the trainer does for the eval loss."""
     model = reranker_bert_tiny_model_v54
     _disable_dropout(model)
@@ -163,6 +210,9 @@ NEGATIVES = ["wrong a", "wrong b", "wrong c", "wrong d", "wrong e", "wrong f"]
 
 @pytest.mark.parametrize("mini_batch_size", [2, 5])
 def test_cached_ce_mnrl_with_hard_negatives(reranker_bert_tiny_model_v54: CrossEncoder, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over mini-batch sizes 2 and 5. With a third hard-negative column, asserts cached and plain loss
+    # values and gradients match and the gradients are non-zero.
     """Explicit hard negatives (a third input column) triple the pair count. The cached loss must still
     reproduce the non-cached loss and gradient."""
     model = reranker_bert_tiny_model_v54
@@ -170,6 +220,9 @@ def test_cached_ce_mnrl_with_hard_negatives(reranker_bert_tiny_model_v54: CrossE
     model.model.train()
 
     def loss_and_grads(loss_fn: torch.nn.Module) -> tuple[float, dict]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, seeds 12, computes the loss on queries, answers and negatives, backpropagates, and
+        # returns the loss value and gradient dict.
         model.model.zero_grad()
         torch.manual_seed(12)
         loss = loss_fn([QUERIES, ANSWERS, NEGATIVES], None)
@@ -188,6 +241,10 @@ def test_cached_ce_mnrl_with_hard_negatives(reranker_bert_tiny_model_v54: CrossE
 
 
 def test_cached_ce_mnrl_prompt_reaches_the_backward_pass(reranker_bert_tiny_model_v54: CrossEncoder) -> None:
+    # [FUNCTION DOC]
+    # Checks that a prompt passed to the cached loss is also used in the backward hook's re-prediction: with the
+    # prediction spy installed and the prompt "Rerank this passage: ", asserts forward and re-predicted logits match
+    # exactly per mini-batch and some parameter received a non-zero gradient.
     """The prompt (and task) must be carried into the backward hook's re-prediction: they change the
     tokenization, so if the hook's bundle dropped them, the re-predicted logits would belong to
     different inputs than the cached gradients."""
@@ -202,6 +259,9 @@ def test_cached_ce_mnrl_prompt_reaches_the_backward_pass(reranker_bert_tiny_mode
     predict_minibatch = loss_fn.predict_minibatch
 
     def spy(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Same recording spy as above: delegates to the original prediction, appends a detached clone of the
+        # logits to the current sink, and returns the original results.
         logits, random_state = predict_minibatch(**kwargs)
         sink.append(logits.detach().clone())
         return logits, random_state

@@ -1,3 +1,6 @@
+# [MODULE DOC] Embedding similarity (STS-style) evaluator for SentenceTransformer models: embeds sentence pairs, scores
+# them with one or more similarity functions and reports Pearson and Spearman correlation with gold scores.
+# Supports quantized embedding precisions and optional CSV logging.
 from __future__ import annotations
 
 import csv
@@ -25,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingSimilarityEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator holding sentences1, sentences2 and gold scores (equal-length lists), batch_size, main_similarity
+    # (optional SimilarityFunction that selects the primary metric), similarity_fn_names (cosine, euclidean,
+    # manhattan, dot; defaults to the main similarity, else the model's function at call time), name,
+    # show_progress_bar, write_csv, precision (float32/int8/uint8/binary/ubinary or None), truncate_dim,
+    # csv_file and csv_headers.
+    # KNOWN ISSUE: The docstring example says the primary metric is "sts_dev_pearson_cosine", but the code selects a Spearman metric (e.g. "spearman_cosine").
     """
     Evaluate a model based on the similarity of the embeddings by calculating the Spearman and Pearson rank correlation
     in comparison to the gold standard labels.
@@ -93,6 +102,9 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] | None = None,
         truncate_dim: int | None = None,
     ):
+        # [FUNCTION DOC] Store inputs, assert equal list lengths, convert main_similarity to a SimilarityFunction when given (ValueError
+        # if invalid), default similarity_fn_names to the main similarity's value. If show_progress_bar is None,
+        # enable it at INFO/DEBUG logging. Build the CSV file name (includes name and precision) and headers.
         super().__init__()
         self.sentences1 = sentences1
         self.sentences2 = sentences2
@@ -132,6 +144,7 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
         self._append_csv_headers(self.similarity_fn_names)
 
     def _append_csv_headers(self, similarity_fn_names: list[str]) -> None:
+        # [FUNCTION DOC] HELPER: Append "<similarity>_pearson" and "<similarity>_spearman" CSV headers for each given name.
         metrics = ["pearson", "spearman"]
 
         for v in similarity_fn_names:
@@ -140,6 +153,7 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
 
     @classmethod
     def from_input_examples(cls, examples: list[InputExample], **kwargs):
+        # [FUNCTION DOC] Alternate constructor from InputExamples: texts[0], texts[1] and label as the gold score.
         sentences1 = []
         sentences2 = []
         scores = []
@@ -153,6 +167,15 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Run evaluation: log a header, embed both sentence lists. For "binary" precision shift signed bytes into
+        # unsigned range; for binary and ubinary unpack bits into 0/1 vectors. Adopt the model's similarity function
+        # if none configured. For each known similarity function compute pairwise scores (distances as negative
+        # similarities) and Pearson/Spearman correlations against gold scores, store as "pearson_<fn>" and
+        # "spearman_<fn>", and log them. Optionally write/append a CSV row. With several functions add pearson_max
+        # and spearman_max. The primary metric is the Spearman metric of main_similarity if set, otherwise
+        # spearman_max for several functions or the single function's Spearman. Prefix with name, store in model
+        # card data, return the dict.
+        # KNOWN ISSUE: If main_similarity is not among similarity_fn_names, the chosen primary metric key does not exist in the returned metrics; and the CSV write raises KeyError for unknown function names that were skipped in scoring.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -248,6 +271,8 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> np.ndarray:
+        # [FUNCTION DOC] HELPER: Encode inputs to numpy with the evaluator's batch size, progress bar, precision and truncation;
+        # embeddings are normalized whenever a precision is set.
         return model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -261,9 +286,11 @@ class EmbeddingSimilarityEvaluator(BaseEvaluator):
 
     @property
     def description(self) -> str:
+        # [FUNCTION DOC] Return the human-readable description "Semantic Similarity".
         return "Semantic Similarity"
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict containing truncate_dim and precision when they are not None.
         config_dict = {}
         config_dict_candidate_keys = ["truncate_dim", "precision"]
         for key in config_dict_candidate_keys:

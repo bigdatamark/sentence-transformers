@@ -1,3 +1,9 @@
+# [PACKAGE DOC]
+# Loss functions for sparse encoders. Re-exports the SPLADE wrapper losses (SpladeLoss,
+# CachedSpladeLoss), the FLOPS regularizer, the CSR losses, and sparse versions of the ranking and
+# similarity losses (multiple negatives ranking, CoSENT, AnglE, triplet, margin MSE, cosine
+# similarity, MSE, distillation KL divergence). CachedSpladeLoss is imported last to avoid a
+# circular import.
 from __future__ import annotations
 
 from .csr import CSRLoss, CSRReconstructionLoss

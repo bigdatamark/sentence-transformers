@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Slow regression tests for many pretrained SentenceTransformer models from the Hugging Face Hub (network):
+# each model encodes a fixed query and four documents in bfloat16 with SDPA attention, and the query-document
+# similarities must match recorded reference values. The reference table maps model names to expected
+# similarities and extra loading keyword arguments (remote code trust, or bfloat16 with eager attention);
+# some entries are included only for transformers below or at version 5. Some models need optional
+# dependencies (timm, pillow, einops).
 from __future__ import annotations
 
 import gc
@@ -159,6 +166,12 @@ MODELS_TO_SIMILARITIES_BF16_SDPA: dict[str, tuple[list[float], dict[str, Any]]] 
 @pytest.mark.parametrize("model_name, expected_config", MODELS_TO_SIMILARITIES_BF16_SDPA.items())
 @pytest.mark.slow
 def test_pretrained_model_bf16_sdpa(model_name: str, expected_config: tuple[list[float], dict[str, Any]]) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over the reference table. Builds loading kwargs with bfloat16 and SDPA model kwargs, shallowly
+    # overridden by the entry's kwargs (so an entry's model kwargs replace the defaults entirely), loads the
+    # model, encodes the query and documents with the query/document prompts, computes the first row of the
+    # similarity matrix and asserts it is close to the expected values within 1% relative tolerance. Then deletes
+    # the model, runs garbage collection and empties the CUDA cache.
     expected_score, kwargs_override = expected_config
     kwargs = {"model_kwargs": {"torch_dtype": torch.bfloat16, "attn_implementation": "sdpa"}}
     kwargs.update(kwargs_override)

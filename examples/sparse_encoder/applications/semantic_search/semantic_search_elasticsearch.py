@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Script: sparse semantic search backed by a local Elasticsearch (v8+). Encodes the first 10,000 Natural Questions answers
+# with SPLADE (naver/splade-cocondenser-ensembledistil) as sparse document tensors, decodes them to token->weight form,
+# then loops forever: encodes the current queries (initially the first two dataset queries) with encode_query, calls
+# semantic_search_elasticsearch (top 5; the corpus is indexed on the first call and the returned index is reused later),
+# prints timings and hits (score, answer text, corpus id), and reads the next query from stdin.
+# Side effects: network, Elasticsearch index creation, stdin/stdout; never terminates on its own.
 """
 This script contains an example how to perform semantic search with Elasticsearch.
 

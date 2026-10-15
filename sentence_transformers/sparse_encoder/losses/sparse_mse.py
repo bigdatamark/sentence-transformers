@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Sparse MSE loss: regresses the student sparse embeddings onto target (teacher) embeddings given as
+# labels, reusing the dense MSELoss. Unlike the other sparse losses it can be used directly.
 from __future__ import annotations
 
 from sentence_transformers.sentence_transformer.losses.mse import MSELoss
@@ -5,7 +8,12 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseMSELoss(MSELoss):
+    # [CLASS DOC]
+    # MSELoss subclass for SparseEncoder students; the inherited forward encodes each input column and
+    # averages the MSE between each column's embeddings and the label embeddings.
     def __init__(self, model: SparseEncoder) -> None:
+        # [FUNCTION DOC]
+        # Initializes the parent MSELoss with the model.
         """
         Computes the MSE loss between the computed embedding and a target embedding. This loss
         is used when extending embeddings to new languages as described in our publication

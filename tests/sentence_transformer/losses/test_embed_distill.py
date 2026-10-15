@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests EmbedDistillLoss, which trains a student SentenceTransformer to match precomputed teacher embeddings (given as labels) using a
+# cosine, MSE or L2 distance, optionally through a learnable linear projection to the teacher dimension that can be saved/loaded as a
+# safetensors file. Also tests that MSELoss is a subclass fixed to the MSE metric. Uses the tiny BERT model fixture.
 from __future__ import annotations
 
 import pytest
@@ -9,16 +13,22 @@ from sentence_transformers.sentence_transformer.losses import EmbedDistillLoss, 
 
 
 def _features(model: SentenceTransformer, texts: list[str]) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Preprocesses texts with the model and returns the feature dict with every tensor moved to the model's device.
     feats = model.preprocess(texts)
     return {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in feats.items()}
 
 
 def test_invalid_distance_metric_raises(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts an unsupported distance metric name raises ValueError listing the allowed metrics.
     with pytest.raises(ValueError, match="distance_metric must be one of"):
         EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="kl_div")  # type: ignore[arg-type]
 
 
 def test_missing_labels_raises(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts calling the loss with labels None raises ValueError requiring pre-computed teacher embeddings.
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="cosine")
     with pytest.raises(ValueError, match="pre-computed teacher embeddings"):
         loss([_features(stsb_bert_tiny_model, ["a", "b"])], labels=None)
@@ -26,6 +36,8 @@ def test_missing_labels_raises(stsb_bert_tiny_model: SentenceTransformer) -> Non
 
 @pytest.mark.parametrize("distance_metric", ["cosine", "mse", "l2"])
 def test_forward_produces_finite_scalar(stsb_bert_tiny_model: SentenceTransformer, distance_metric: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over cosine, mse and l2: with random teacher labels of the model dimension, asserts the loss is a finite scalar.
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric=distance_metric)
     sentence_features = [_features(stsb_bert_tiny_model, ["a", "b"])]
     labels = torch.randn(2, stsb_bert_tiny_model.get_embedding_dimension(), device=stsb_bert_tiny_model.device)
@@ -36,6 +48,9 @@ def test_forward_produces_finite_scalar(stsb_bert_tiny_model: SentenceTransforme
 
 @pytest.mark.parametrize("distance_metric", ["cosine", "mse", "l2"])
 def test_distance_metric_matches_reference(stsb_bert_tiny_model: SentenceTransformer, distance_metric: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized per metric: computes the loss directly from fixed 2x3 student and teacher embeddings and asserts it equals a reference:
+    # mean squared error, mean row-wise Euclidean norm of the difference, or mean of one minus row-wise cosine similarity.
     """Per-metric, the loss should match a hand-computed reference on the same embeddings."""
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric=distance_metric)
 
@@ -55,6 +70,8 @@ def test_distance_metric_matches_reference(stsb_bert_tiny_model: SentenceTransfo
 
 
 def test_2d_labels_broadcast_across_columns(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With two text columns and 2-D labels, asserts the same teacher target is broadcast to both columns and the loss is finite.
     """2D labels with multi-column input = same target broadcast (multilingual-distillation case)."""
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="mse")
     sentence_features = [
@@ -67,6 +84,8 @@ def test_2d_labels_broadcast_across_columns(stsb_bert_tiny_model: SentenceTransf
 
 
 def test_3d_labels_per_column(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With two text columns and 3-D labels (batch, column, dim), asserts per-column targets are accepted and the loss is finite.
     """3D labels supply a different teacher embedding per text column."""
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="mse")
     sentence_features = [
@@ -80,6 +99,8 @@ def test_3d_labels_per_column(stsb_bert_tiny_model: SentenceTransformer) -> None
 
 
 def test_3d_labels_column_count_mismatch_raises(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts 3-D labels with three columns for a single text column raise ValueError about the number of label columns.
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="mse")
     sentence_features = [_features(stsb_bert_tiny_model, ["a", "b"])]
     dim = stsb_bert_tiny_model.get_embedding_dimension()
@@ -89,6 +110,9 @@ def test_3d_labels_column_count_mismatch_raises(stsb_bert_tiny_model: SentenceTr
 
 
 def test_projection_layer_changes_during_training(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Configures a projection to a teacher dimension 16 larger than the student's, moves the loss to the model device, runs one SGD step
+    # (learning rate 1) on the projection parameters only, and asserts the projection weight changed.
     """The projection layer should receive gradients and update its weights."""
     student_dim = stsb_bert_tiny_model.get_embedding_dimension()
     teacher_dim = student_dim + 16
@@ -111,6 +135,8 @@ def test_projection_layer_changes_during_training(stsb_bert_tiny_model: Sentence
 
 
 def test_projection_dim_matches_teacher(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts projection_dim creates a linear projection from the student dimension to the requested teacher dimension.
     """projection_dim should produce a Linear that outputs teacher_dim."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() * 2
     loss = EmbedDistillLoss(stsb_bert_tiny_model, projection_dim=teacher_dim)
@@ -120,17 +146,23 @@ def test_projection_dim_matches_teacher(stsb_bert_tiny_model: SentenceTransforme
 
 
 def test_no_projection_by_default(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts there is no projection layer and projection_dim is None by default.
     loss = EmbedDistillLoss(stsb_bert_tiny_model)
     assert loss.projection is None
     assert loss.projection_dim is None
 
 
 def test_get_config_dict(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts get_config_dict returns exactly the distance metric and projection dimension.
     loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="l2", projection_dim=128)
     assert loss.get_config_dict() == {"distance_metric": "l2", "projection_dim": 128}
 
 
 def test_mseloss_subclass_matches_embed_distill_mse(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts MSELoss and EmbedDistillLoss with MSE give the same value on fixed student/teacher embeddings.
     """`MSELoss(model)` should produce the same value as `EmbedDistillLoss(model, distance_metric='mse')`."""
     mse_loss = MSELoss(stsb_bert_tiny_model)
     embed_loss = EmbedDistillLoss(stsb_bert_tiny_model, distance_metric="mse")
@@ -145,10 +177,14 @@ def test_mseloss_subclass_matches_embed_distill_mse(stsb_bert_tiny_model: Senten
 
 
 def test_mseloss_is_subclass_of_embed_distill() -> None:
+    # [FUNCTION DOC]
+    # Asserts MSELoss is a subclass of EmbedDistillLoss.
     assert issubclass(MSELoss, EmbedDistillLoss)
 
 
 def test_mseloss_accepts_projection_dim(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts MSELoss accepts projection_dim, creates a projection with that output size, and reports distance metric "mse".
     """The upgraded MSELoss should accept a projection_dim for cross-dim distillation."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() + 8
     loss = MSELoss(stsb_bert_tiny_model, projection_dim=teacher_dim)
@@ -158,6 +194,8 @@ def test_mseloss_accepts_projection_dim(stsb_bert_tiny_model: SentenceTransforme
 
 
 def test_mseloss_get_config_dict_exposes_projection_dim(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts MSELoss's config dict contains only projection_dim.
     """MSELoss's config should expose `projection_dim` (the only knob it has) so model
     cards reflect cross-dim distillation runs."""
     loss = MSELoss(stsb_bert_tiny_model, projection_dim=64)
@@ -165,12 +203,17 @@ def test_mseloss_get_config_dict_exposes_projection_dim(stsb_bert_tiny_model: Se
 
 
 def test_save_projection_without_projection_raises(stsb_bert_tiny_model: SentenceTransformer, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Asserts save_projection on a loss without a projection raises ValueError.
     loss = EmbedDistillLoss(stsb_bert_tiny_model)
     with pytest.raises(ValueError, match="No projection layer to save"):
         loss.save_projection(tmp_path / "proj.safetensors")
 
 
 def test_save_load_projection_round_trip(stsb_bert_tiny_model: SentenceTransformer, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Builds a loss with a projection, shifts its weight and bias by constants, saves to a file in tmp_path, loads into a fresh loss with the
+    # same projection_dim, and asserts weight and bias are exactly equal. Writes a file.
     """save_projection -> load_projection should preserve weights bit-for-bit."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() + 16
     src = EmbedDistillLoss(stsb_bert_tiny_model, projection_dim=teacher_dim)
@@ -192,6 +235,9 @@ def test_save_load_projection_round_trip(stsb_bert_tiny_model: SentenceTransform
 
 
 def test_load_projection_without_projection_dim(stsb_bert_tiny_model: SentenceTransformer, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a projection filled with constants, loads it into a loss configured without a projection, and asserts the layer is created
+    # lazily with the saved teacher dimension and identical weights and bias.
     """`load_projection` should construct the layer from the saved shape when none was configured."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() + 8
     src = EmbedDistillLoss(stsb_bert_tiny_model, projection_dim=teacher_dim)
@@ -213,6 +259,10 @@ def test_load_projection_without_projection_dim(stsb_bert_tiny_model: SentenceTr
 
 
 def test_load_projection_matches_model_device(stsb_bert_tiny_model: SentenceTransformer, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a projection and loads it into a loss without one; asserts the lazily created layer's weight is on the model's device.
+    # KNOWN ISSUE: The docstring says this covers loading after the loss has been moved, but the test never moves the loss, so it only checks
+    # the default placement.
     """Lazy-constructed projection should land on the model's device so that
     `load_projection` works when called after the loss has been moved."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() + 8
@@ -227,6 +277,8 @@ def test_load_projection_matches_model_device(stsb_bert_tiny_model: SentenceTran
 
 
 def test_load_projection_dim_mismatch_raises(stsb_bert_tiny_model: SentenceTransformer, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Asserts loading a saved projection into a loss configured with a different projection_dim raises ValueError about the mismatch.
     """Loading into a loss whose projection has a different shape should raise."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() + 16
     src = EmbedDistillLoss(stsb_bert_tiny_model, projection_dim=teacher_dim)
@@ -239,6 +291,8 @@ def test_load_projection_dim_mismatch_raises(stsb_bert_tiny_model: SentenceTrans
 
 
 def test_mseloss_save_load_projection(stsb_bert_tiny_model: SentenceTransformer, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Asserts MSELoss can save and load its projection, preserving the weight exactly.
     """MSELoss should inherit `save_projection` / `load_projection` from the parent."""
     teacher_dim = stsb_bert_tiny_model.get_embedding_dimension() + 8
     src = MSELoss(stsb_bert_tiny_model, projection_dim=teacher_dim)

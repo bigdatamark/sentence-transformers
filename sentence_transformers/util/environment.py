@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER: Environment and dependency introspection utilities: hints for missing multimodal
+# extras, distributed/device detection, package availability and version checks, and validation
+# of model-declared version requirements. Uses a standard library logger. The hint table maps
+# lowercase keyword tuples to install commands; order matters (first match wins, the
+# "read_video" entry must precede the generic torchvision one).
 from __future__ import annotations
 
 import contextlib
@@ -31,6 +37,12 @@ _DEPENDENCY_EXTRA_HINTS: list[tuple[tuple[str, ...], str]] = [
 
 @contextlib.contextmanager
 def suggest_extra_on_exception() -> Generator[None, None, None]:
+    # [FUNCTION DOC]
+    # HELPER: Context manager. Runs the wrapped block; if it raises ImportError or AttributeError
+    # whose lowercased message contains any keyword from the hint table, re-raises an exception of the
+    # same type whose message is the original (stripped) message followed by a blank line and the
+    # install hint, chained from the original. Other matching-type errors are re-raised unchanged;
+    # other exception types propagate untouched. Yields nothing.
     """Re-raise ImportError/AttributeError with an install hint when a multimodal dependency is missing."""
     try:
         yield
@@ -43,6 +55,9 @@ def suggest_extra_on_exception() -> Generator[None, None, None]:
 
 
 def is_dist_initialized() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True only if torch.distributed is available and initialized; checks
+    # availability first to avoid AttributeError on builds without distributed support.
     """
     Returns whether ``torch.distributed`` is available and has been initialized.
 
@@ -54,6 +69,13 @@ def is_dist_initialized() -> bool:
 
 
 def get_device_name() -> str:
+    # [FUNCTION DOC]
+    # Picks the default device string for this process, in priority order:
+    # CUDA ("cuda:N" where N is the LOCAL_RANK environment variable if set, else the distributed rank
+    # if initialized and less than the number of visible GPUs, else 0), then "mps", "npu", "xpu",
+    # then "hpu" if the habana_frameworks package exists and reports a device, else "cpu".
+    # Side effect: may import habana_frameworks.
+    # KNOWN ISSUE: uses importlib.util while the module only imports importlib, relying on importlib.util having been imported elsewhere.
     """
     Returns the name of the device where this module is running on.
 
@@ -86,6 +108,11 @@ def get_device_name() -> str:
 
 
 def check_package_availability(package_name: str, owner: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the installed distribution named package_name has exactly that
+    # metadata Name and a non-empty Home-page containing the owner string; False if the package is
+    # not installed or does not match.
+    # KNOWN ISSUE: distributions that only declare Project-URL (no Home-page metadata field) are reported as unavailable even when installed.
     """
     Checks if a package is available from the correct owner.
     """
@@ -98,6 +125,8 @@ def check_package_availability(package_name: str, owner: str) -> bool:
 
 
 def is_accelerate_available() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the Hugging Face accelerate package is installed (owner "huggingface").
     """
     Returns True if the Huggingface accelerate library is available.
     """
@@ -105,6 +134,8 @@ def is_accelerate_available() -> bool:
 
 
 def is_datasets_available() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the Hugging Face datasets package is installed (owner "huggingface").
     """
     Returns True if the Huggingface datasets library is available.
     """
@@ -112,6 +143,8 @@ def is_datasets_available() -> bool:
 
 
 def is_training_available() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if both accelerate and datasets are available, i.e. training dependencies are present.
     """
     Returns True if we have the required dependencies for training Sentence
     Transformers models, i.e. Huggingface datasets and Huggingface accelerate.
@@ -120,6 +153,11 @@ def is_training_available() -> bool:
 
 
 def get_installed_version(package_name: str) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns the version string of a package. "python" yields the running Python version.
+    # Otherwise, if a module with the package name (dashes replaced by underscores) is already in
+    # sys.modules and has a string __version__, that is returned; else the distribution metadata
+    # version; else None if the package is not installed.
     """
     Returns the version of an installed package, or None if the package can't be found.
 
@@ -140,6 +178,18 @@ def get_installed_version(package_name: str) -> str | None:
 
 
 def check_version_requirements(requirements: dict[str, Any] | None, source: str | None = None) -> None:
+    # [FUNCTION DOC]
+    # Validates model-declared package version requirements.
+    # Inputs: requirements, a mapping from package name to either a PEP 440 specifier string or a
+    # dict with "specifier" and optional "reason"; source, the model name for messages.
+    # Returns immediately if empty/None; logs a warning and returns if it is not a dict.
+    # The name "pytorch" is aliased to "torch". For each entry: non-string specifiers are warned and
+    # skipped; the specifier is parsed (allowing prereleases) and the installed version (from
+    # get_installed_version) checked; parse failures are warned and skipped; satisfied entries are
+    # skipped. Unmet entries collect a message line ("- name+specifier, but X is installed / it is not
+    # installed. reason") and, except for python, a quoted pip install spec.
+    # Raises ImportError listing all unmet requirements plus a combined pip install command if any
+    # installable spec exists. Returns None otherwise.
     """
     Verifies that the installed packages satisfy the version requirements declared by a model.
 

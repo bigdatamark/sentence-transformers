@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: run SparseRerankingEvaluator on the first 1000 MS MARCO v1.1 validation rows: each sample's passages are split
+# into positives (is_selected true) and negatives, and the evaluator ranks each query's candidates with a SPLADE model
+# (batch 32) and reports MAP, MRR@10 and NDCG@10 (samples without positives are skipped by the evaluator). Prints the
+# primary metric (NDCG@10) and value. Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

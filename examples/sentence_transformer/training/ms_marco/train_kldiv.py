@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Example script: distill a reranker into an mpnet-base bi-encoder on MS MARCO with DistillKLDivLoss, using the
+# tomaarsen/msmarco-Qwen3-Reranker-0.6B dataset (query/passage texts plus teacher scores). Seeds random/torch/numpy
+# with 12 and configures INFO logging at import; running as a script calls main().
 import logging
 import random
 
@@ -26,6 +30,13 @@ numpy.random.seed(12)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads microsoft/mpnet-base (fp32, model card metadata), the first
+    # 10k train and 1k eval rows, trains 1 epoch with DistillKLDivLoss (batch 16, lr 4e-5, warmup 0.1, bf16, eval/save
+    # every 100 steps, keep 5, log every 20). Evaluation is a SequentialEvaluator of an InformationRetrievalEvaluator
+    # (eval queries vs. their own positives, query i relevant to doc i) and NanoBEIR (msmarco, nfcorpus, nq); it runs
+    # during training and once after. Saves to models/<run_name>/final, prints the path and pushes to the Hub
+    # (an upload failure raises, unlike the other examples). Side effects: network, disk, GPU, logging.
     # 1. Load a model to finetune with 2. (Optional) model card data
     # Loading in fp32 is preferred for training if your memory can handle it
     model = SentenceTransformer(

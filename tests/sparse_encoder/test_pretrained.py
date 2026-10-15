@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Regression tests for pretrained SparseEncoder models from the Hugging Face Hub (network). A reference table
+# maps model names to expected query-document dot similarities for a fixed query and four documents, extra
+# loading kwargs, and an optional relative tolerance; some entries vary by transformers version (5.0 and
+# 5.6 thresholds). Also includes a basic load-and-encode smoke test.
 from __future__ import annotations
 
 import gc
@@ -123,6 +128,11 @@ MODELS_TO_SIMILARITIES_BF16_SDPA: dict[
 def test_pretrained_model_bf16_sdpa(
     model_name: str, expected_config: tuple[list[float], dict[str, Any]] | tuple[list[float], dict[str, Any], float]
 ) -> None:
+    # [FUNCTION DOC]
+    # Slow, parametrized over the reference table. Unpacks expected scores, kwargs override and an optional
+    # tolerance (default 0.01), builds bfloat16 + SDPA model kwargs shallowly overridden by the entry, loads the
+    # model, encodes query and documents, takes the first similarity row on CPU and asserts it is close to the
+    # expected values. Then frees the model, runs garbage collection and empties the CUDA cache.
     expected_score, kwargs_override, *rest = expected_config
     rtol = rest[0] if rest else 0.01
     kwargs = {"model_kwargs": {"torch_dtype": torch.bfloat16, "attn_implementation": "sdpa"}}
@@ -146,6 +156,11 @@ def test_pretrained_model_bf16_sdpa(
     ],
 )
 def test_load_and_encode(model_name: str) -> None:
+    # [FUNCTION DOC]
+    # Loads a SparseEncoder from a dense tiny BERT checkpoint (failing the test with a message on any load
+    # error), encodes three sentences and asserts a tensor of three embeddings is returned, that decoding yields
+    # three lists, that encoding a one-item list without tensor conversion yields a list of length one, that
+    # encoding a bare string yields a 1-D tensor, and that encoding with a progress bar works.
     # Ensure that SparseEncoder can be initialized with a base model and can encode
     try:
         model = SparseEncoder(model_name)

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Binary cross entropy (with logits) loss for CrossEncoder relevance training on labeled pairs.
 from __future__ import annotations
 
 from torch import Tensor, nn
@@ -7,6 +9,10 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class BinaryCrossEntropyLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, an activation applied to
+    # logits (identity default), an optional positive-class weight tensor, and an inner BCE-with-logits loss
+    # built with that weight and extra kwargs. Expects two text columns and 0/1 (or soft) labels per pair.
     def __init__(
         self,
         model: CrossEncoder,
@@ -14,6 +20,9 @@ class BinaryCrossEntropyLoss(nn.Module):
         pos_weight: Tensor | None = None,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store model, activation, positive weight; build the inner BCE-with-logits loss. Raises ValueError if the
+        # model is not a CrossEncoder or does not have exactly one output label.
         """
         Computes the Binary Cross Entropy Loss for a CrossEncoder model. This loss is used to train a model to predict
         a high logit for positive pairs and a low logit for negative pairs. The model should be initialized with
@@ -93,6 +102,11 @@ class BinaryCrossEntropyLoss(nn.Module):
     def forward(
         self, inputs: list[list[str]], labels: Tensor, prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss for one batch. Inputs: exactly two text columns, a label tensor, optional prompt/task.
+        # Zips into pairs, tokenizes, moves to device, runs the model, flattens "scores" to one logit per pair,
+        # applies the activation, and returns BCE-with-logits against float labels. Raises ValueError unless there
+        # are exactly two columns.
         if len(inputs) != 2:
             raise ValueError(
                 f"BinaryCrossEntropyLoss expects a dataset with two non-label columns, but got a dataset with {len(inputs)} columns."
@@ -108,6 +122,9 @@ class BinaryCrossEntropyLoss(nn.Module):
         return loss
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Return the loss config for model cards: activation function's qualified name and the positive weight as a
+        # plain number (or None).
         return {
             "activation_fn": fullname(self.activation_fn),
             "pos_weight": self.pos_weight if self.pos_weight is None else self.pos_weight.item(),

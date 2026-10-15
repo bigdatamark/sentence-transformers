@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: export sentence-transformers/parallel-sentences-wikimatrix (LASER-filtered) to gzip TSV files
+# parallel-sentences/WikiMatrix-en-<lang>-<split>.tsv.gz for de, es, it, fr, ar, tr and splits train/dev.
+# Writes stripped "english<TAB>non_english" lines, dropping pairs with an empty side; skips existing files and
+# unloadable subsets/splits with a printed message. Prints counts and "---DONE---". Side effects: network, disk, stdout.
 """
 This script writes parallel sentence tsv files that can be used to extend existing sentence
 embedding models to new languages.

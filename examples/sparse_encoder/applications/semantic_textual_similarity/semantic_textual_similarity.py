@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: semantic textual similarity with a SPLADE sparse encoder. Encodes two lists of three sentences, computes the
+# 3x3 similarity matrix with the model's default similarity (dot product) and prints every pair's score. A trailing
+# string shows sample output. Side effects: model download, stdout.
+# KNOWN ISSUE: an inline comment says cosine similarities are computed, but the model's default similarity is dot product.
 """
 This is a simple application for sparse encoder: Semantic Textual Similarity
 

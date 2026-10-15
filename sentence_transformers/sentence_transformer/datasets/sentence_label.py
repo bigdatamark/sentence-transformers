@@ -1,3 +1,5 @@
+# [MODULE DOC] Deprecated legacy iterable dataset that yields examples grouped by label, for batch triplet losses that
+# need several examples with the same label in each batch.
 """
 This file contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.
@@ -21,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 class SentenceLabelDataset(IterableDataset):
+    # [CLASS DOC] Iterable dataset over InputExamples with labels. Attributes: samples_per_label (how many examples are
+    # yielded consecutively per label draw), grouped_inputs (examples of usable labels concatenated, grouped
+    # by label), groups_right_border (end index of each label group in grouped_inputs), label_range (shuffled
+    # array of label group indices), with_replacement flag.
     """
     This dataset can be used for some specific Triplet Losses like BATCH_HARD_TRIPLET_LOSS which requires
     multiple examples with the same label in a batch.
@@ -35,6 +41,10 @@ class SentenceLabelDataset(IterableDataset):
     """
 
     def __init__(self, examples: list[InputExample], samples_per_label: int = 2, with_replacement: bool = False):
+        # [FUNCTION DOC] Group examples by label, keep only labels with at least samples_per_label examples, concatenating their
+        # examples and recording each group's end index. Create and shuffle (numpy global RNG) the label-group index
+        # array, store with_replacement, and log how many examples and labels were usable.
+        # KNOWN ISSUE: The docstring describes with_replacement backwards: in the code, True allows an example to be drawn again in later draws, and False draws each example at most once per pass over the labels.
         """
         Creates a LabelSampler for a SentenceLabelDataset.
 
@@ -79,6 +89,11 @@ class SentenceLabelDataset(IterableDataset):
         )
 
     def __iter__(self):
+        # [FUNCTION DOC] Yield examples until as many as grouped_inputs have been yielded. Cycle through the shuffled label groups;
+        # for each, the candidate pool is the whole group (with replacement) or the group's examples not yet yielded
+        # in this pass (without replacement). If the pool has at least samples_per_label items, pick that many
+        # distinct ones at random and yield them, marking them seen. After the last label, reset seen sets and
+        # reshuffle the labels.
         label_idx = 0
         count = 0
         already_seen = {}
@@ -108,4 +123,5 @@ class SentenceLabelDataset(IterableDataset):
                 np.random.shuffle(self.label_range)
 
     def __len__(self):
+        # [FUNCTION DOC] Return the number of usable examples (length of grouped_inputs).
         return len(self.grouped_inputs)

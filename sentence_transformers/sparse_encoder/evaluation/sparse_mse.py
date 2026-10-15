@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the MSE evaluator: measures the mean squared error (times 100) between a
+# teacher's embeddings of source sentences and the student sparse model's embeddings of target
+# sentences, plus sparsity statistics. Embeddings are handled as dense tensors.
 from __future__ import annotations
 
 import logging
@@ -18,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 class SparseMSEEvaluator(MSEEvaluator):
+    # [CLASS DOC]
+    # Subclass of MSEEvaluator for SparseEncoder students. Adds max_active_dims and sparsity_stats.
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.MSEEvaluator` but is specifically designed for sparse encoder models.
 
@@ -93,6 +99,11 @@ class SparseMSEEvaluator(MSEEvaluator):
         write_csv: bool = True,
         max_active_dims: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores max_active_dims and empty sparsity statistics, delegates source/target sentences,
+        # teacher model, progress bar, batch size, name and CSV flag to the parent (which computes the
+        # teacher embeddings), appends active_dims and sparsity_ratio to the CSV headers, and logs a
+        # warning that the MSE is not computed with sparse tensors so memory issues may occur.
         self.max_active_dims = max_active_dims
         self.sparsity_stats = defaultdict(list)
         super().__init__(
@@ -116,6 +127,11 @@ class SparseMSEEvaluator(MSEEvaluator):
         epoch: int = -1,
         steps: int = -1,
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation: resets sparsity statistics, runs the parent evaluation (encoding through
+        # embed_inputs), averages each statistic over encode calls, adds them (prefixed with name) to the
+        # metrics, stores the metrics in the model card data, logs the sparsity, and appends the two
+        # values to the last CSV row when output_path is given and write_csv is set. Returns the metrics.
         self.sparsity_stats = defaultdict(list)
         metrics = super().__call__(model=model, output_path=output_path, epoch=epoch, steps=steps)
         for key, value in self.sparsity_stats.items():
@@ -140,6 +156,10 @@ class SparseMSEEvaluator(MSEEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Encodes texts as dense (not sparse) tensors on CPU with the evaluator's batch size, progress
+        # bar setting, max_active_dims and extra kwargs, records the model's sparsity statistics, and
+        # returns the embeddings.
         embeddings = model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -161,9 +181,13 @@ class SparseMSEEvaluator(MSEEvaluator):
         epoch: int = 0,
         step: int = 0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the metrics in the model's model card data for this evaluator at the given epoch and step.
         model.model_card_data.set_evaluation_metrics(self, metrics, epoch=epoch, step=step)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims

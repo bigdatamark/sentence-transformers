@@ -1,3 +1,5 @@
+# [MODULE DOC] CoSENT loss: a ranking loss over pairs of labeled sentence pairs that pushes the model's pair similarity order
+# to match the order of the gold similarity labels.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,7 +14,10 @@ from sentence_transformers.sentence_transformer.model import SentenceTransformer
 
 
 class CoSENTLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, similarity_fct (pairwise similarity between aligned rows; default pairwise
+    # cosine), scale (inverse temperature, default 20).
     def __init__(self, model: SentenceTransformer, scale: float = 20.0, similarity_fct=util.pairwise_cos_sim) -> None:
+        # [FUNCTION DOC] Store the model, similarity function and scale.
         """
         This class implements CoSENT (Consistent SENTence embedding) loss.
         It expects that each of the inputs consists of a pair of inputs (e.g., texts) and a float valued label,
@@ -80,11 +85,17 @@ class CoSENTLoss(nn.Module):
         self.scale = scale
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared column embedding helper and compute the loss with the labels.
         embeddings = embed_columns(self.model, sentence_features)
 
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Score each aligned pair from the first two embedding columns (extra columns are ignored here), multiply by
+        # scale, and form the matrix of score differences (row pair minus column pair). Keep only entries where the
+        # row pair's label is lower than the column pair's (others get a huge negative offset), append a single zero,
+        # and return the log-sum-exp of all entries, i.e. log(1 + sum of exp(lower-labeled score minus higher-labeled
+        # score)).
         """
         Compute the CoSENT loss from embeddings.
 
@@ -114,10 +125,12 @@ class CoSENTLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with scale and the similarity function's name (requires the function to have a name).
         return {"scale": self.scale, "similarity_fct": self.similarity_fct.__name__}
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the CoSENT paper.
         return """
 @article{10531646,
     author={Huang, Xiang and Peng, Hao and Zou, Dongcheng and Liu, Zhiwei and Li, Jianxin and Liu, Kay and Wu, Jia and Su, Jianlin and Yu, Philip S.},

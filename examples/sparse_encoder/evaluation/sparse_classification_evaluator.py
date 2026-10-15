@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: run SparseBinaryClassificationEvaluator on the last 1000 Quora duplicates pair-class rows with a SPLADE model,
+# computing accuracy/F1/precision/recall/AP/MCC with best thresholds for cosine, dot, euclidean and manhattan similarity,
+# then print the primary metric name (max AP) and value. Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

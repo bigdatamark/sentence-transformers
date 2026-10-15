@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: unsupervised SimCSE on sentences from a text file (first CLI arg; gzip if .gz; lines shorter than 10
+# characters skipped) with distilroberta-base (max length 32, mean pooling). Each sentence forms a (sentence1, sentence2)
+# identical pair for MultipleNegativesRankingLoss. Optional second arg names the output folder
+# output/train_simcse-<name>-<timestamp>; without arguments it prints usage and exits. Batch 128, 1 epoch, lr 5e-5, 10%
+# warmup, AdamW, checkpoint every 10%. Saves to <output>/final and tries a Hub push. Side effects: file reading, network, disk, GPU, logging.
 """
 This file loads sentences from a provided text file. It is expected, that the there is one sentence per line in that text file.
 

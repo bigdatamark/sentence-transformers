@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example script: train a SPLADE sparse encoder from Luyu/co-condenser-marco by distillation on MS MARCO with
+# SpladeLoss wrapping SparseMarginMSELoss (query regularizer weight 0.1, document 0.08). Running as a script calls main().
 """
 This scripts demonstrates how to train a Sparse Encoder model for Information Retrieval.
 
@@ -26,6 +29,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Builds the SparseEncoder (fp32, max length 256, model card metadata),
+    # resolves the first 100k bert-ensemble-margin-mse (query_id, positive_id, negative_id, score) rows to texts, splits off
+    # 10k rows (unseeded) for evaluation, and trains 1 epoch (batch 16, lr 2e-5, warmup 0.1, bf16, eval/save every 500 steps,
+    # seed 42, loading the best checkpoint by NanoBEIR mean dot NDCG@10 at the end) with a SparseNanoBEIREvaluator on msmarco,
+    # nfcorpus and nq. Then evaluates on all NanoBEIR datasets, saves to models/<run_name>/final and tries a Hub push.
+    # Side effects: heavy network/disk/GPU use, logging.
     model_name = "Luyu/co-condenser-marco"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 
@@ -60,6 +70,9 @@ def main():
     dataset = dataset.select(range(dataset_size))
 
     def id_to_text_map(batch):
+        # [FUNCTION DOC]
+        # HELPER: batched map function returning query, positive and negative texts looked up from the enclosing dicts plus the
+        # unchanged score column (used as the MarginMSE label).
         return {
             "query": [queries[qid] for qid in batch["query_id"]],
             "positive": [corpus[pid] for pid in batch["positive_id"]],

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Slow tests for SentenceTransformer multi-process encoding (a list of devices or an explicit pool), comparing
+# against single-process encoding and checking prompts, normalization, int8 quantization after merging, output
+# value modes, empty and single-string inputs, chunk sizes and multi-device output placement. These can fail if
+# the OpenVINO backend was imported in the same session, as it breaks pickling of a torch function.
 from __future__ import annotations
 
 import numpy as np
@@ -17,6 +22,13 @@ from sentence_transformers import SentenceTransformer
 def test_encode_multi_process(
     stsb_bert_tiny_model: SentenceTransformer, normalize_embeddings: bool, prompt_name: str | None
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over normalization and prompt name. Sets a "retrieval" prompt, encodes 40 sentences with a
+    # two-CPU pool and chunk size 10, stops the pool, and asserts a 40x128 non-zero result within 0.001 of normal
+    # encoding, and that all row means are below 0.01 exactly when normalizing.
+    # KNOWN ISSUE: Unit-normalizing vectors does not make their component means near zero, so the final assertion
+    # relies on an empirical property of this model rather than on normalization; also the pool is not stopped in
+    # a finally block, so a failing encode leaks worker processes.
     model = stsb_bert_tiny_model
     model.prompts = {"retrieval": "Represent this sentence for searching relevant passages: "}
     sentences = [f"This is sentence {i}" for i in range(40)]
@@ -43,6 +55,8 @@ def test_encode_multi_process(
 
 @pytest.mark.slow
 def test_multi_process_encode_same_as_standard_encode(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Asserts encoding 15 texts with two CPU workers matches standard encoding within 1e-6.
     model = stsb_bert_tiny_model
     # Test that multi-process encoding gives the same result as standard encoding
     texts = ["First sentence.", "Second sentence.", "Third sentence."] * 5
@@ -59,6 +73,9 @@ def test_multi_process_encode_same_as_standard_encode(stsb_bert_tiny_model: Sent
 
 @pytest.mark.slow
 def test_multi_process_pool(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Encodes with an explicit two-CPU pool (stopped in finally) and asserts a numpy array of the right shape that
+    # matches standard encoding.
     # Test the start_multi_process_pool and stop_multi_process_pool functions
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence.", "Third sentence."] * 5
@@ -82,6 +99,8 @@ def test_multi_process_pool(stsb_bert_tiny_model: SentenceTransformer):
 
 @pytest.mark.slow
 def test_multi_process_with_args(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # With a pool, asserts normalized tensor output has unit L2 norms, and that int8 precision yields an int8 array.
     # Test multi-process encoding with various arguments
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]
@@ -110,6 +129,10 @@ def test_multi_process_with_args(stsb_bert_tiny_model: SentenceTransformer):
 
 @pytest.mark.slow
 def test_multi_process_int8_matches_single_process(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Encodes 16 texts in int8 directly and with two workers and chunk size 4; asserts a numpy array of the same
+    # dtype differing by at most one bucket (quantization happens once after merging), and that requesting tensor
+    # output yields an int8 torch tensor.
     """int8/uint8 calibration ranges are computed from the batch: quantizing per worker chunk would
     give different buckets, so the pool path must quantize once after merging."""
     model = stsb_bert_tiny_model
@@ -133,6 +156,9 @@ def test_multi_process_int8_matches_single_process(stsb_bert_tiny_model: Sentenc
 
 @pytest.mark.slow
 def test_multi_process_output_values(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Asserts encoding with output_value None returns lists of dicts containing sentence embeddings in both modes,
+    # with matching sentence embeddings.
     # Test that different output_value options work with multi-process
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]
@@ -162,6 +188,8 @@ def test_multi_process_output_values(stsb_bert_tiny_model: SentenceTransformer):
 
 @pytest.mark.slow
 def test_multi_process_chunk_size(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Asserts encoding 30 texts with two workers and chunk size 5 gives a numpy array of the right shape.
     # Test explicit chunk_size parameter
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence.", "Third sentence."] * 10
@@ -176,6 +204,9 @@ def test_multi_process_chunk_size(stsb_bert_tiny_model: SentenceTransformer):
 
 @pytest.mark.slow
 def test_multi_process_with_prompt(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Sets a retrieval prompt, encodes normalized with and without a pool, and asserts a 10x128 unit-norm numpy
+    # array matching the standard result.
     # Test multi-process encoding with prompts
     model = stsb_bert_tiny_model
     model.prompts = {"retrieval": "Represent this sentence for searching relevant passages: "}
@@ -214,6 +245,9 @@ def test_multi_process_with_empty_texts(
     convert_to_numpy: bool,
     output_value: str | None,
 ):
+    # [FUNCTION DOC]
+    # Parametrized over tensor/numpy conversion flags and output value; asserts empty input gives empty results of
+    # the same type with and without multi-processing.
     # Test encoding with empty texts
     model = stsb_bert_tiny_model
     texts = []
@@ -246,6 +280,10 @@ def test_multi_process_with_one_single_string(
     convert_to_numpy: bool,
     output_value: str | None,
 ):
+    # [FUNCTION DOC]
+    # Parametrized like the previous test with a single string input; asserts same result type, then the same shape
+    # for arrays/tensors, or for containers the same length and, for dicts or lists of dicts, the same keys and
+    # close values.
     # Test encoding with a single text
     model = stsb_bert_tiny_model
     texts = "This is a single sentence."
@@ -292,6 +330,8 @@ def test_multi_process_with_one_single_string(
 
 @pytest.mark.slow
 def test_multi_process_more_workers_than_texts(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Asserts three workers for two texts still give a numpy array of the right shape.
     # Test with more workers than texts
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]
@@ -305,6 +345,8 @@ def test_multi_process_more_workers_than_texts(stsb_bert_tiny_model: SentenceTra
 
 @pytest.mark.slow
 def test_multi_process_with_large_chunk_size(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Asserts a chunk size larger than the 20 inputs still gives the right shape.
     # Test with a large chunk size
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence."] * 10  # 20 sentences
@@ -322,6 +364,9 @@ def test_multi_process_with_large_chunk_size(stsb_bert_tiny_model: SentenceTrans
     not torch.cuda.is_available(), reason="CUDA must be available to experiment with 2 separate devices"
 )
 def test_multi_process_output_tensors_two_devices(stsb_bert_tiny_model: SentenceTransformer):
+    # [FUNCTION DOC]
+    # Skipped without CUDA. Encodes on CPU and CUDA workers and asserts tensor output is gathered onto the CPU with
+    # the right shape, and default output is a numpy array.
     # Test with two separate devices
     model = stsb_bert_tiny_model
     texts = ["First sentence.", "Second sentence."]

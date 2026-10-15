@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests that the deprecated CachedMultipleNegativesSymmetricRankingLoss (gradient-cached) reproduces the loss value and
+# parameter gradients of the non-cached MultipleNegativesSymmetricRankingLoss. Uses five fixed anchor/positive string pairs.
 from __future__ import annotations
 
 import pytest
@@ -17,6 +20,11 @@ POSITIVES = ["positive a", "positive b", "positive c", "positive d", "positive e
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 @pytest.mark.parametrize("minibatching", [{"mini_batch_size": 2}, {"mini_batch_num_tokens": 16}])
 def test_cached_symmetric_matches_symmetric(stsb_bert_tiny_model: SentenceTransformer, minibatching: dict) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mini-batching by fixed batch size (2) and by token budget (16). Moves the tiny model to CPU, disables
+    # dropout for determinism, sets train mode, and uses all-zero labels. Computes loss and gradients for the cached and plain losses,
+    # asserts gradients are non-trivial, that the loss values match approximately, and that every parameter gradient matches
+    # within tolerance. Deprecation warnings are ignored. Mutates model gradients and mode.
     """The deprecated symmetric shim only wires ``directions`` and ``partition_mode`` into the
     composed loss, and that wiring has no test of its own. The cached version must reproduce the
     non-cached symmetric loss and gradient, for both mini-batching modes."""
@@ -26,6 +34,9 @@ def test_cached_symmetric_matches_symmetric(stsb_bert_tiny_model: SentenceTransf
     labels = torch.zeros(5, dtype=torch.long)
 
     def loss_and_grads(loss_fn: torch.nn.Module) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes model gradients, runs the given loss on preprocessed anchors and positives with the labels, backpropagates,
+        # and returns the detached loss and a dict of cloned parameter gradients.
         model.zero_grad()
         loss_value = loss_fn([model.preprocess(ANCHORS), model.preprocess(POSITIVES)], labels)
         loss_value.backward()

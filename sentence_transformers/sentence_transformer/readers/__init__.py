@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Deprecated data readers for the legacy fit-style (v2) training loop. Re-exports InputExample and
+# the file readers (LabelSentenceReader, NLIDataReader, PairedFilesReader, STSDataReader,
+# STSBenchmarkDataReader, TripletReader), each of which reads a dataset from disk and returns a
+# list of InputExample objects. Kept only for backwards compatibility.
 """
 This directory contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.

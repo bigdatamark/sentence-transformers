@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: run SparseMSEEvaluator, measuring the mean squared error (times 100) between a student SPLADE model
+# (prithivida/Splade_PP_en_v1) and a teacher SPLADE model on all STSb validation sentences (sentence1 and sentence2 lists
+# concatenated, used as both source and target), then print the primary metric (negative MSE) and its value.
+# Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

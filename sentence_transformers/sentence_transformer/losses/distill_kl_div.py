@@ -1,3 +1,5 @@
+# [MODULE DOC] KL-divergence distillation loss: aligns the student's softmax distribution over a query's candidate documents
+# with the teacher's distribution derived from precomputed teacher scores in the labels.
 from __future__ import annotations
 
 import math
@@ -17,6 +19,9 @@ from sentence_transformers.util import (
 
 
 class DistillKLDivLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model (student), similarity_fct (pairwise score between aligned rows, default dot
+    # product), temperature and separate student_temperature / teacher_temperature (each defaulting to temperature),
+    # loss_fct (KL divergence with batch-mean reduction), and a one-time teacher scale check flag.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -25,6 +30,8 @@ class DistillKLDivLoss(nn.Module):
         student_temperature: float | None = None,
         teacher_temperature: float | None = None,
     ) -> None:
+        # [FUNCTION DOC] Store settings and resolve the student/teacher temperatures. Raises ValueError if any of the three temperatures
+        # is not a positive finite number.
         """
         Compute the KL divergence loss between probability distributions derived from student and teacher models' similarity scores.
         By default, similarity is calculated using the dot-product. This loss is designed for knowledge distillation
@@ -167,11 +174,17 @@ class DistillKLDivLoss(nn.Module):
         self._checked_teacher_scale = False
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared column embedding helper and compute the loss with the labels.
         embeddings = embed_columns(self.model, sentence_features)
 
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Raises ValueError with fewer than three columns (query plus at least two candidates) or when labels are not
+        # shaped (batch size, number of candidates). Student scores: the similarity between the query and each candidate
+        # column, stacked per row, divided by the student temperature, then log-softmax. Teacher: detached labels divided
+        # by the teacher temperature, then softmax; on the first call a utility checks the teacher targets for problems
+        # such as underflow (may warn). Returns the batch-mean KL divergence times the squared student temperature.
         if len(embeddings) < 3:
             raise ValueError(
                 f"{type(self).__name__} expects at least 3 columns (query, positive, negative_1, ...), "
@@ -210,6 +223,8 @@ class DistillKLDivLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: similarity function name and temperature, plus student/teacher temperatures only when they
+        # differ from the shared temperature.
         config: dict[str, Any] = {
             "similarity_fct": similarity_fct_name(self.similarity_fct),
             "temperature": self.temperature,
@@ -222,6 +237,7 @@ class DistillKLDivLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for Lin et al. 2020 on distilling dense representations.
         return """
 @misc{lin2020distillingdenserepresentationsranking,
       title={Distilling Dense Representations for Ranking using Tightly-Coupled Teachers},

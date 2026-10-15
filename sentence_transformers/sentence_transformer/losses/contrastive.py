@@ -1,3 +1,5 @@
+# [MODULE DOC] Classic contrastive loss (Hadsell et al. 2006) for labeled pairs, plus an enumeration-style namespace of
+# pairwise distance functions for two aligned embedding tensors.
 from __future__ import annotations
 
 import warnings
@@ -13,6 +15,9 @@ from sentence_transformers.sentence_transformer.model import SentenceTransformer
 
 
 class SiameseDistanceMetric(Enum):
+    # [CLASS DOC] Namespace of pairwise distance functions on two (batch, dim) tensors: Euclidean (p=2), Manhattan (p=1) and
+    # cosine distance (one minus cosine similarity). Because the values are plain functions, Python's Enum treats
+    # them as attributes rather than members, so they are accessed and called directly.
     """The metric for the contrastive loss"""
 
     EUCLIDEAN = lambda x, y: F.pairwise_distance(x, y, p=2)
@@ -21,6 +26,8 @@ class SiameseDistanceMetric(Enum):
 
 
 class ContrastiveLoss(nn.Module):
+    # [CLASS DOC] Loss module for (anchor, other) pairs with binary labels. Attributes: distance_metric (default cosine
+    # distance), margin (default 0.5), model, size_average (mean vs sum), and a one-time label check flag.
     def __init__(
         self,
         model: SentenceTransformer,
@@ -28,6 +35,7 @@ class ContrastiveLoss(nn.Module):
         margin: float = 0.5,
         size_average: bool = True,
     ) -> None:
+        # [FUNCTION DOC] Store the distance metric, margin, model and size_average flag; labels have not been checked yet.
         """
         Contrastive loss. Expects as input two texts and a label of either 0 or 1. If the label == 1, then the distance between the
         two embeddings is reduced. If the label == 0, then the distance between the embeddings is increased.
@@ -88,6 +96,8 @@ class ContrastiveLoss(nn.Module):
         self._checked_labels = False
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric (as "SiameseDistanceMetric.<NAME>" when it matches one of that
+        # namespace's attributes, otherwise its function name or string form), margin and size_average.
         distance_metric_name = getattr(self.distance_metric, "__name__", str(self.distance_metric))
         for name, value in vars(SiameseDistanceMetric).items():
             if value == self.distance_metric:
@@ -97,10 +107,14 @@ class ContrastiveLoss(nn.Module):
         return {"distance_metric": distance_metric_name, "margin": self.margin, "size_average": self.size_average}
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the model (via the shared column embedding helper) and compute the loss.
         embeddings = embed_columns(self.model, sentence_features)
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] On the first call only, warn (UserWarning) if any label is not 0 or 1. Assert exactly two embedding columns.
+        # Compute distances between paired embeddings; per-pair loss is half of (label times squared distance plus one
+        # minus label times squared positive part of margin minus distance). Returns the mean if size_average else the sum.
         if not self._checked_labels:
             self._checked_labels = True
             if labels.ne(0).logical_and(labels.ne(1)).any().item():
@@ -121,6 +135,7 @@ class ContrastiveLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for Hadsell, Chopra and LeCun 2006.
         return """
 @inproceedings{hadsell2006dimensionality,
     author={Hadsell, R. and Chopra, S. and LeCun, Y.},

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests that the public helper functions of sentence_transformers.util are importable and callable, both by
+# dynamic import and by attribute access, and that the module survives a reload.
 from __future__ import annotations
 
 import importlib
@@ -22,6 +25,9 @@ from sentence_transformers import util
     ],
 )
 def test_direct_import(function_name):
+    # [FUNCTION DOC]
+    # Parametrized over util function names; imports the util module dynamically, fetches the named attribute and
+    # asserts it is non-None and callable.
     """Test that functions can be imported directly from sentence_transformers.util"""
     # Import the function dynamically
     module = importlib.import_module("sentence_transformers.util")
@@ -47,6 +53,8 @@ def test_direct_import(function_name):
     ],
 )
 def test_module_import(function_name):
+    # [FUNCTION DOC]
+    # Parametrized over the same names; asserts the util module has the attribute and it is callable.
     """Test that functions can be accessed via the util module"""
     # Check that function exists in the module
     assert hasattr(util, function_name)
@@ -56,6 +64,9 @@ def test_module_import(function_name):
 
 
 def test_import_reload():
+    # [FUNCTION DOC]
+    # Reloads the util module (mutates the global module object) and asserts cos_sim is still present and
+    # callable.
     """Test that util module can be reloaded without errors"""
     importlib.reload(util)
 

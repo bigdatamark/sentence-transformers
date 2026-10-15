@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pytest test module for the Sentence Transformers Transformer module with the "text-generation" transformers task, run across many tiny Hub model architectures (whole tree is skipped in CI by the shared conftest). Causal LM heads are used by CrossEncoder with LogitScore. Extends the shared forward-fail mapping with marian and whisper (embedding size mismatches) and declares an empty pair-failure mapping. Builds the base model key list from transformers' model mapping (or config mapping on ImportError). Tests are grouped in one class parametrised per architecture via class-scoped fixtures, and use subtests to cover every supported input modality/format.
 """
 Test suite for Transformer module with text-generation task.
 Tests various tiny model architectures that support causal language modeling,
@@ -52,6 +54,8 @@ EXPECT_FORWARD_FAIL_PAIRS = {}
 
 
 def _get_text_generation_archs() -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the architecture keys to test: those with a tiny model id, not in the general xfail list, not in the transformers-v4 xfail list unless transformers is v5 or newer, not faulty, present in transformers' causal language model mapping, and present in the base model key list.
     """Get architectures that support text-generation (causal LM)."""
     return [
         key
@@ -67,18 +71,24 @@ def _get_text_generation_archs() -> list[str]:
 
 @pytest.fixture(params=_get_text_generation_archs(), scope="class")
 def arch(request):
+    # [FUNCTION DOC]
+    # HELPER: Class-scoped parametrised fixture; each parameter is one architecture key from the selection above. Returns the key.
     """Get the model architecture name for text-generation task."""
     return request.param
 
 
 @pytest.fixture(scope="class")
 def arch_model(arch):
+    # [FUNCTION DOC]
+    # HELPER: Class-scoped fixture loading the tiny Transformer module for the current architecture with the text-generation task via the shared loader. Returns a tuple of architecture key and module (shared, and mutable, across all tests of the class for that architecture).
     model = load_transformer(arch, transformer_task="text-generation")
     return arch, model
 
 
 @pytest.fixture
 def arch_model_modalities(arch_model):
+    # [FUNCTION DOC]
+    # HELPER: Function fixture returning a tuple of architecture key, module and the module's supported-modalities list. If reading the modalities raises, the test fails with the error message.
     """Create a Transformer instance and return it with its supported modalities."""
     try:
         arch, model = arch_model
@@ -89,9 +99,13 @@ def arch_model_modalities(arch_model):
 
 
 class TestTextGenerationArchitectures:
+    # [CLASS DOC]
+    # Test class run once per selected architecture (via the class-scoped fixtures) covering embedding dimension, save/load round trip, output name, and forward passes on all supported modality samples and pairs. No state of its own.
     """Test suite for Transformer module with text-generation task."""
 
     def test_get_embedding_dimension(self, arch_model):
+        # [FUNCTION DOC]
+        # Asserts the module's embedding dimension is a positive integer.
         """Test that embedding dimension can be retrieved."""
         arch, model = arch_model
         dim = model.get_embedding_dimension()
@@ -99,6 +113,8 @@ class TestTextGenerationArchitectures:
         assert dim > 0
 
     def test_save_load(self, arch_model, tmp_path):
+        # [FUNCTION DOC]
+        # Saves the module into a fresh "model" subdirectory of pytest's temporary path, reloads it as a Transformer from that path, and asserts the embedding dimension is unchanged. Writes to disk.
         """Test saving and loading the model."""
         arch, model = arch_model
         save_path = tmp_path / "model"
@@ -108,11 +124,15 @@ class TestTextGenerationArchitectures:
         assert loaded_model.get_embedding_dimension() == model.get_embedding_dimension()
 
     def test_module_output_name(self, arch_model):
+        # [FUNCTION DOC]
+        # Asserts the module's output name is "causal_logits" for the text-generation task.
         """Test that the module output name is 'causal_logits' for text-generation."""
         arch, model = arch_model
         assert model.module_output_name == "causal_logits"
 
     def test_inference_with_supported_modalities(self, arch_model_modalities, subtests):
+        # [FUNCTION DOC]
+        # Runs preprocessing and a no-grad forward pass for every sample set produced by the shared sample builder (n of 2, using the module's message format). If the architecture requires CUDA it skips when CUDA is unavailable, else moves the module to the GPU (and later the features). For each, inside a subtest, it chooses the expected outcome: any exception if the architecture's forward is expected to fail for all modalities or for this description; ValueError, TypeError or AttributeError for image+video samples of image-video-failing architectures or audio samples of audio-failing architectures; ValueError for combined descriptions when the output is sentence embeddings without a multimodal-success exception, or for known multimodal failures; otherwise no exception. Within the expected context it preprocesses (skipping the subtest for older-transformers errors about image URLs/paths not being flattenable or missing image height), runs forward, and asserts the output contains the module output name with batch size equal to the number of inputs.
         """Test inference with each supported modality (single and multi-modal)."""
         arch, model, modalities = arch_model_modalities
         if arch in REQUIRES_CUDA:
@@ -178,6 +198,9 @@ class TestTextGenerationArchitectures:
                     assert output_tensor.shape[0] == len(inputs), f"Batch size mismatch for {modality_desc}"
 
     def test_inference_with_supported_modality_pairs(self, arch_model_modalities, subtests):
+        # [FUNCTION DOC]
+        # Runs preprocessing and forward on pair inputs. If the architecture requires CUDA it skips when CUDA is unavailable, else moves the module to the GPU (and later the features). If the module supports messages, first patches its chat template to accept query/document roles. Builds pair samples with n of 2 and, per pair description in a subtest, expects any exception if forward fails for all modalities or the pair-failure mapping lists it, the narrower ValueError/TypeError/AttributeError for audio pairs of audio-failing architectures, else none. Preprocesses, runs forward without gradients, asserts the output name is present and batch size equals the number of pairs.
+        # KNOWN ISSUE: Mutations here (moving to CUDA, patching the chat template) are applied to the class-scoped shared module and leak into later tests for the same architecture.
         """Test inference with pair inputs for each supported modality combination."""
         arch, model, modalities = arch_model_modalities
         if arch in REQUIRES_CUDA:

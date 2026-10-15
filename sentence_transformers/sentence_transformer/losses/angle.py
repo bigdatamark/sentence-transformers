@@ -1,3 +1,5 @@
+# [MODULE DOC] AnglE (angle-optimized) loss: the CoSENT ranking objective computed with the pairwise angle similarity
+# instead of cosine similarity.
 from __future__ import annotations
 
 import torch
@@ -8,7 +10,10 @@ from sentence_transformers.util import pairwise_angle_sim
 
 
 class AnglELoss(CoSENTLoss):
+    # [CLASS DOC] Subclass of CoSENTLoss whose similarity function is the pairwise angle similarity. Attributes are inherited
+    # (model, scale, similarity function).
     def __init__(self, model: SentenceTransformer, scale: float = 20.0) -> None:
+        # [FUNCTION DOC] Initialize CoSENTLoss with the model, scale (inverse temperature, default 20) and the angle similarity function.
         """
         This class implements AnglE (Angle Optimized) loss.
         This is a modification of :class:`CoSENTLoss`, designed to address the following issue:
@@ -91,6 +96,10 @@ class AnglELoss(CoSENTLoss):
     def compute_loss_from_embeddings(
         self, embeddings: list[torch.Tensor], labels: torch.Tensor | None
     ) -> torch.Tensor:
+        # [FUNCTION DOC] Compute the loss from per-column embeddings. With more than two columns (anchor, positive, negatives...),
+        # repeat the anchor once per non-anchor column and pair it with the concatenated other columns; labels default to
+        # ones for the positive, and negatives get one minus the labels; then defer to the CoSENT computation. With two
+        # columns, raises ValueError if labels are missing, else defers to CoSENT with the given labels. Returns a scalar.
         if len(embeddings) > 2:
             # Anchor-positive-negative-... n-tuples case, convert to pairwise comparisons again, but with `labels` (or 1s)
             # for the positive pairs and `1 - labels` for the negatives.
@@ -110,6 +119,7 @@ class AnglELoss(CoSENTLoss):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the AoE / AnglE paper.
         return """
 @inproceedings{li-li-2024-aoe,
     title = "{A}o{E}: Angle-optimized Embeddings for Semantic Textual Similarity",

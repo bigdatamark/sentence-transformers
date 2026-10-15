@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Sparse triplet loss, reusing the dense TripletLoss computation on sparse embeddings. Must be
+# wrapped in SpladeLoss or CSRLoss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -9,9 +12,15 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseTripletLoss(TripletLoss):
+    # [CLASS DOC]
+    # TripletLoss subclass for SparseEncoder models. The inherited compute_loss_from_embeddings returns
+    # the mean of the distance to the positive minus the distance to the negative plus the margin,
+    # clamped at zero.
     def __init__(
         self, model: SparseEncoder, distance_metric=TripletDistanceMetric.EUCLIDEAN, triplet_margin: float = 5
     ) -> None:
+        # [FUNCTION DOC]
+        # Initializes the parent with the model, distance metric (Euclidean by default) and margin (default 5).
         """
         This class implements triplet loss. Given a triplet of (anchor, positive, negative),
         the loss minimizes the distance between anchor and positive while it maximizes the distance
@@ -68,4 +77,6 @@ class SparseTripletLoss(TripletLoss):
         super().__init__(model, distance_metric=distance_metric, triplet_margin=triplet_margin)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError("SparseTripletLoss should not be used alone. Use it with SpladeLoss or CSRLoss.")

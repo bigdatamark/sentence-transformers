@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for sentence_transformers.util.quantization: quantize_embeddings for binary/ubinary bit packing (any
+# dimension), int8/uint8 calibrated scaling with clipping, empty inputs and multi-vector inputs, and
+# semantic_search_faiss precision validation and padding handling (skipped when faiss is not installed).
+# Defines fixed seeded random queries (2x16) and calibration embeddings (100x16).
 from __future__ import annotations
 
 import importlib.util
@@ -18,6 +23,10 @@ from sentence_transformers.util.quantization import quantize_embeddings, semanti
     ],
 )
 def test_binary_quantize_non_multiple_of_8_does_not_raise(precision: str, n_samples: int, embedding_dim: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over binary/ubinary and dimensions not divisible by 8; quantizes seeded random embeddings and
+    # asserts the packed shape is samples by ceiling of dimension over 8, with int8 dtype for binary and uint8 for
+    # ubinary.
     """quantize_embeddings must not crash for embedding dimensions not divisible by 8."""
     rng = np.random.default_rng(seed=0)
     embeddings = rng.standard_normal((n_samples, embedding_dim)).astype(np.float32)
@@ -44,6 +53,8 @@ def test_binary_quantize_non_multiple_of_8_does_not_raise(precision: str, n_samp
     ],
 )
 def test_binary_quantize_multiple_of_8_shape(precision: str, n_samples: int, embedding_dim: int) -> None:
+    # [FUNCTION DOC]
+    # Same as above for dimensions divisible by 8, expecting dimension divided by 8 packed columns.
     """For dims divisible by 8, the packed shape must equal (n, dim // 8)."""
     rng = np.random.default_rng(seed=1)
     embeddings = rng.standard_normal((n_samples, embedding_dim)).astype(np.float32)
@@ -59,6 +70,9 @@ def test_binary_quantize_multiple_of_8_shape(precision: str, n_samples: int, emb
 
 @pytest.mark.parametrize("precision", ["binary", "ubinary"])
 def test_binary_quantize_row_independence(precision: str) -> None:
+    # [FUNCTION DOC]
+    # Asserts an all-positive row packs to 127 (binary, offset by 128) or 255 (ubinary) and an all-negative row to
+    # -128 or 0, showing rows are packed independently.
     """Each row is packed independently. An all-positive row must not bleed into an all-negative one."""
     embedding_dim = 8
     embeddings = np.array(
@@ -79,6 +93,9 @@ def test_binary_quantize_row_independence(precision: str) -> None:
 
 @pytest.mark.parametrize("precision", ["int8", "uint8"])
 def test_quantize_clips_out_of_range_values(precision: str) -> None:
+    # [FUNCTION DOC]
+    # Quantizes a row with values outside the calibration ranges and asserts results saturate at the dtype
+    # limits instead of wrapping (exact expected int8 and uint8 rows).
     """Values outside the calibration range must saturate, not wrap around, on cast.
 
     Without clipping, a value that should quantize above 255 silently wraps
@@ -99,6 +116,10 @@ def test_quantize_clips_out_of_range_values(precision: str) -> None:
 
 
 def test_quantize_multi_vector_handles_empty_matrices() -> None:
+    # [FUNCTION DOC]
+    # Quantizes a list of a 10x16 matrix and an empty 0x16 matrix in int8, uint8, binary and ubinary, asserting
+    # the empty matrix yields an empty output with the right width and dtype; also asserts a list of only empty
+    # matrices quantizes to int8 without error.
     """A (0, dim) matrix (e.g. a fully-masked multi-vector document) must quantize to the
     correctly-shaped empty output instead of crashing packbits / calibration."""
     rng = np.random.RandomState(0)
@@ -120,6 +141,8 @@ def test_quantize_multi_vector_handles_empty_matrices() -> None:
 
 
 def test_quantize_empty_list_returns_empty_list() -> None:
+    # [FUNCTION DOC]
+    # Asserts an empty list input returns an empty list for every precision.
     """An empty input list (e.g. encode() of zero texts) must return an empty list, not IndexError."""
     for precision in ("int8", "uint8", "binary", "ubinary", "float32"):
         assert quantize_embeddings([], precision=precision) == []
@@ -132,6 +155,9 @@ CALIBRATION = np.random.default_rng(seed=2).standard_normal((100, 16), dtype=np.
 
 
 def _corpus(n_docs: int, precision: str, seed: int = 0) -> np.ndarray:
+    # [FUNCTION DOC]
+    # HELPER: Generates seeded random n_docs x 16 embeddings and quantizes them to the given precision using the
+    # shared calibration embeddings.
     embeddings = np.random.default_rng(seed=seed).standard_normal((n_docs, 16), dtype=np.float32)
     return quantize_embeddings(embeddings, precision=precision, calibration_embeddings=CALIBRATION)
 
@@ -139,6 +165,9 @@ def _corpus(n_docs: int, precision: str, seed: int = 0) -> np.ndarray:
 @skip_without_faiss
 @pytest.mark.parametrize("corpus_precision", ["int8", "binary", "float16"])
 def test_semantic_search_faiss_rejects_unsupported_precision(corpus_precision: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over int8, binary and float16; asserts semantic_search_faiss raises a ValueError mentioning
+    # corpus_precision for these unsupported corpus precisions.
     """An unsupported ``corpus_precision`` must say so, not fall through to an unrelated error.
 
     Without validation, no index construction branch matches and the call dies on
@@ -157,6 +186,9 @@ def test_semantic_search_faiss_rejects_unsupported_precision(corpus_precision: s
 @pytest.mark.parametrize("corpus_precision", ["ubinary", "uint8"])
 @pytest.mark.parametrize("rescore", [True, False])
 def test_semantic_search_faiss_drops_padded_indices(corpus_precision: str, rescore: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over ubinary/uint8 and rescoring; searches a 3-document corpus with top 5 and asserts no -1
+    # corpus ids appear and each query returns exactly documents 0, 1 and 2.
     """A corpus smaller than ``top_k`` must not produce ``corpus_id: -1`` entries.
 
     FAISS pads short result sets with index -1, which would resolve to the last corpus
@@ -182,6 +214,8 @@ def test_semantic_search_faiss_drops_padded_indices(corpus_precision: str, resco
 @skip_without_faiss
 @pytest.mark.parametrize("rescore", [True, False])
 def test_semantic_search_faiss_empty_corpus(rescore: bool) -> None:
+    # [FUNCTION DOC]
+    # Asserts an empty ubinary corpus gives an empty result list per query, with or without rescoring.
     """An empty corpus yields empty result lists rather than phantom hits."""
     results, _ = semantic_search_faiss(
         QUERIES,
@@ -198,6 +232,8 @@ def test_semantic_search_faiss_empty_corpus(rescore: bool) -> None:
 @skip_without_faiss
 @pytest.mark.parametrize("corpus_precision", ["ubinary", "uint8"])
 def test_semantic_search_faiss_returns_top_k_when_corpus_is_large_enough(corpus_precision: str) -> None:
+    # [FUNCTION DOC]
+    # Asserts a 50-document corpus returns exactly 5 valid hits per query with rescoring.
     """The padding check must not shorten results for a corpus larger than ``top_k``."""
     results, _ = semantic_search_faiss(
         QUERIES,

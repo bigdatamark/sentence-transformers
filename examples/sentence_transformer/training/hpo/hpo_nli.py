@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: hyperparameter optimization (HPO) of a SentenceTransformer on AllNLI triplets with Optuna.
+# Loads 10k AllNLI train triplets and 1k dev triplets, builds an STSb-validation EmbeddingSimilarityEvaluator
+# (cosine, name "sts-dev"), and runs SentenceTransformerTrainer.hyperparameter_search for 20 trials (maximize),
+# creating a fresh distilbert-base-uncased model and MultipleNegativesRankingLoss per trial. Uses fp16 and
+# NO_DUPLICATES batch sampling; no evaluation/saving during trials. Prints the best trial.
+# Side effects: downloads datasets/models from the Hugging Face Hub, writes to "checkpoints", logs to W&B if installed.
 from datasets import load_dataset
 
 from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer, SentenceTransformerTrainingArguments
@@ -22,6 +29,10 @@ dev_evaluator = EmbeddingSimilarityEvaluator(
 
 # 3. Define the Hyperparameter Search Space
 def hpo_search_space(trial):
+    # [FUNCTION DOC]
+    # Optuna search space. Input: an Optuna trial. Returns a dict of training-argument overrides:
+    # num_train_epochs int in [1,2], per_device_train_batch_size int in [32,128], warmup_steps float in [0,0.3]
+    # (interpreted as a warmup ratio), learning_rate float in [1e-6,1e-4] sampled on a log scale.
     return {
         "num_train_epochs": trial.suggest_int("num_train_epochs", 1, 2),
         "per_device_train_batch_size": trial.suggest_int("per_device_train_batch_size", 32, 128),
@@ -32,16 +43,24 @@ def hpo_search_space(trial):
 
 # 4. Define the Model Initialization
 def hpo_model_init(trial):
+    # [FUNCTION DOC]
+    # Model factory called by the trainer at the start of each trial. Ignores the trial and returns a new
+    # SentenceTransformer built from distilbert/distilbert-base-uncased (mean pooling added automatically).
     return SentenceTransformer("distilbert/distilbert-base-uncased")
 
 
 # 5. Define the Loss Initialization
 def hpo_loss_init(model):
+    # [FUNCTION DOC]
+    # Loss factory: returns MultipleNegativesRankingLoss bound to the given (per-trial) model.
     return MultipleNegativesRankingLoss(model)
 
 
 # 6. Define the Objective Function
 def hpo_compute_objective(metrics):
+    # [FUNCTION DOC]
+    # Objective function: takes the evaluation metrics dict and returns the value under key
+    # "eval_sts-dev_spearman_cosine" (raises KeyError if absent), which the search maximizes.
     """
     Valid keys are: 'eval_loss', 'eval_sts-dev_pearson_cosine', 'eval_sts-dev_spearman_cosine',
     'eval_sts-dev_pearson_manhattan', 'eval_sts-dev_spearman_manhattan', 'eval_sts-dev_pearson_euclidean',

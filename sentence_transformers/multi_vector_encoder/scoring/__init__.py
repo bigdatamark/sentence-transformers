@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Late-interaction scoring functions for multi-vector embeddings. Re-exports ColBERT scoring (MaxSim summed
+# over query tokens) in batched-all-pairs, pairwise and knowledge-distillation variants, mean-normalized
+# versions of each, and XTR scoring (top-k retrieval-restricted MaxSim) as both classes and functions,
+# including pairwise and distillation forms. Only re-exports; no side effects.
 from __future__ import annotations
 
 from .colbert import (

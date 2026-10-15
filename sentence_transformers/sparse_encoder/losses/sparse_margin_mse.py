@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse margin MSE loss for distillation: matches the student's score margins between a query's
+# first document and its other documents to gold (teacher) margins, reusing the dense MarginMSELoss.
+# Must be wrapped in SpladeLoss or CSRLoss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -10,7 +14,14 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseMarginMSELoss(MarginMSELoss):
+    # [CLASS DOC]
+    # MarginMSELoss subclass for SparseEncoder students. The inherited compute_loss_from_embeddings
+    # computes, for each extra document, the similarity margin between the first document and that
+    # document for the query (dot product by default), and the MSE against the labels (margins, or raw
+    # teacher scores from which margins are derived).
     def __init__(self, model: SparseEncoder, similarity_fct=util.pairwise_dot_score) -> None:
+        # [FUNCTION DOC]
+        # Initializes the parent with the model and the pairwise similarity function.
         """
         Compute the MSE loss between the predicted margin ``sim(Query, Pos) - sim(Query, Neg)`` and the gold margin
         ``gold_sim(Query, Pos) - gold_sim(Query, Neg)``.
@@ -174,4 +185,6 @@ class SparseMarginMSELoss(MarginMSELoss):
         super().__init__(model, similarity_fct=similarity_fct)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError("SparseMarginMSELoss should not be used alone. Use it with SpladeLoss or CSRLoss.")

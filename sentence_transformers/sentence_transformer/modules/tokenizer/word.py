@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Base interface for word-level tokenizers, the ENGLISH_STOP_WORDS list (punctuation plus common
+# English function words, used as the default stop words), and a wrapper adapting a Hugging Face
+# tokenizer to the word-tokenizer interface.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -396,46 +400,77 @@ ENGLISH_STOP_WORDS = [
 
 
 class WordTokenizer(ABC):
+    # [CLASS DOC]
+    # Abstract base class for tokenizers that map text to vocabulary indices. Subclasses must
+    # implement set_vocab, get_vocab, tokenize, save and a static load.
     @abstractmethod
     def set_vocab(self, vocab: Iterable[str]):
+        # [FUNCTION DOC]
+        # Abstract: sets the vocabulary and any lookup structures derived from it.
         pass
 
     @abstractmethod
     def get_vocab(self, vocab: Iterable[str]):
+        # [FUNCTION DOC]
+        # Abstract: returns the vocabulary.
+        # KNOWN ISSUE: Declares a vocab parameter that the concrete get_vocab implementations do not take
+        # (Whitespace/Phrase) or ignore (TransformersTokenizerWrapper).
         pass
 
     @abstractmethod
     def tokenize(self, text: str, **kwargs) -> list[int]:
+        # [FUNCTION DOC]
+        # Abstract: converts a text into a list of vocabulary indices.
         pass
 
     @abstractmethod
     def save(self, output_path: str):
+        # [FUNCTION DOC]
+        # Abstract: saves the tokenizer configuration to output_path.
         pass
 
     @staticmethod
     @abstractmethod
     def load(input_path: str):
+        # [FUNCTION DOC]
+        # Abstract static method: loads a tokenizer from input_path and returns it.
         pass
 
 
 class TransformersTokenizerWrapper(WordTokenizer):
+    # [CLASS DOC]
+    # Adapter that exposes a Hugging Face PreTrainedTokenizer through the WordTokenizer interface.
     def __init__(self, tokenizer: PreTrainedTokenizerBase):
+        # [FUNCTION DOC]
+        # Stores the wrapped Hugging Face tokenizer.
         super().__init__()
         self.tokenizer = tokenizer
 
     def tokenize(self, sentence: str):
+        # [FUNCTION DOC]
+        # Runs the wrapped tokenizer on the sentence and returns element zero of its input_ids.
+        # KNOWN ISSUE: For a single string input_ids is already a flat list of ids, so this returns only
+        # the first token id (usually the special start token) rather than the list of token ids.
         encoded = self.tokenizer(sentence)
         return encoded["input_ids"][0]
 
     def set_vocab(self, vocab: Iterable[str]):
+        # [FUNCTION DOC]
+        # No-op: the vocabulary is fixed by the wrapped tokenizer.
         pass
 
     def get_vocab(self, vocab: Iterable[str]):
+        # [FUNCTION DOC]
+        # Returns the wrapped tokenizer's vocabulary dict; the vocab argument is ignored.
         return self.tokenizer.get_vocab()
 
     def save(self, output_path: str):
+        # [FUNCTION DOC]
+        # Saves the wrapped tokenizer with save_pretrained to output_path.
         self.tokenizer.save_pretrained(output_path)
 
     @staticmethod
     def load(input_path: str):
+        # [FUNCTION DOC]
+        # Static method that loads a fast AutoTokenizer from input_path and wraps it.
         return TransformersTokenizerWrapper(AutoTokenizer.from_pretrained(input_path, use_fast=True))

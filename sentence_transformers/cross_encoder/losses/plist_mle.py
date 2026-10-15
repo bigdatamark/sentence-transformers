@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Position-aware ListMLE (p-ListMLE) listwise loss for CrossEncoder and its position weighting module.
 from __future__ import annotations
 
 import torch
@@ -8,9 +10,14 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class PListMLELambdaWeight(nn.Module):
+    # [CLASS DOC]
+    # Module computing per-position weights for p-ListMLE. Holds an optional custom discount function taking the
+    # validity mask; without one, uses an exponential discount favoring top positions.
     """Base class for implementing weighting schemes in Position-Aware ListMLE Loss."""
 
     def __init__(self, rank_discount_fn=None) -> None:
+        # [FUNCTION DOC]
+        # Store the optional rank discount function.
         """
         Initialize a lambda weight for PListMLE loss.
 
@@ -22,6 +29,10 @@ class PListMLELambdaWeight(nn.Module):
         self.rank_discount_fn = rank_discount_fn
 
     def forward(self, mask: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Return weights of shape queries by documents. If a custom function is set, returns its result on the mask.
+        # Otherwise, with zero-based position r and n valid documents in the row, weight is 2 to the power (n minus
+        # r) minus 1, zeroed at invalid positions.
         """
         Calculate position-aware weights for the PListMLE loss.
 
@@ -43,6 +54,11 @@ class PListMLELambdaWeight(nn.Module):
 
 
 class PListMLELoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, an optional position
+    # weight module, activation (identity when None), optional mini-batch size, whether the given document order
+    # is the ground-truth ranking, and a small epsilon. Inputs: (queries, per-query document lists) and per-query
+    # label tensors.
     def __init__(
         self,
         model: CrossEncoder,
@@ -51,6 +67,10 @@ class PListMLELoss(nn.Module):
         mini_batch_size: int | None = None,
         respect_input_order: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store settings. Raises ValueError unless the model has exactly one output label.
+        # KNOWN ISSUE: The docstring says lambda_weight defaults to None (plain ListMLE), but the actual default is
+        # a PListMLELambdaWeight instance, so position weighting is on by default.
         """
         PListMLE loss for learning to rank with position-aware weighting. This loss function implements
         the ListMLE ranking algorithm which uses a list-wise approach based on maximum likelihood
@@ -164,6 +184,17 @@ class PListMLELoss(nn.Module):
         prompt: str | None = None,
         task: str | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss. Raises ValueError if labels are a single tensor, there are not exactly two columns, or
+        # per-query document and label counts differ. Scores all pairs in chunks (mini-batch size, default number of
+        # queries; non-positive means all at once), applies the activation, and scatters into a padded queries by
+        # max-documents matrix (padding a tiny positive value), with a validity mask and a label matrix padded with
+        # negative infinity. Returns a zero tensor requiring grad if there are no valid entries. If not respecting
+        # input order, sorts each row by label descending and reorders logits and mask accordingly. Plackett-Luce
+        # log-likelihood per position: logit minus log of (sum of exponentiated valid logits from that position to the
+        # end, plus epsilon). If a weight module is set, multiplies by its weights normalized to sum to one per row.
+        # Zeros invalid positions, takes the negative row sum as per-query loss, returns a zero tensor requiring
+        # grad if all per-query losses are zero, else their mean.
         """
         Compute PListMLE loss for a batch of queries and their documents.
 
@@ -266,6 +297,9 @@ class PListMLELoss(nn.Module):
         return torch.mean(per_query_losses)
 
     def get_config_dict(self) -> dict[str, float | int | str | None]:
+        # [FUNCTION DOC]
+        # Return the loss config: weight module qualified name (or None), activation qualified name, mini-batch
+        # size, and the respect-input-order flag.
         """
         Get configuration parameters for this loss function.
 
@@ -281,6 +315,8 @@ class PListMLELoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Lan et al. 2014 (Position-Aware ListMLE).
         return """
 @inproceedings{lan2014position,
   title={Position-Aware ListMLE: A Sequential Learning Process for Ranking},

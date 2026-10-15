@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script: run SparseTripletEvaluator on the first 1000 AllNLI dev triplets with a SPLADE model (batch 32), measuring the
+# fraction of triplets whose anchor is more similar (dot product) to the positive than to the negative, then print the
+# primary metric (dot accuracy) and value. Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

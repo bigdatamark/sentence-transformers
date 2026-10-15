@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Example script: like train_splade_nq.py but with a large batch (512) made affordable by CachedSpladeLoss, which wraps
+# SparseMultipleNegativesRankingLoss and computes embeddings in mini-batches of 32 with gradient caching (query/document
+# regularizer weights 5e-5/3e-5). Running as a script calls main().
+# KNOWN ISSUE: the docstring's usage line names train_splade_nq.py instead of this file.
 """
 This example trains a SparseEncoder for the Natural Questions (NQ) dataset.
 The training script fine-tunes a SparseEncoder using the Splade loss function for retrieval.
@@ -30,6 +35,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads distilbert-base-uncased as a SparseEncoder (fp32, max length 256),
+    # takes 100k NQ rows and holds out 1k (seed 12), evaluates SparseNanoBEIREvaluator (msmarco, nfcorpus, nq; batch 32)
+    # before, during and after training, and trains 1 epoch (batch 512, lr 1e-5, 10% warmup, bf16, NO_DUPLICATES, eval/save
+    # every 20%). Saves to models/<run_name>/final and tries a Hub push. Side effects: network, disk, GPU, logging.
     model_name = "distilbert/distilbert-base-uncased"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
     global_batch_size = 512

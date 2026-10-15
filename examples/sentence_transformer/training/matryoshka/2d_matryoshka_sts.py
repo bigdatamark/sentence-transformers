@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilbert-base-uncased, or first CLI arg) on STSb pairs with
+# float similarity scores using Matryoshka2dLoss wrapping CoSENTLoss at dims 768/512/256/128/64.
+# Batch size 16, 4 epochs, fp16, eval/save every 100 steps with an STSb validation EmbeddingSimilarityEvaluator.
+# Afterwards evaluates on STSb test, saves to output/2d_matryoshka_sts_<model>-<timestamp>/final and attempts
+# a Hub push of "<model>-sts-2d-matryoshka", logging manual-upload instructions if that fails.
+# Side effects: network, disk writes, INFO logging.
 """
 This examples trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) for the STSbenchmark from scratch.
 It uses MatryoshkaLoss with the powerful CoSENTLoss to train models that perform well at output dimensions [768, 512, 256, 128, 64].

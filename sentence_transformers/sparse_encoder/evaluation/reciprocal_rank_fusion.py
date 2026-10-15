@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Evaluator for hybrid search that fuses a dense and a sparse retriever's ranked document lists
+# with Reciprocal Rank Fusion (RRF) and reports MAP, MRR@k and NDCG@k for dense, sparse and fused
+# rankings. It works purely on precomputed rankings; no model is run.
 from __future__ import annotations
 
 import csv
@@ -15,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 class ReciprocalRankFusionEvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # BaseEvaluator over paired dense and sparse result samples. Each sample is a dict with query_id,
+    # query, positive (a document or list of documents) and documents (ranked list, best first).
+    # Attributes: at_k (default 10), rrf_k (RRF constant, default 60), name, batch_size, progress bar
+    # flag, write_csv, write_predictions, the CSV file name and headers, and primary metric
+    # "ndcg@k". Fused score of a document is the sum over retrievers that returned it of one divided
+    # by rrf_k plus its one-based rank.
     """
     This class evaluates a hybrid search approach using Reciprocal Rank Fusion (RRF).
 
@@ -53,6 +64,12 @@ class ReciprocalRankFusionEvaluator(BaseEvaluator):
         write_csv: bool = True,
         write_predictions: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Stores the settings. Raises ValueError if the two sample lists differ in length, if any sample
+        # lacks query_id, or if query ids at the same index differ. Builds the CSV file name
+        # ("ReciprocalRankFusion_evaluation", optional name suffix, "_results.csv"), the CSV headers, and,
+        # if write_predictions, a predictions JSONL file name.
+        # KNOWN ISSUE: batch_size is stored but never used.
         super().__init__()
         self.dense_samples = dense_samples
         self.sparse_samples = sparse_samples
@@ -103,6 +120,19 @@ class ReciprocalRankFusionEvaluator(BaseEvaluator):
             )
 
     def __call__(self, output_path: str | None = None, epoch: int = -1, steps: int = -1) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation and returns the metrics dict. Logs a header with epoch/step info. For each
+        # sample pair (asserting matching query ids): builds 0/1 relevance lists for the dense and sparse
+        # document lists; if a list has no relevant documents its metrics are 0, otherwise one relevant
+        # entry is appended per positive that the list missed, and the metrics come from compute_metrics
+        # with descending rank scores. Computes RRF scores over the union of documents, sorts them in
+        # descending score order, and evaluates the fused list the same way; stores fused rankings if
+        # predictions are requested. Averages each metric over queries and logs a statistics line and a
+        # comparison table (dense, sparse, fusion, gains). If output_path is given, creates it and
+        # appends a row (epoch, steps, nine metrics) to the CSV (writing headers when new) if write_csv,
+        # and writes the fused rankings as JSON lines if requested. Returns the metrics dense_map,
+        # dense_mrr@k, dense_ndcg@k, sparse_*, and map, mrr@k, ndcg@k for the fusion, prefixed with name.
+        # Note duplicate documents collapse in the rank maps (the later rank wins).
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -322,6 +352,10 @@ class ReciprocalRankFusionEvaluator(BaseEvaluator):
         return metrics
 
     def compute_metrics(self, y_true, y_pred):
+        # [FUNCTION DOC]
+        # Given 0/1 relevance labels and predicted scores, returns a tuple of: MRR@k (reciprocal rank of
+        # the first relevant item among the top at_k by score, else 0), NDCG@k via scikit-learn, and
+        # average precision via scikit-learn.
         """Compute MRR, NDCG, and AP metrics using sklearn"""
         ranking = np.argsort(y_pred)[::-1]
 
@@ -341,6 +375,8 @@ class ReciprocalRankFusionEvaluator(BaseEvaluator):
         return mrr, ndcg, ap
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Returns the config dict (at_k, rrf_k, write_predictions) used in the model card.
         return {
             "at_k": self.at_k,
             "rrf_k": self.rrf_k,

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Slow integration tests that rebuild the OpenSearch inference-free neural sparse models (v2 and v3 distill)
+# from their Hub components (network): a Router whose query side is a frozen SparseStaticEmbedding loaded from
+# JSON weights and whose document side is a fill-mask Transformer plus max SpladePooling, with dot-product
+# similarity. Checks similarity and decoded token scores against published reference values.
 from __future__ import annotations
 
 import pytest
@@ -9,6 +14,10 @@ from sentence_transformers.sparse_encoder.modules import Router, SparseStaticEmb
 
 @pytest.mark.slow
 def test_opensearch_v2_distill_similarity():
+    # [FUNCTION DOC]
+    # Builds the v2 model (document pooling with the default activation), encodes a fixed query and document,
+    # asserts their similarity is close to 17.5307, decodes the query (top 3 tokens) and full document, and
+    # asserts "ny", "weather" and "now" are present with query and document scores within 1e-3 of the reference.
     """Test OpenSearch v2 distill model produces expected similarity scores."""
     # Setup the model
     doc_encoder = Transformer(
@@ -85,6 +94,9 @@ def test_opensearch_v2_distill_similarity():
 
 @pytest.mark.slow
 def test_opensearch_v3_distill_similarity():
+    # [FUNCTION DOC]
+    # Same as the v2 test for the v3 model, whose document pooling uses the log1p_relu activation; expects a
+    # similarity close to 11.1105 and checks six tokens from the query's top 10 decoded tokens.
     """Test OpenSearch v3 distill model produces expected similarity scores."""
     # Setup the model
     doc_encoder = Transformer(

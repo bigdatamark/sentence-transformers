@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Script: sparse semantic search with a local OpenSearch (v2.15+) using an inference-free model. Builds a SparseEncoder
+# from a Router: queries go through a frozen SparseStaticEmbedding (per-token weights loaded from the
+# opensearch-neural-sparse-encoding-doc-v3-distill repo), documents through the fill-mask transformer plus max SPLADE
+# pooling with log1p-ReLU; similarity is dot product. Encodes and decodes the first 10,000 Natural Questions answers,
+# then loops forever: encodes/decodes the current queries (initially the first two dataset queries), calls
+# semantic_search_opensearch (top 5; corpus indexed on first call, index reused afterwards), prints timings and hits,
+# and reads the next query from stdin. Side effects: network, OpenSearch index creation, stdin/stdout.
 """
 This script contains an example how to perform semantic search with OpenSearch.
 

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for CachedSpladeLoss (gradient-cached SPLADE loss that embeds in mini-batches without gradients, then
+# re-embeds each mini-batch in a backward hook) against the plain SpladeLoss: equal loss components and
+# gradients for any mini-batch size or token budget, correct gradient carrying, multiple forwards before a
+# backward, no-grad evaluation, frozen inference-free query routes, dict-valued base losses and dropout replay.
+# Uses fixed lists of six anchor and six positive strings.
 from __future__ import annotations
 
 import pytest
@@ -16,6 +22,10 @@ POSITIVES = ["positive a", "positive b", "positive c", "positive d", "positive e
 
 
 def _make_loss(model: SparseEncoder, cached: bool, mini_batch_size: int = 2) -> torch.nn.Module:
+    # [FUNCTION DOC]
+    # HELPER: Builds a SPLADE loss over SparseMultipleNegativesRankingLoss with document weight 3e-5 and query
+    # weight 5e-5; returns CachedSpladeLoss with the given mini-batch size (default 2) when cached is True,
+    # otherwise SpladeLoss.
     kwargs = {
         "model": model,
         "loss": SparseMultipleNegativesRankingLoss(model),
@@ -30,6 +40,10 @@ def _make_loss(model: SparseEncoder, cached: bool, mini_batch_size: int = 2) -> 
 def _loss_and_grads(
     model: SparseEncoder, loss_fn: torch.nn.Module, batch_size: int = 6
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    # [FUNCTION DOC]
+    # HELPER: Zeroes model gradients, runs the loss on the first batch_size (default 6) anchors and positives,
+    # asserts the output is a dict, backpropagates the sum of its values, and returns the output dict plus a dict
+    # of cloned gradients for parameters that received one. Mutates parameter gradients.
     model.zero_grad()
     output = loss_fn([model.preprocess(ANCHORS[:batch_size]), model.preprocess(POSITIVES[:batch_size])], None)
     assert isinstance(output, dict)
@@ -40,6 +54,10 @@ def _loss_and_grads(
 
 @pytest.mark.parametrize("mini_batch_size", [2, 4, 50])
 def test_cached_splade_matches_splade(splade_bert_tiny_model: SparseEncoder, mini_batch_size: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over mini-batch sizes 2, 4 and 50. On CPU with dropout disabled in training mode, asserts the
+    # cached and plain losses return the same keys with approximately equal values, that cached gradients are
+    # nonzero, and that every gradient is close to the plain one (rtol 1e-4, atol 2e-4).
     """``mini_batch_size`` only bounds memory: the cached loss must reproduce SpladeLoss's total loss,
     per-component values, and gradients, whether or not it divides the batch size."""
     model = splade_bert_tiny_model.to("cpu")
@@ -63,6 +81,9 @@ def test_cached_splade_matches_splade(splade_bert_tiny_model: SparseEncoder, min
 
 
 def test_cached_splade_components_sum_to_the_total(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Runs the cached loss in training mode and asserts the summed total requires grad, exactly one returned
+    # component carries the gradient, and backpropagation produces a nonzero gradient on some parameter.
     """The trainer back-propagates the sum of the returned dict, so the components must sum exactly to
     the gradient-carrying total even though only one entry carries the gradient."""
     model = splade_bert_tiny_model.to("cpu")
@@ -78,6 +99,9 @@ def test_cached_splade_components_sum_to_the_total(splade_bert_tiny_model: Spars
 
 
 def test_cached_splade_two_forwards_before_one_backward(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Runs one shared cached loss on two halves of the data before a single backward, and separately two fresh
+    # loss instances; asserts the resulting gradients match, so each forward's cache feeds its own hook.
     """Each forward pass must hand its own cached gradients to its own backward hook."""
     model = splade_bert_tiny_model.to("cpu")
     _disable_dropout(model)
@@ -104,6 +128,9 @@ def test_cached_splade_two_forwards_before_one_backward(splade_bert_tiny_model: 
 
 
 def test_cached_splade_under_no_grad(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # In eval mode under no-grad, asserts the cached and plain losses give the same keys and approximately equal
+    # values.
     """The eval loss must be computable under ``torch.no_grad`` and match the training-path total."""
     model = splade_bert_tiny_model.to("cpu")
     _disable_dropout(model)
@@ -120,6 +147,10 @@ def test_cached_splade_under_no_grad(splade_bert_tiny_model: SparseEncoder) -> N
 
 
 def test_cached_splade_inference_free_frozen_query_route(inference_free_splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # On an inference-free model, freezes all query-route parameters, runs the cached loss (mini-batch 2, query
+    # regularizer disabled) on five queries and five documents with tasks, backpropagates, and asserts the
+    # non-query parameters got nonzero gradients while every frozen query-route parameter has no gradient.
     """An inference-free SPLADE model routes queries through a (frozen) SparseStaticEmbedding, whose
     embeddings then don't require grad. The backward hook must skip that route's remaining mini-batches
     (nothing to back-propagate into) instead of crashing, while the document route still trains."""
@@ -165,6 +196,9 @@ def test_cached_splade_inference_free_frozen_query_route(inference_free_splade_b
 
 
 def test_cached_splade_token_budget_matches_splade(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a cached loss with a 16-token mini-batch budget matches SpladeLoss in loss components and gradients
+    # on variable-length texts.
     """The token budget must reproduce SpladeLoss's per-component losses and gradients."""
     model = splade_bert_tiny_model.to("cpu")
     _disable_dropout(model)
@@ -174,6 +208,9 @@ def test_cached_splade_token_budget_matches_splade(splade_bert_tiny_model: Spars
     positives = ["short", "positive b also has a longer surface form", "p", "another positive text", "q r", "s"]
 
     def loss_and_grads(cached: bool) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Zeroes gradients, builds the cached (token budget 16) or plain loss, runs it on the local anchors
+        # and positives, backpropagates the summed output and returns the output and cloned gradients.
         model.zero_grad()
         kwargs = {
             "model": model,
@@ -199,17 +236,30 @@ def test_cached_splade_token_budget_matches_splade(splade_bert_tiny_model: Spars
 
 
 def test_cached_splade_keeps_dict_base_loss_components(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Defines a base loss returning two weighted parts of the ranking loss as a dict and asserts that cached and
+    # plain SPLADE losses both return exactly those parts plus the document and query regularizer keys with
+    # approximately equal values; then asserts exactly one cached component carries the gradient and that
+    # backpropagating the sum produces nonzero gradients.
     """A dict-valued base loss must keep its own component keys in the returned dict, exactly as
     SpladeLoss spreads them. The separate keys are the point of returning a dict: the trainer logs
     each component on its own. The cached loss used to collapse them into a single ``base_loss``."""
 
     class TwoPartLoss(torch.nn.Module):
+        # [CLASS DOC]
+        # HELPER: Test base loss wrapping SparseMultipleNegativesRankingLoss that returns its loss split into a dict.
+        # Attributes: the model and the inner ranking loss.
         def __init__(self, model: SparseEncoder) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Initialises the module, stores the model and creates the inner ranking loss.
             super().__init__()
             self.model = model
             self.inner = SparseMultipleNegativesRankingLoss(model)
 
         def compute_loss_from_embeddings(self, embeddings, labels=None):
+            # [FUNCTION DOC]
+            # HELPER: Computes the inner loss from embeddings and labels and returns a dict with "part_a" at 0.25 and
+            # "part_b" at 0.75 of it.
             loss = self.inner.compute_loss_from_embeddings(embeddings, labels)
             return {"part_a": loss * 0.25, "part_b": loss * 0.75}
 
@@ -218,6 +268,9 @@ def test_cached_splade_keeps_dict_base_loss_components(splade_bert_tiny_model: S
     model.train()
 
     def outputs(cached: bool) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Builds the cached (mini-batch 2) or plain SPLADE loss around the two-part base loss and returns its
+        # output on the first four anchors and positives.
         kwargs = {
             "model": model,
             "loss": TwoPartLoss(model),
@@ -245,6 +298,11 @@ def test_cached_splade_keeps_dict_base_loss_components(splade_bert_tiny_model: S
 
 
 def test_cached_splade_replays_dropout_in_the_backward_pass(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # With dropout active in training mode (asserted), wraps the cached loss's mini-batch embedding method with a
+    # spy that records representations into a switchable list, runs the forward, switches the list, runs the
+    # backward, and asserts four mini-batch embeddings were recorded in each pass and they are identical (random
+    # state is replayed).
     """The backward pass must re-embed exactly what the forward pass embedded, dropout included,
     making this loss self-guarding instead of relying only on the shared engine's tests."""
     model = splade_bert_tiny_model.to("cpu")
@@ -260,6 +318,9 @@ def test_cached_splade_replays_dropout_in_the_backward_pass(splade_bert_tiny_mod
     embed_minibatch = loss_fn.embed_minibatch
 
     def spy(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Calls the original mini-batch embedding with the keyword arguments, appends a detached clone of the
+        # representations to the currently selected list, and returns the representations and random state.
         reps, random_state = embed_minibatch(**kwargs)
         sink.append(reps.detach().clone())
         return reps, random_state

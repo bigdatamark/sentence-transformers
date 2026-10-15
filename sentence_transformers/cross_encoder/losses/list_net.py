@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# ListNet listwise learning-to-rank loss for CrossEncoder.
 from __future__ import annotations
 
 import torch
@@ -8,12 +10,20 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class ListNetLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, an activation applied to
+    # the flat logits (identity when None), an optional mini-batch size for scoring pairs, and an inner cross
+    # entropy loss used with soft targets. Inputs per row: a query and a variable-length list of documents with
+    # a matching list of relevance labels.
     def __init__(
         self,
         model: CrossEncoder,
         activation_fn: nn.Module | None = nn.Identity(),
         mini_batch_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store model, activation (None becomes identity), mini-batch size and create the cross entropy loss.
+        # Raises ValueError if the model does not have exactly one output label.
         """
         ListNet loss for learning to rank. This loss function implements the ListNet ranking algorithm
         which uses a list-wise approach to learn ranking models. It minimizes the cross entropy
@@ -105,6 +115,15 @@ class ListNetLoss(nn.Module):
         prompt: str | None = None,
         task: str | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the ListNet loss. Inputs: two columns (queries, per-query document lists), labels as a list of
+        # per-query tensors, optional prompt/task. Raises ValueError if labels are a single tensor, if there are not
+        # exactly two columns, or if document counts and label counts per query differ. Flattens into (query,
+        # document) pairs and scores them in chunks (chunk size = mini-batch size, or the number of queries when
+        # unset; non-positive means all pairs at once), concatenating flat float logits and applying the activation.
+        # Scatters logits into a queries by max-documents matrix padded with a very large negative value, and labels
+        # into a same-shape matrix padded with negative infinity (so padded slots get zero target probability).
+        # Returns cross entropy between the logits and the softmax of the label matrix (row-wise), averaged.
         """
         Compute ListNet loss for a batch of queries and their documents.
 
@@ -173,6 +192,8 @@ class ListNetLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Return the loss config: activation function's qualified name and the mini-batch size.
         """
         Get configuration parameters for this loss function.
 
@@ -183,6 +204,8 @@ class ListNetLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Cao et al. 2007 (ListNet).
         return """
 @inproceedings{cao2007learning,
     title={Learning to Rank: From Pairwise Approach to Listwise Approach},

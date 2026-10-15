@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the reranking evaluator: for each query scores and sorts a candidate document
+# list with sparse embeddings and reports MRR@k, NDCG@k and MAP, plus query and document sparsity
+# statistics.
 from __future__ import annotations
 
 import logging
@@ -20,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class SparseRerankingEvaluator(RerankingEvaluator):
+    # [CLASS DOC]
+    # Subclass of RerankingEvaluator for SparseEncoder models. Adds max_active_dims and sparsity_stats
+    # (keys prefixed query_ or corpus_). Ranking metrics are inherited.
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.RerankingEvaluator` but is specifically designed for sparse encoder models.
 
@@ -120,6 +127,11 @@ class SparseRerankingEvaluator(RerankingEvaluator):
         max_active_dims: int | None = None,
         mrr_at_k: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores max_active_dims and empty statistics, delegates samples (dicts with query, positive and
+        # negative or documents), at_k, name, CSV flag, similarity function (default cosine), batch size,
+        # progress bar, batched-encoding flag and deprecated mrr_at_k to the parent, then appends the
+        # query/corpus active dims and sparsity ratio columns to the CSV headers.
         self.max_active_dims = max_active_dims
         self.sparsity_stats = defaultdict(list)
         super().__init__(
@@ -140,6 +152,12 @@ class SparseRerankingEvaluator(RerankingEvaluator):
     def __call__(
         self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs the evaluation: resets statistics, runs the parent evaluation (encoding through
+        # embed_inputs), averages each statistic over encode calls, adds them (prefixed with name) to the
+        # metrics, stores the metrics in the model card data, logs query and corpus sparsity and appends
+        # the statistics to the last CSV row when output_path is given and write_csv is set. Returns the
+        # metrics dict.
         self.sparsity_stats = defaultdict(list)
         metrics = super().__call__(model=model, output_path=output_path, epoch=epoch, steps=steps)
         for key, value in self.sparsity_stats.items():
@@ -169,6 +187,14 @@ class SparseRerankingEvaluator(RerankingEvaluator):
         show_progress_bar: bool | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Encodes texts with model.encode, encode_query or encode_document (chosen by encode_fn_name None,
+        # "query" or "document") as a list of individual sparse CPU tensors (not stacked, because sparse
+        # tensors cannot be sliced), using the batch size, given progress-bar flag, max_active_dims and
+        # extra kwargs. Stacks them to compute sparsity statistics, recorded under query_ (for None or
+        # "query") or corpus_ keys. Returns the list of embeddings.
+        # KNOWN ISSUE: Any other encode_fn_name leaves the encode function unassigned and raises
+        # UnboundLocalError.
         if encode_fn_name is None:
             encode_fn = model.encode
         elif encode_fn_name == "query":
@@ -194,9 +220,13 @@ class SparseRerankingEvaluator(RerankingEvaluator):
     def store_metrics_in_model_card_data(
         self, model: SparseEncoder, metrics: dict[str, Any], epoch: int = 0, step: int = 0
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the metrics in the model's model card data for this evaluator at the given epoch and step.
         model.model_card_data.set_evaluation_metrics(self, metrics, epoch=epoch, step=step)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims

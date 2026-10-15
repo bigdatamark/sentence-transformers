@@ -1,3 +1,6 @@
+# [PACKAGE DOC] Deprecated dataset helpers for the legacy fit-style (v2.x) training loop. Re-exports the denoising
+# auto-encoder dataset, the no-duplicates data loader, the parallel sentences dataset, the sentence-label
+# dataset and the plain sentences dataset.
 """
 This directory contains deprecated code that can only be used with the old `model.fit`-style Sentence Transformers v2.X training.
 It exists for backwards compatibility with the `model.old_fit` method, but will be removed in a future version.

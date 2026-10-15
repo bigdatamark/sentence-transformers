@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Training arguments for dense SentenceTransformer training. Defines a dataclass subclass of
+# BaseTrainingArguments and re-exports the batch sampler enums for convenience.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +11,11 @@ from sentence_transformers.base.training_args import BaseTrainingArguments
 
 @dataclass
 class SentenceTransformerTrainingArguments(BaseTrainingArguments):
+    # [CLASS DOC]
+    # Dataclass of training arguments for SentenceTransformerTrainer. Adds no fields of its own; all
+    # options (output_dir, prompts, batch_sampler, multi_dataset_batch_sampler, router_mapping,
+    # learning_rate_mapping and the Hugging Face TrainingArguments) come from BaseTrainingArguments.
+    # It exists to give dense training a distinct type.
     r"""
     SentenceTransformerTrainingArguments extends :class:`~sentence_transformers.base.training_args.BaseTrainingArguments`
     with additional arguments specific to Sentence Transformers. See :class:`~transformers.TrainingArguments` for

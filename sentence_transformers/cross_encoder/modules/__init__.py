@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Modules used to assemble a CrossEncoder pipeline. Re-exports the shared base modules (Dense, InputModule,
+# Module, Asym/Router, Transformer) from the base package so everything needed to build a CrossEncoder is
+# importable from one path, plus the cross-encoder-specific LogitScore module that turns causal LM logits
+# into relevance scores. Only re-exports; no side effects.
 from __future__ import annotations
 
 # Base modules are re-exported here so all modules used to build a CrossEncoder

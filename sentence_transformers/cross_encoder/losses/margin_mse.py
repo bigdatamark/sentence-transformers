@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Margin-MSE distillation loss for CrossEncoder: matches predicted score margins between a positive and
+# each negative document to teacher (or gold) margins.
 from __future__ import annotations
 
 import torch
@@ -8,7 +11,14 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class MarginMSELoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, an activation applied to
+    # logits, and an inner MSE loss built from extra kwargs. Inputs are columns (query, positive, negative 1..k)
+    # and labels giving either k margins per row or k+1 raw scores per row.
     def __init__(self, model: CrossEncoder, activation_fn: nn.Module = nn.Identity(), **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Store model, activation, inner MSE loss. Raises ValueError if the model is not a CrossEncoder or does not
+        # have exactly one output label.
         """
         Computes the MSE loss between the predicted margin ``sim(Query, Pos) - sim(Query, Neg)`` and the gold margin
         ``gold_sim(Query, Pos) - gold_sim(Query, Neg)``.
@@ -107,6 +117,13 @@ class MarginMSELoss(nn.Module):
         prompt: str | None = None,
         task: str | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss. Takes the first column as queries, second as positives, the rest as negative columns.
+        # Labels given as a list of tensors are stacked into batch by columns. If labels have k+1 columns they are
+        # converted to margins (first column minus each other column); a flat batch-sized label becomes one column.
+        # Raises ValueError if the final label shape is not batch by number of negatives. Scores the (query,
+        # positive) pairs and each (query, negative) column, forms the margins positive score minus each negative
+        # score (batch by k), and returns the MSE against the detached float labels.
         anchors = inputs[0]
         positives = inputs[1]
         negatives = inputs[2:]
@@ -148,6 +165,9 @@ class MarginMSELoss(nn.Module):
     def logits_from_pairs(
         self, pairs: list[tuple[str, str]], prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Score a list of (query, document) pairs: tokenize with the given prompt/task, move to the model
+        # device, run the model, flatten "scores" to one value per pair, apply the activation, and return it.
         """
         Computes the logits for a list of pairs using the model.
 
@@ -165,12 +185,16 @@ class MarginMSELoss(nn.Module):
         return self.activation_fn(logits)
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Return the loss config: the activation function's qualified name.
         return {
             "activation_fn": fullname(self.activation_fn),
         }
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Hofstaetter et al. (cross-architecture knowledge distillation).
         return """
 @misc{hofstätter2021improving,
     title={Improving Efficient Neural Ranking Models with Cross-Architecture Knowledge Distillation},

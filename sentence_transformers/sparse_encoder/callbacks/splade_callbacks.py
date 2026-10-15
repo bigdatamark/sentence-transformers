@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Trainer callback that warms up the SpladeLoss regularizer weights (query and document) from 0 to
+# their configured maximum over the first part of training, using a linear or quadratic schedule.
 from __future__ import annotations
 
 import logging
@@ -12,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 class SchedulerType(Enum):
+    # [CLASS DOC]
+    # Enum of warmup schedule shapes: LINEAR ("linear") and QUADRATIC ("quadratic").
     """Types of schedulers for weight parameters in SpladeLoss"""
 
     LINEAR = "linear"
@@ -19,12 +24,24 @@ class SchedulerType(Enum):
 
 
 class SpladeRegularizerWeightSchedulerCallback(TrainerCallback):
+    # [CLASS DOC]
+    # Hugging Face TrainerCallback that mutates a SpladeLoss's query_regularizer_weight and
+    # document_regularizer_weight during training, and logs their current values. Keeps the
+    # maximum (original) weights, current weights, total steps and warmup steps as state.
     def __init__(
         self,
         loss: SpladeLoss,
         scheduler_type: str | SchedulerType = SchedulerType.QUADRATIC,
         warmup_ratio: float = 1 / 3,
     ):
+        # [FUNCTION DOC]
+        # Validates and stores the settings. A string scheduler_type is lowercased and converted to the
+        # enum; an invalid string logs a warning and falls back to quadratic. A warmup_ratio outside
+        # (0, 1] logs a warning and becomes 1/3. If loss is not a SpladeLoss, logs a warning and raises
+        # ValueError. Records the loss's current weights as maxima, and starts the current document weight
+        # at 0 and the query weight at 0 (or None when the loss has no query weight).
+        # KNOWN ISSUE: The warning for a non-SpladeLoss says the callback "won't have any effect", but a
+        # ValueError is raised right after.
         """
         Callback that updates the query_regularizer_weight and document_regularizer_weight parameters of SpladeLoss
         based on a schedule.
@@ -78,6 +95,11 @@ class SpladeRegularizerWeightSchedulerCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs,
     ):
+        # [FUNCTION DOC]
+        # At training start, sets total_steps from state.max_steps if positive, else from steps per epoch
+        # times epochs if those exist; otherwise logs a warning and returns (scheduling then stays
+        # disabled). Sets warmup_steps to total_steps times warmup_ratio, at least 1, and writes the
+        # initial (zero) weights into the loss.
         """Initialize the scheduler at the beginning of training."""
         # Calculate total steps and warmup steps
         if hasattr(state, "max_steps") and state.max_steps > 0:
@@ -97,6 +119,10 @@ class SpladeRegularizerWeightSchedulerCallback(TrainerCallback):
         self.loss.document_regularizer_weight = self._current_document_regularizer_weight
 
     def _calculate_weight_value(self, step: int, max_value: float) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns the scheduled weight for a step: max_value unchanged if warmup is not set, the step
+        # is past warmup, or max_value is None; otherwise max_value times the warmup progress ratio
+        # (linear) or its square (quadratic, also used for unknown types after a warning).
         """Calculate the weight value based on the current step and scheduler type."""
         if self.warmup_steps is None or step >= self.warmup_steps or max_value is None:
             return max_value
@@ -118,6 +144,10 @@ class SpladeRegularizerWeightSchedulerCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs,
     ):
+        # [FUNCTION DOC]
+        # At each step start (if scheduling is set up), computes the scheduled query and document weights
+        # for state.global_step and, if either changed, writes both into the loss and stores them as the
+        # current values.
         """Update weight values at the beginning of each step."""
         if self.total_steps is None or self.warmup_steps is None:
             return
@@ -142,6 +172,9 @@ class SpladeRegularizerWeightSchedulerCallback(TrainerCallback):
             self._current_document_regularizer_weight = new_document_regularizer_weight
 
     def on_log(self, args, state, control, model=None, logs=None, **kwargs):
+        # [FUNCTION DOC]
+        # Adds the current document regularizer weight (and the query weight when not None) to the logs dict.
+        # KNOWN ISSUE: Raises TypeError if logs is None, which its default allows.
         """Log the current weight values."""
         logs["document_regularizer_weight"] = self._current_document_regularizer_weight
         if self._current_query_regularizer_weight is not None:

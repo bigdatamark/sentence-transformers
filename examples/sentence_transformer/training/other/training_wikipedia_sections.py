@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Example script: train distilbert-base-uncased with TripletLoss on the Wikipedia Sections triplet dataset (10k train,
+# 1k validation, 1k test rows). Batch 16, 1 epoch, fp16, eval/save every 100 steps with a TripletEvaluator on
+# validation; afterwards evaluates on the test triplets, saves to output/training-wikipedia-sections-<model>-<timestamp>/final
+# and tries a Hub push. Side effects: network, disk, GPU, logging.
 """
 This script trains sentence transformers with a triplet loss function.
 

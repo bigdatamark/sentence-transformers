@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example script: finetune the naver/splade-cocondenser-ensembledistil sparse encoder on STSb scored pairs with SpladeLoss
+# wrapping SparseCosineSimilarityLoss and only a document FLOPS regularizer (weight 3e-3). Running as a script calls main().
 """
 This example trains a SparseEncoder for the Semantic Textual Similarity Benchmark dataset.
 The training script fine-tunes a SparseEncoder using the Splade loss function for retrieval.
@@ -30,6 +33,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads the model (fp32, dot similarity, max length 256) and STSb
+    # train/validation/test, evaluates STSb validation with SparseEmbeddingSimilarityEvaluator (cosine) before and during
+    # training, trains 1 epoch (batch 16, lr 5e-5, bf16, eval/save every 100 steps, seed 42), evaluates STSb test, saves to
+    # models/<model>-sts/final and tries a Hub push. Side effects: network, disk, GPU, logging.
+    # KNOWN ISSUE: the upload-failure message tells the user to load the model with CrossEncoder instead of SparseEncoder.
     model_name = "naver/splade-cocondenser-ensembledistil"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

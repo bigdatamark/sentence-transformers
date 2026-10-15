@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example script: train a SPLADE sparse encoder from distilbert-base-uncased on GooAQ question/answer pairs with SpladeLoss
+# over SparseMultipleNegativesRankingLoss (query/document regularizer weights 5e-5/3e-5). Running as a script calls main().
 """
 This example trains a SparseEncoder for the GooAQ dataset.
 The training script fine-tunes a SparseEncoder using the Splade loss function for retrieval.
@@ -30,6 +33,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads the model (fp32, max length 256), takes 100k GooAQ rows and holds
+    # out 1k (seed 12), trains 1 epoch (batch 32, lr 2e-5, bf16, NO_DUPLICATES, eval/save every 610 steps, seed 42, best model
+    # by NanoBEIR mean dot NDCG@10) with SparseNanoBEIREvaluator on msmarco/nfcorpus/nq, evaluates on all NanoBEIR datasets,
+    # saves to models/<run_name>/final and tries a Hub push. Side effects: network, disk, GPU, logging.
     model_name = "distilbert/distilbert-base-uncased"
 
     train_batch_size = 32

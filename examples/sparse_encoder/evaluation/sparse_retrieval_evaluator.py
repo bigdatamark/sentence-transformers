@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: run SparseInformationRetrievalEvaluator on BeIR NFCorpus with a SPLADE model (batch 16). The corpus text is
+# title plus space plus text; queries and corpus become id->text dicts and the test qrels become query id -> set of
+# relevant corpus ids (ids cast to strings). Prints the primary metric (dot NDCG@10) and its value.
+# Side effects: network, INFO logging, stdout.
 import logging
 
 from datasets import load_dataset

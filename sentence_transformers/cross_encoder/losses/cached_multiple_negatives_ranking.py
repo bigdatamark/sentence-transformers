@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Gradient-cached (GradCache) variant of the CrossEncoder in-batch negatives ranking loss, allowing very
+# large batches with bounded memory: logits are first computed without gradients, the loss gradient with
+# respect to the logits is cached, and a backward hook later re-runs the mini-batches with gradients and
+# injects the cached gradients.
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -16,6 +21,12 @@ from sentence_transformers.util import batch_to_device
 
 
 class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
+    # [CLASS DOC]
+    # Subclass of the CrossEncoder multiple negatives ranking loss (same negative sampling, activation, scale
+    # and cross entropy). Adds a mini-batch size for the forward passes and a progress-bar flag. A class flag
+    # tells the trainer this loss back-propagates through a hook on its returned loss. Uses the shared gradcache
+    # helpers: a random-state context that snapshots/restores RNG state for devices of given tensors, and the
+    # backward hook that replays mini-batches.
     # Back-propagates from a hook on the returned loss (see `gradcache.uses_gradient_cache`).
     uses_gradient_cache = True
 
@@ -28,6 +39,10 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         mini_batch_size: int = 32,
         show_progress_bar: bool = False,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initialize the parent with model, negative count, scale and activation; store mini-batch size and
+        # progress-bar flag; recreate the cross entropy loss. Raises ValueError if the model is not a CrossEncoder
+        # or does not have exactly one output label.
         """
         Boosted version of :class:`~sentence_transformers.cross_encoder.losses.MultipleNegativesRankingLoss` that
         caches the gradients of the logits wrt. the loss. This allows for much higher batch sizes without extra
@@ -149,6 +164,11 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         prompt: str | None = None,
         task: str | None = None,
     ) -> tuple[Tensor, RandContext | None]:
+        # [FUNCTION DOC]
+        # Score one mini-batch of pairs. Tokenizes (with prompt/task) and moves to the device first, then inside the
+        # given random-state context (if replaying) and with or without gradients, optionally snapshots the RNG
+        # state for the feature tensors' devices and runs the model. Returns one logit per pair and the snapshot
+        # (or None).
         """Do forward pass on a minibatch of the input features and return corresponding logits.
 
         Pairs are tokenized and moved to the device before the RNG snapshot: RandContext only captures
@@ -174,6 +194,10 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         prompt: str | None = None,
         task: str | None = None,
     ) -> Iterator[tuple[Tensor, RandContext | None]]:
+        # [FUNCTION DOC]
+        # Generator over mini-batches of the pair list (step = mini-batch size, optional progress bar). For each,
+        # scores it via the mini-batch predictor, passing the i-th saved random state when replaying, and yields
+        # the logits and the random state.
         """Do forward pass on all the minibatches of the input features and yield corresponding embeddings."""
         for i, b in enumerate(
             tqdm.trange(
@@ -205,6 +229,10 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         random_states: list[RandContext] | None = None,
         ranges: list[tuple[int, int]] | None = None,
     ) -> Iterator[tuple[Tensor, RandContext | None]]:
+        # [FUNCTION DOC]
+        # HELPER: Adapter used by the shared backward hook, which iterates per-column feature dicts. Unpacks the
+        # single pseudo-column dict (pairs, prompt, task) and yields from the mini-batch generator; the ranges
+        # argument is ignored.
         """Adapter for the shared backward hook, which iterates per-column features. This loss has one
         "column": the flat pair list, bundled with the prompt/task it must be tokenized with. The
         ``ranges`` are unused: this loss slices its pairs by count (token budgets would require
@@ -219,6 +247,9 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         )
 
     def calculate_loss_and_cache_gradients(self, logits: list[Tensor], batch_size: int) -> tuple[Tensor, list[Tensor]]:
+        # [FUNCTION DOC]
+        # HELPER: Compute the loss from detached leaf logits, back-propagate to them, replace the loss with a
+        # detached copy that requires grad, and return it with the list of per-mini-batch logit gradients.
         """Calculate the cross-entropy loss and return it alongside the gradients wrt. the logits."""
         loss = self.calculate_loss(logits, batch_size)
         loss.backward()
@@ -229,6 +260,14 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
     def forward(
         self, inputs: list[list[str]], labels: Tensor | None = None, prompt: str | None = None, task: str | None = None
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss; labels are ignored. Builds flat anchor and candidate lists: positives first, then for
+        # each sampled in-batch negative column and each hard negative column, the anchors repeated with those
+        # candidates. Runs all pairs through the mini-batch generator without gradients, keeping detached logits
+        # that require grad and RNG snapshots (only when grad is enabled). If grad is disabled (evaluation),
+        # returns the plain loss. Otherwise computes the loss and caches logit gradients, registers a backward hook
+        # on the returned loss that replays the mini-batches with gradients and the same RNG states and
+        # back-propagates the cached gradients into the model, and returns the loss.
         # Step (1): A quick prediction step without gradients/computation graphs to get all the logits
         anchors = inputs[0][::]
         candidates = inputs[1][::]
@@ -282,4 +321,6 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         return loss
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Return the parent's config plus the mini-batch size.
         return {**super().get_config_dict(), "mini_batch_size": self.mini_batch_size}

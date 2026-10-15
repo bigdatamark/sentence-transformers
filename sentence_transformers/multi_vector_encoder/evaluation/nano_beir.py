@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# NanoBEIR benchmark evaluator for MultiVectorEncoder models. Reuses the generic NanoBEIR evaluator (which
+# downloads each Nano subset from the Hugging Face Hub, builds one IR evaluator per subset, runs them, and
+# aggregates metrics) but builds multi-vector IR evaluators and forwards their extra chunking options.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -12,6 +16,11 @@ if TYPE_CHECKING:
 
 
 class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
+    # [CLASS DOC]
+    # Subclass of NanoBEIREvaluator whose per-subset evaluator class is the multi-vector IR evaluator. Adds two
+    # options forwarded to every subset evaluator: corpus chunk size (documents encoded and scored per round)
+    # and an element budget for the MaxSim scoring intermediate. All other arguments (dataset names/id, k
+    # values, prompts, aggregation, CSV/prediction writing) are the parent's. Embedding truncation is rejected.
     """Evaluates a :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` model on the
     `NanoBEIR collection <https://huggingface.co/collections/sentence-transformers/nanobeir-datasets>`_.
 
@@ -86,6 +95,10 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
         chunk_elements: int | None = None,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # Raise ValueError if a non-None truncation dimension is given. Store the chunk size and element budget in
+        # an extra-kwargs dict before calling the parent constructor, because the parent constructor loads the
+        # datasets (network/hub I/O) and builds subset evaluators via the dataset loader, which needs them.
         if kwargs.get("truncate_dim") is not None:
             raise ValueError(
                 "truncate_dim is not supported by MultiVectorEncoder evaluators: multi-vector token "
@@ -101,6 +114,9 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
         super().__init__(*args, **kwargs)
 
     def _load_dataset(self, dataset_name: str, **ir_evaluator_kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Load one NanoBEIR subset and build its IR evaluator by delegating to the parent loader with the
+        # given kwargs merged with (and overridden by) the stored chunking kwargs. Returns that evaluator.
         ir_evaluator_kwargs = {**ir_evaluator_kwargs, **self._ir_extra_kwargs}
         return super()._load_dataset(dataset_name, **ir_evaluator_kwargs)
 
@@ -113,5 +129,7 @@ class MultiVectorNanoBEIREvaluator(NanoBEIREvaluator):
         *args,
         **kwargs,
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Run the evaluation; identical to the parent (only narrows the model type). Returns the metrics dict.
         # Overridden only to narrow the model type to MultiVectorEncoder. Behavior is identical to the parent.
         return super().__call__(model, output_path, epoch, steps, *args, **kwargs)

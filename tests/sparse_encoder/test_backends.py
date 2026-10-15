@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for SparseEncoder with ONNX and OpenVINO inference backends (via optimum) on a tiny SPLADE model from
+# the Hub (network): exporting, loading pre-exported models, provider and ov_config handling, output parity
+# with PyTorch, and the subfolder/file name arguments passed to the optimum loader. Skipped at module level
+# when optimum backends are not installed or when running in CI.
 """
 Test different backends (PyTorch, ONNX, OpenVINO) for the Transformer class with transformer_task="fill-mask" and SparseEncoder.
 
@@ -45,6 +50,10 @@ if is_ci():
     "model_kwargs", [{}, {"file_name": "wrong_file_name"}]
 )  # <- Using a file_name is fine when exporting
 def test_backend_export(backend, expected_auto_model_class, model_kwargs) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over backend and an optional (ignored when exporting) file name. Loads the model with export,
+    # asserts the backend and the optimum auto model class, and that a single encoding has the embedding
+    # dimension as its shape.
     model = SparseEncoder("sparse-encoder-testing/splade-bert-tiny-nq", backend=backend, model_kwargs=model_kwargs)
     assert model.get_backend() == backend
     assert isinstance(model[0].auto_model, expected_auto_model_class)
@@ -54,6 +63,9 @@ def test_backend_export(backend, expected_auto_model_class, model_kwargs) -> Non
 
 
 def test_backend_no_export_crash():
+    # [FUNCTION DOC]
+    # Loads with export disabled from a repo lacking exported files: expects OSError for ONNX on optimum before
+    # 1.25.0 and for OpenVINO on optimum-intel before 1.19.0; otherwise asserts the auto model class.
     # Prior to optimum v1.25.0, ONNX Crashes when it can't export & the model repo/path doesn't contain an exported model
     # Since then, it auto-updates export to True
     with pytest.raises(OSError) if parse(optimum_version) < Version("1.25.0") else nullcontext():
@@ -90,6 +102,9 @@ def test_backend_no_export_crash():
     ],
 )
 def test_backend_load(backend, model_id, model_kwargs, exception) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over backend/pre-exported repo and model kwargs; when a wrong file name is given without export
+    # expects OSError or RuntimeError, otherwise asserts the backend and that encoding returns a non-empty result.
     if exception:
         with pytest.raises((OSError, RuntimeError)):
             SparseEncoder(model_id, backend=backend, model_kwargs=model_kwargs)
@@ -101,6 +116,8 @@ def test_backend_load(backend, model_id, model_kwargs, exception) -> None:
 
 
 def test_onnx_provider_crash() -> None:
+    # [FUNCTION DOC]
+    # Asserts an invalid ONNX execution provider raises ValueError.
     with pytest.raises(ValueError):
         SparseEncoder(
             "sparse-encoder-testing/splade-bert-tiny-nq-onnx",
@@ -110,6 +127,9 @@ def test_onnx_provider_crash() -> None:
 
 
 def test_openvino_provider() -> None:
+    # [FUNCTION DOC]
+    # Asserts an ov_config dict is merged with the default latency performance hint, then writes an ov_config JSON
+    # file to a temp directory and asserts loading from that path gives the file's precision hint plus latency.
     model = SparseEncoder(
         "sparse-encoder-testing/splade-bert-tiny-nq-openvino",
         backend="openvino",
@@ -137,11 +157,17 @@ def test_openvino_provider() -> None:
 
 
 def test_incorrect_backend() -> None:
+    # [FUNCTION DOC]
+    # Asserts an unknown backend name raises ValueError.
     with pytest.raises(ValueError):
         SparseEncoder("sparse-encoder-testing/splade-bert-tiny-nq", backend="incorrect_backend")
 
 
 def test_openvino_backend() -> None:
+    # [FUNCTION DOC]
+    # Asserts OpenVINO and PyTorch encodings agree within 1e-5; then writes an ov_config file setting two streams
+    # and asserts the OpenVINO inference request reports NUM_STREAMS 2; then saves that model to the temp
+    # directory, reloads it locally and asserts its output matches the earlier OpenVINO output. Frees the model.
     model_id = "sparse-encoder-testing/splade-bert-tiny-nq"
     # Test that OpenVINO output is close to PyTorch output
     pytorch_model = SparseEncoder(model_id)
@@ -181,10 +207,20 @@ def test_openvino_backend() -> None:
 
 
 def test_export_false_subfolder() -> None:
+    # [FUNCTION DOC]
+    # Wraps the optimum OpenVINO class loader to assert export is false, subfolder is "openvino" and the file name
+    # is "openvino_model.xml", then loads the pre-exported model with export disabled.
+    # KNOWN ISSUE: The class-level loader is replaced globally and never restored, so the wrapper (and its
+    # assertions) leaks into every later test in the process and stacks on repeated runs.
     model_id = "sparse-encoder-testing/splade-bert-tiny-nq-openvino"
 
     def from_pretrained_decorator(method):
+        # [FUNCTION DOC]
+        # HELPER: Returns a wrapper around the given method that performs the assertions on keyword arguments and
+        # then delegates.
         def decorator(*args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Asserts export is falsy, subfolder and file name are as expected, then calls the original method.
             assert not kwargs["export"]
             assert kwargs["subfolder"] == "openvino"
             assert kwargs["file_name"] == "openvino_model.xml"
@@ -197,10 +233,18 @@ def test_export_false_subfolder() -> None:
 
 
 def test_export_set_nested_filename() -> None:
+    # [FUNCTION DOC]
+    # Same as the previous test but passes a nested file name "openvino/openvino_model.xml" and asserts it is split
+    # into subfolder "openvino" and file name "openvino_model.xml".
+    # KNOWN ISSUE: Also replaces the class-level loader globally without restoring it.
     model_id = "sparse-encoder-testing/splade-bert-tiny-nq-openvino"
 
     def from_pretrained_decorator(method):
+        # [FUNCTION DOC]
+        # HELPER: Returns a wrapper asserting subfolder and file name before delegating.
         def decorator(*args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Asserts subfolder and file name, then calls the original method.
             assert kwargs["subfolder"] == "openvino"
             assert kwargs["file_name"] == "openvino_model.xml"
             return method(*args, **kwargs)

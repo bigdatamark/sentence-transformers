@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train a transformer (default distilroberta-base, or first CLI arg) with GISTEmbedLoss on 10k AllNLI
+# triplets, using all-MiniLM-L6-v2 as the guide model that filters in-batch false negatives. Batch 128, 1 epoch, fp16,
+# NO_DUPLICATES. Evaluates on STSb validation before/during training and STSb test afterwards; saves to
+# output/training_nli_v3_<model>-<timestamp>/final and tries a Hub push of "<model>-nli-v3".
+# The max_seq_length and num_epochs variables are defined but never applied. Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: the docstring says evaluation happens every 10% of training steps, but eval_steps and save_steps are 10 (absolute steps).
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with GISTEmbedLoss, using sentence-transformers/all-MiniLM-L6-v2 as an efficient guiding model. Entailments are positive pairs and the contradiction

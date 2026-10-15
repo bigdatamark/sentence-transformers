@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pytest tests for SentenceTransformerTrainer internals: pushing checkpoints to the Hub (with Hub API calls mocked),
+# reloading checkpoints that contain user-defined module classes, and accumulation of per-component loss values. Skips
+# the module if the training extra is not installed. Uses the root conftest's static embedding fixtures and pytest
+# temporary directories.
 from __future__ import annotations
 
 import contextlib
@@ -29,6 +34,11 @@ if not is_training_available():
 
 @contextlib.contextmanager
 def _patch_hfapi(method: str, **kwargs):
+    # [FUNCTION DOC]
+    # HELPER: Context manager that mocks a Hugging Face Hub API method by name. Older transformers imported such
+    # functions into its trainer module, newer ones call the HfApi class method at call time; it patches the trainer
+    # module attribute if present, else the HfApi class attribute, forwarding extra keyword arguments (e.g. return
+    # value) to the mock. Yields the mock and restores the original on exit.
     # Older transformers imported create_repo/upload_folder into the trainer module.
     # Newer transformers resolves HfApi.<method> at call time via hf_api(), so patch
     # whichever the installed version actually uses.
@@ -40,6 +50,15 @@ def _patch_hfapi(method: str, **kwargs):
 
 
 def test_push_from_checkpoint_copies_full_layout(static_embedding_model: SentenceTransformer, tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Creates a trainer with push to Hub enabled, a dummy hub model id and the "every_save" strategy (repository
+    # creation mocked). Saves the model into a "checkpoint-437" folder, then adds dummy training-state files
+    # (optimizer, scheduler, scaler, trainer state, RNG state), a DeepSpeed "global_step123" directory, and a
+    # sharded-weights index with two shard files. Calls the private push-from-checkpoint method with the upload
+    # mocked, the process marked as rank zero and the callback handler mocked. Asserts the Sentence Transformers
+    # layout files (modules list, ST config, README, tokenizer) were copied into the output directory, none of the
+    # training-state files or the DeepSpeed directory were, and the upload was called with the output directory as
+    # folder path.
     output_dir = tmp_path / "out"
     checkpoint_folder = output_dir / "checkpoint-437"
     checkpoint_folder.mkdir(parents=True)
@@ -100,6 +119,10 @@ def test_push_from_checkpoint_copies_full_layout(static_embedding_model: Sentenc
 def test_push_from_checkpoint_skips_when_end_strategy(
     static_embedding_model: SentenceTransformer, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Same setup with the "end" hub strategy and a "checkpoint-1" folder; asserts the private push-from-checkpoint
+    # method neither uploads nor copies the modules list into the output directory (pushing happens only at training
+    # end).
     output_dir = tmp_path / "out"
     checkpoint_folder = output_dir / "checkpoint-1"
     checkpoint_folder.mkdir(parents=True)
@@ -131,6 +154,9 @@ def test_push_from_checkpoint_skips_when_end_strategy(
 
 
 class CustomNormalize(Normalize):
+    # [CLASS DOC]
+    # HELPER: Trivial subclass of the Normalize module defined in the tests namespace, standing in for a user's custom
+    # module class whose import path is outside the library (and would normally require trust remote code).
     """A module class outside the ``sentence_transformers.*`` namespace, like a user's own custom module."""
 
 
@@ -138,6 +164,15 @@ class CustomNormalize(Normalize):
 def test_load_from_checkpoint_reloads_custom_module_classes(
     static_embedding: StaticEmbedding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, behind_router: bool
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrised on whether the custom module sits behind a Router (query and document routes both using it). Builds
+    # a model from the static embedding plus the custom module (or router), with widget examples disabled, and asserts
+    # trust remote code is off. Creates a trainer (with a router mapping of the text column to query when routed),
+    # saves a checkpoint, and confirms the saved module type (from the modules list, or from the router config's last
+    # route type) is not in the library namespace. Zeroes the first non-empty model parameter in place, then
+    # monkeypatches the SentenceTransformer constructor to record its keyword arguments, calls the private
+    # load-from-checkpoint method, and asserts the parameter is restored to its original values and the reload was
+    # done with trust remote code still False.
     """Since v6.0, a module class outside Sentence Transformers requires ``trust_remote_code=True``, which a
     programmatically built model never carries. The trainer must still be able to reload its own checkpoint:
     otherwise ``load_best_model_at_end`` quietly keeps the final weights instead of the best ones, and
@@ -175,6 +210,9 @@ def test_load_from_checkpoint_reloads_custom_module_classes(
     original_init = SentenceTransformer.__init__
 
     def recording_init(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Recording replacement for the SentenceTransformer constructor: merges the keyword arguments into the
+        # captured dict and calls the original constructor.
         reload_kwargs.update(kwargs)
         original_init(self, *args, **kwargs)
 
@@ -186,6 +224,11 @@ def test_load_from_checkpoint_reloads_custom_module_classes(
 
 
 def test_track_loss_components_detaches_the_accumulated_values() -> None:
+    # [FUNCTION DOC]
+    # Calls the trainer's loss-component tracking method (as an unbound function) twice on a fake trainer namespace
+    # (NaN/Inf filter off, training mode, empty train/eval accumulators, global step 0) with a graph-carrying tensor
+    # of value 6. Asserts the accumulated "base_loss" value under "train" is detached (no gradient function, not
+    # requiring grad) and equals 12.
     """The component dict values carry the autograd graph and, for the Cached* losses, the
     gradient caches held by their backward hook. Accumulating them undetached would pin
     every step's caches until the next logging flush (multi-GB at default logging_steps)."""

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Script: export sentence-transformers/parallel-sentences-tatoeba to gzip TSV files
+# parallel-sentences/Tatoeba-eng-<iso3>-<split>.tsv.gz for targets deu, ara, tur, spa, ita, fra and splits train/dev.
+# Filenames use ISO-639-2 codes, mapped via iso3_to_iso2 to the dataset's "en-xx" config names. Writes stripped
+# "english<TAB>non_english" lines, dropping pairs with an empty side; skips existing files and unloadable
+# subsets/splits (printing a message). Prints counts and "---DONE---". Side effects: network, disk, stdout.
 """
 Tatoeba (https://tatoeba.org/) is a collection of sentences and translations, mainly aiming for
 language learning. It is available for more than 300 languages.

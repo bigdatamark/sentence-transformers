@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Listwise KL-divergence distillation loss for MultiVectorEncoder: the student's late-interaction scores
+# over each query's candidate documents are softmaxed and matched to the teacher's softmaxed scores.
 from __future__ import annotations
 
 import math
@@ -18,6 +21,12 @@ from sentence_transformers.util import (
 
 
 class MultiVectorDistillKLDivLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module. Attributes: the model; a listwise scoring function (default ColBERT KD scoring taking
+    # queries batch by tokens by dim and stacked documents batch by N by tokens by dim plus masks, returning
+    # batch by N); a shared temperature and resolved student and teacher temperatures; optional mini-batch size
+    # for document forwards; a KL divergence loss (batch-mean reduction, log-space targets); and a one-time flag
+    # for checking teacher score scale. Needs per-sample media counts for slicing vision inputs.
     """KL-divergence distillation loss for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` models.
 
     For each query, the dataset provides ``N`` candidate documents (a positive plus at least one negative)
@@ -113,6 +122,10 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         teacher_temperature: float | None = None,
         mini_batch_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store settings; student and teacher temperatures fall back to the shared temperature. Raises ValueError if
+        # any of the three temperatures is not a positive finite number. Creates the KL loss and clears the
+        # teacher-scale-checked flag.
         super().__init__()
         self.model = model
         self.similarity_fct = similarity_fct if similarity_fct is not None else colbert_kd_scores
@@ -128,6 +141,9 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         self._checked_teacher_scale = False
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the loss config: scoring function name, temperature, the student/teacher temperatures only when
+        # they differ from the shared one, and the mini-batch size.
         config: dict[str, Any] = {
             "similarity_fct": similarity_fct_name(self.similarity_fct),
             "temperature": self.temperature,
@@ -144,6 +160,15 @@ class MultiVectorDistillKLDivLoss(nn.Module):
         sentence_features: Iterable[dict[str, Tensor]],
         labels: Tensor,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss. Raises ValueError for fewer than three feature dicts (need at least two candidates).
+        # Runs the model on the query features (task from the features, default "query") to get token embeddings and
+        # a boolean scoring mask. Raises ValueError unless labels have shape batch by number of candidate columns.
+        # Embeds candidate columns (default task "document", optional mini-batching) and stacks them into a padded
+        # batch by N by tokens tensor with matching mask. Scores, then computes log-softmax of scores over student
+        # temperature and of detached labels over teacher temperature. On the first call only, runs a teacher
+        # target sanity check (may warn about degenerate/underflowing teacher distributions) and sets the flag.
+        # Returns KL(teacher || student) with batch-mean reduction multiplied by the student temperature squared.
         sentence_features = list(sentence_features)
         if len(sentence_features) < 3:
             raise ValueError(
@@ -191,6 +216,8 @@ class MultiVectorDistillKLDivLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for ColBERTv2 (Santhanam et al. 2022).
         return """
 @inproceedings{santhanam-etal-2022-colbertv2,
     title = "ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction",

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Model card support for MultiVectorEncoder: a training callback alias and a dataclass that fills in
+# multi-vector-specific metadata and the usage code snippet for the generated README.
 from __future__ import annotations
 
 import logging
@@ -17,11 +20,20 @@ logger = logging.getLogger(__name__)
 
 
 class MultiVectorEncoderModelCardCallback(BaseModelCardCallback):
+    # [CLASS DOC]
+    # Model card training callback; identical to the base callback (which records training info into the model
+    # card data), existing only as a dedicated type.
     pass
 
 
 @dataclass
 class MultiVectorEncoderModelCardData(BaseModelCardData):
+    # [CLASS DOC]
+    # Dataclass of model card data extending BaseModelCardData. Fields: task name (defaulted at registration),
+    # tags (sentence-transformers, multi-vector, colbert, late-interaction), non-init usage examples and the
+    # recorded query/document embedding shapes from running the snippet, pipeline tag, template path (the
+    # model_card_template.md next to this module), model type "Multi-Vector Encoder", and the registered model.
+    # Class-level snippet settings name the model class and a placeholder model id.
     """A dataclass storing data used in the model card for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` models.
 
     Args:
@@ -74,6 +86,10 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
     model: MultiVectorEncoder | None = field(default=None, init=False, repr=False)
 
     def register_model(self, model: MultiVectorEncoder) -> None:
+        # [FUNCTION DOC]
+        # Register the model with the base class, then default the task name to "semantic search with late
+        # interaction", the pipeline tag to "feature-extraction", and mark the model as an IR model if unset.
+        # Mutates the dataclass.
         super().register_model(model)
 
         if self.task_name is None:
@@ -86,6 +102,11 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
             self.ir_model = True
 
     def get_model_specific_metadata(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the base model-specific metadata updated with the embedding dimension and a human-readable
+        # similarity name (MaxSim, MeanMaxSim, XTR, otherwise underscores to spaces in title case). If the first
+        # Transformer module has a "fixed" query expansion strategy, the query length entry is overridden by the
+        # expansion length. Requires a registered model.
         metadata = super().get_model_specific_metadata()
         # Humanize like the dense and sparse cards. The generic .title() fallback would render
         # "Maxsim" / "Xtr".
@@ -109,6 +130,13 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
         return metadata
 
     def run_usage_snippet(self) -> None:
+        # [FUNCTION DOC]
+        # Actually run the usage example to capture outputs. Defaults usage examples to four planet sentences if
+        # none are set. If widget generation is disabled, returns early. Otherwise keeps at most four examples,
+        # prepares each for inference, splits into one query and the rest as documents (or uses the same single
+        # example for both), encodes queries and documents (model forward passes), records the first query and
+        # document embedding shapes, computes the similarity matrix, and stores it as comment-prefixed text lines
+        # formatted to four decimals. Mutates the dataclass.
         if self.usage_examples is None:
             self.usage_examples = [
                 "Which planet is known as the Red Planet?",
@@ -140,6 +168,13 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
             self.similarities = "\n".join(f"# {line}" for line in str(similarity.cpu()).splitlines())
 
     def generate_usage_snippet(self) -> str:
+        # [FUNCTION DOC]
+        # Build the markdown usage snippet: a fenced Python code block that imports the model class, loads the
+        # model id (or placeholder), defines the first example as the query list and the rest as documents (same
+        # example for both if only one), encodes both, prints the recorded shapes (or symbolic shapes with the
+        # output dimension), computes similarity, and prints either the recorded similarity text or the expected
+        # matrix shape. Uses display examples when present, else usage examples, else the planet defaults.
+        # Returns the snippet string.
         # MV encode() returns variable-length per-token lists (no stacked `.shape`), and late
         # interaction is always retrieval, so the snippet splits positionally into queries /
         # documents, matching how the base sources IR usage examples (query from the first dataset
@@ -192,4 +227,6 @@ class MultiVectorEncoderModelCardData(BaseModelCardData):
         return "```python\n" + "\n".join(lines) + "\n```"
 
     def get_default_model_name(self) -> str:
+        # [FUNCTION DOC]
+        # Return the default model name, which is the model type string.
         return self.model_type

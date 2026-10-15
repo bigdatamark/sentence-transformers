@@ -1,3 +1,6 @@
+# [MODULE DOC] Translation evaluator: given aligned source and target sentence lists (target i is the translation of
+# source i), checks how often each sentence's nearest neighbor by cosine similarity in the other language is
+# its own translation, in both directions. Optionally appends results to a CSV.
 from __future__ import annotations
 
 import csv
@@ -20,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 
 class TranslationEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator state: source_sentences and target_sentences (equal length), name, batch_size, show_progress_bar,
+    # print_wrong_matches, truncate_dim, write_csv, CSV file name and headers. Primary metric is "mean_accuracy".
+    # KNOWN ISSUE: The docstring says labels must indicate similarity, but the evaluator takes no labels; alignment by index is the only supervision.
     """
     Given two sets of sentences in different languages, e.g. (en_1, en_2, en_3...) and (fr_1, fr_2, fr_3, ...),
     and assuming that fr_i is the translation of en_i.
@@ -80,6 +86,8 @@ class TranslationEvaluator(BaseEvaluator):
         write_csv: bool = True,
         truncate_dim: int | None = None,
     ):
+        # [FUNCTION DOC] Store inputs, assert equal lengths (AssertionError otherwise), build CSV file name ("_name" suffix if set)
+        # and headers, and set the primary metric.
         super().__init__()
         self.source_sentences = source_sentences
         self.target_sentences = target_sentences
@@ -102,6 +110,12 @@ class TranslationEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Log a header, embed both lists as tensors and stack them, compute the full cosine similarity matrix. Source
+        # to target accuracy: fraction of rows whose argmax column equals the row index; when print_wrong_matches is
+        # on, prints (stdout) each wrong match with the predicted and true target scores and the top five targets.
+        # Target to source accuracy: same on the transposed matrix. Logs both, optionally writes/appends a CSV row,
+        # and returns name-prefixed src2trg_accuracy, trg2src_accuracy and mean_accuracy (their average) after storing
+        # them in model card data.
         if epoch != -1:
             if steps == -1:
                 out_txt = f" after epoch {epoch}"
@@ -176,6 +190,7 @@ class TranslationEvaluator(BaseEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> list[Tensor]:
+        # [FUNCTION DOC] HELPER: Encode inputs as a list of tensors (not numpy) with the batch size, progress bar and truncation settings.
         return model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -186,6 +201,7 @@ class TranslationEvaluator(BaseEvaluator):
         )
 
     def get_config_dict(self):
+        # [FUNCTION DOC] Return a config dict containing truncate_dim when set.
         config_dict = {}
         if self.truncate_dim is not None:
             config_dict["truncate_dim"] = self.truncate_dim

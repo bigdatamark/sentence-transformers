@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Sparse CoSENT loss: a pairwise ranking loss over similarity scores of sparse embedding pairs,
+# reusing the dense CoSENTLoss computation. Must be wrapped in SpladeLoss or CSRLoss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -10,7 +13,17 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseCoSENTLoss(CoSENTLoss):
+    # [CLASS DOC]
+    # CoSENTLoss subclass for SparseEncoder models. The wrapper loss calls the inherited
+    # compute_loss_from_embeddings with (anchor, other) embeddings and float labels; the loss is the log
+    # of one plus the sum of exponentiated scaled score differences over all pairs where one pair's
+    # label exceeds another's.
     def __init__(self, model: SparseEncoder, scale: float = 20.0, similarity_fct=util.pairwise_cos_sim) -> None:
+        # [FUNCTION DOC]
+        # Sets the model's similarity_fn_name to "cosine" (mutating the model) and initializes the parent
+        # with the model, scale (default 20) and the pairwise similarity function (default pairwise cosine).
+        # KNOWN ISSUE: similarity_fn_name is forced to "cosine" even when a different similarity_fct (such as
+        # the angle similarity in SparseAnglELoss) is used.
         """
         This class implements CoSENT (Cosine Sentence).
         It expects that each of the inputs consists of a pair of inputs (e.g., texts) and a float valued label,
@@ -73,4 +86,6 @@ class SparseCoSENTLoss(CoSENTLoss):
         super().__init__(model, scale=scale, similarity_fct=similarity_fct)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError("SparseCoSENTLoss should not be used alone. Use it with SpladeLoss or CSRLoss.")

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Trainer for dense SentenceTransformer models, a thin specialization of the shared BaseTrainer
+# (itself built on the Hugging Face Trainer). It plugs in the SentenceTransformer-specific model
+# class, model card data and callback, data collator and training arguments, and picks CoSENTLoss
+# as the default loss.
 from __future__ import annotations
 
 import logging
@@ -34,6 +39,11 @@ logger = logging.getLogger(__name__)
 
 
 class SentenceTransformerTrainer(BaseTrainer):
+    # [CLASS DOC]
+    # Trainer for SentenceTransformer models. Class attributes select the model class, model card
+    # data/callback classes, data collator class and training arguments class that the BaseTrainer
+    # uses to build defaults and validate inputs. All training, evaluation, loss routing, prompts and
+    # router mapping are handled by BaseTrainer.
     """
     SentenceTransformerTrainer is a simple but feature-complete training and eval loop for PyTorch
     based on the 🤗 Transformers :class:`~transformers.Trainer`.
@@ -140,6 +150,11 @@ class SentenceTransformerTrainer(BaseTrainer):
         optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None = None,
         preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Forwards every argument (model, args, datasets, loss or loss factories, evaluator(s), collator,
+        # processing class, model_init, metrics, callbacks, optimizers, optimizer class and kwargs,
+        # logits preprocessing) to BaseTrainer and narrows the type hints of model, args and
+        # data_collator. The deprecated keyword tokenizer is accepted as processing_class.
         super().__init__(
             model=model,
             args=args,
@@ -161,6 +176,9 @@ class SentenceTransformerTrainer(BaseTrainer):
         self.data_collator: SentenceTransformerDataCollator
 
     def get_default_loss(self, model: SentenceTransformer) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Returns a CoSENTLoss for the given model when no loss was passed, logging at info level which
+        # loss is used. Imports the loss lazily.
         from sentence_transformers.sentence_transformer.losses import CoSENTLoss
 
         loss = CoSENTLoss(model)

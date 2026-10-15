@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Embedding quantization and approximate/exact semantic search over (possibly quantized) corpora
+# using the optional faiss and usearch libraries (imported lazily inside the functions).
+# Quantization maps float embeddings to float32, int8/uint8 (per-dimension 256-bucket scalar
+# quantization from min/max ranges) or binary/ubinary (sign bits packed into bytes). The search
+# functions optionally oversample with quantized vectors and rescore using the original float
+# queries. Results are lists (one per query) of dicts with "corpus_id" and "score". Logs warnings.
 from __future__ import annotations
 
 import logging
@@ -28,6 +35,27 @@ def semantic_search_faiss(
     exact: bool = True,
     output_index: bool = False,
 ) -> tuple[list[list[dict[str, int | float]]], float, faiss.Index]:
+    # [FUNCTION DOC]
+    # Semantic search with faiss.
+    # Inputs: query embeddings; exactly one of corpus embeddings or a prebuilt faiss index; corpus
+    # precision ("float32", "uint8", "ubinary"); top_k; optional ranges / calibration embeddings for
+    # uint8 quantization of the queries; rescore flag and multiplier; exact flag; output_index flag.
+    # Raises ValueError if both or neither corpus source is given, or the precision is unsupported.
+    # If no index is given, builds one: float32/uint8 use an exact inner-product flat index or a
+    # 32-neighbour HNSW index (exact false); ubinary uses a binary flat or binary HNSW index with
+    # dimension in bits (bytes times 8); then adds the corpus.
+    # If the queries are not int8/uint8: when rescore is on and precision is not float32, keeps the
+    # float queries for rescoring and multiplies k by rescore_multiplier (rescore with a float32
+    # corpus only logs a warning); then quantizes the queries to the corpus precision. If the queries
+    # are already quantized and rescore is on, logs a warning.
+    # Searches k neighbours (timed). When rescoring, reconstructs each hit's stored vector (zero
+    # placeholder for -1 padding), unpacks bits for ubinary, casts to integers, computes the dot
+    # product with the float query, forces padding slots to negative infinity, keeps the top_k by
+    # rescored score and reorders indices/scores accordingly.
+    # Returns (results, elapsed seconds) or (results, elapsed seconds, index) if output_index; padding
+    # hits with id -1 are dropped from the results.
+    # KNOWN ISSUE: with exact false and float32/uint8 precision the HNSW flat index uses faiss's default L2 metric, not inner product, so scores are distances (lower is better) and inconsistent with the exact inner-product path.
+    # KNOWN ISSUE: without rescoring, binary indexes return Hamming distances (lower is better) yet they are reported as "score" in ascending order.
     """
     Performs semantic search using the FAISS library.
 
@@ -212,6 +240,20 @@ def semantic_search_usearch(
     exact: bool = True,
     output_index: bool = False,
 ) -> tuple[list[list[dict[str, int | float]]], float, usearch.index.Index]:
+    # [FUNCTION DOC]
+    # Semantic search with usearch; same contract as the faiss variant.
+    # Precisions: "float32" (cosine metric, f32), "int8" (inner product, i8), "binary" (Hamming, i8)
+    # and "ubinary" (Hamming, b1 with dimension in bits). Validation errors as in the faiss version.
+    # If no index is given, builds one and adds the corpus with keys 0..n-1.
+    # Quantizes non-int queries to the corpus precision; enables rescoring (k times multiplier) only
+    # when rescore is on and the index's scalar kind is not f32, otherwise warns. Warns if queries are
+    # already quantized while rescore is on.
+    # Searches with the exact flag, takes distances and keys, promoting 1-D results to 2-D. When
+    # rescoring, fetches the stored vectors by key, unpacks bits for binary precisions, casts to int,
+    # computes dot products with the float queries, keeps top_k by rescored score.
+    # Returns (results, elapsed seconds) or with the index appended if output_index.
+    # KNOWN ISSUE: without rescoring the reported "score" is a usearch distance (lower is better, e.g. cosine distance or Hamming), not a similarity, contrary to how the faiss inner-product path behaves.
+    # KNOWN ISSUE: unlike the faiss variant, missing or padded results (fewer than k hits) are not filtered or handled during rescoring.
     """
     Performs semantic search using the usearch library.
 
@@ -393,6 +435,23 @@ def quantize_embeddings(
     ranges: np.ndarray | None = None,
     calibration_embeddings: np.ndarray | None = None,
 ) -> np.ndarray | list[np.ndarray]:
+    # [FUNCTION DOC]
+    # Quantizes embeddings to the requested precision.
+    # Inputs: a tensor, numpy array, or list of tensors/arrays; precision ("float32", "int8", "uint8",
+    # "binary", "ubinary"); optional ranges (2 x dim array of per-dimension min and max); optional
+    # calibration embeddings used to compute ranges.
+    # Tensors are moved to CPU numpy. An empty list returns an empty list. A list of 2-D matrices
+    # (multi-vector, possibly ragged) is quantized matrix by matrix, recursively; for int8/uint8 with
+    # no ranges or calibration, all matrices concatenated serve as calibration so buckets are shared.
+    # Other lists are stacked into an array.
+    # Raises a generic Exception if the input is already int8/uint8, and ValueError for unknown
+    # precisions. A (0, dim) matrix yields an empty array of the right width and dtype (dim for int
+    # precisions, ceil(dim/8) bytes for binary ones).
+    # float32: cast. int8/uint8: ranges from argument, else min/max of calibration embeddings, else of
+    # the embeddings themselves (warning if fewer than 100 rows); step is (max - min) / 255, with zero
+    # steps replaced by 1; value is floor((x - min) / step) clipped to 0..255, returned as uint8, or
+    # minus 128 as int8. ubinary: positive-sign bits packed along the last axis into uint8 (rows kept);
+    # binary: the same packed bytes minus 128 as int8.
     """
     Quantizes embeddings to a lower precision. This can be used to reduce the memory footprint and increase the
     speed of similarity search. The supported precisions are "float32", "int8", "uint8", "binary", and "ubinary".

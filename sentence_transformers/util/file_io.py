@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# File resolution and download helpers for models stored locally or on the Hugging Face Hub.
+# Functions first look in the local filesystem, then fall back to the Hub (via hf_hub_download /
+# snapshot_download, tagged with library name "sentence-transformers"). Only unambiguous
+# "not found" Hub errors become a None result; other errors (auth, rate-limit, network) propagate.
+# Also provides a silent tqdm subclass and a streaming HTTP download helper. Logs at debug level.
 from __future__ import annotations
 
 import logging
@@ -12,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class disabled_tqdm(tqdm):
+    # [CLASS DOC]
+    # HELPER: tqdm subclass whose progress bar is always disabled, used to silence snapshot downloads.
     """
     Class to override `disable` argument in case progress bars are globally disabled.
 
@@ -19,10 +27,15 @@ class disabled_tqdm(tqdm):
     """
 
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Forces the "disable" keyword to True and forwards everything to tqdm's constructor.
         kwargs["disable"] = True
         super().__init__(*args, **kwargs)
 
     def __delattr__(self, attr: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Deletes an attribute, ignoring the AttributeError raised for a missing "_lock"
+        # attribute (a known huggingface_hub interaction); other AttributeErrors are re-raised.
         """Fix for https://github.com/huggingface/huggingface_hub/issues/1603"""
         try:
             super().__delattr__(attr)
@@ -38,6 +51,10 @@ def is_sentence_transformer_model(
     revision: str | None = None,
     local_files_only: bool = False,
 ) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the model (local dir or Hub repo id) contains a "modules.json" file, as resolved
+    # by load_file_path with the given token, cache folder, revision and local-only flag; False if not.
+    # Non-"not found" Hub errors propagate. May download the file (network, cache writes).
     """
     Checks if the given model name or path corresponds to a SentenceTransformer model.
 
@@ -79,6 +96,16 @@ def load_file_path(
     revision: str | None = None,
     local_files_only: bool = False,
 ) -> str | None:
+    # [FUNCTION DOC]
+    # Resolves a single file of a model to a local path.
+    # Inputs: model name/path, filename (string or Path), optional subfolder, token, cache folder,
+    # revision, local_files_only.
+    # 1) If model_name_or_path/subfolder/filename exists locally, returns that path as a string.
+    # 2) If model_name_or_path is an existing local directory (but lacks the file), returns None.
+    # 3) Otherwise downloads from the Hub, splitting subfolder+filename into the final file name and
+    # its parent directory (posix) as the Hub subfolder, and returns the cached path.
+    # EntryNotFoundError, HFValidationError and LocalEntryNotFoundError are logged at debug and give
+    # None; all other exceptions propagate. Side effects: network, cache directory writes.
     """
     Loads a file from a local or remote location.
 
@@ -138,6 +165,16 @@ def load_dir_path(
     revision: str | None = None,
     local_files_only: bool = False,
 ) -> str | None:
+    # [FUNCTION DOC]
+    # Resolves a model subfolder to a local directory path.
+    # Converts a Path subfolder to a posix string. Returns the local path if model/subfolder exists;
+    # returns None if the model path is a local directory without it. Otherwise snapshot-downloads the
+    # repo restricted to files under the subfolder (no pattern restriction for "" or "."), with a
+    # silent progress bar. HFValidationError / LocalEntryNotFoundError are logged at debug and give
+    # None. Any other error triggers one retry with local_files_only enabled; if that retry finds
+    # nothing in the cache, the original error is re-raised (cache-miss suppressed from the traceback).
+    # Returns the snapshot path joined with the subfolder as a string.
+    # KNOWN ISSUE: if the repo exists on the Hub but has no such subfolder, the snapshot download succeeds and the function returns a path that does not exist, rather than None as the docstring suggests.
     """
     Loads the subfolder path for a given model name or path.
 
@@ -203,6 +240,13 @@ def load_dir_path(
 
 
 def http_get(url: str, path: str) -> None:
+    # [FUNCTION DOC]
+    # Downloads url to the local file path with a byte progress bar.
+    # Raises ImportError if httpx is not installed. Creates the parent directory if path has one.
+    # Streams a GET request (following redirects), raising httpx's status error for non-success codes.
+    # Uses Content-Length as progress total when present. Writes 1024-byte chunks to "<path>_part",
+    # then atomically replaces path with it. On any error the partial file is removed and the error
+    # re-raised. The progress bar is always closed. Returns None. Side effects: network, file writes.
     """Download a URL to a local file with a progress bar.
 
     The content is streamed in chunks and first written to a temporary

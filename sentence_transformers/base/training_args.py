@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Base training arguments shared by all Sentence Transformers trainers (sentence transformer, sparse, cross,
+# multi-vector encoders). Extends Hugging Face TrainingArguments with prompts, batch sampler choices, router
+# mapping, per-parameter learning rates and cross-version warmup handling, plus sanity defaults and warnings.
 from __future__ import annotations
 
 import json
@@ -24,6 +28,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BaseTrainingArguments(TransformersTrainingArguments):
+    # [CLASS DOC]
+    # Dataclass of training arguments. Added fields: prompts (None, a string, a column-to-prompt mapping, a
+    # dataset-to-prompt mapping, or dataset-to-column-to-prompt mapping), batch sampler (enum, enum name
+    # string, sampler class, or factory callable; default plain batch sampler), multi-dataset batch sampler
+    # (likewise; default proportional), router mapping (column-to-route or dataset-to-column-to-route; default
+    # empty), learning-rate mapping (parameter-name regex to learning rate; default empty), and warmup ratio
+    # (default None on transformers v5+, 0.0 before). A class-level list names fields that may arrive as JSON
+    # strings from the command line.
     r"""
     BaseTrainingArguments extends :class:`~transformers.TrainingArguments` with additional arguments
     specific to Sentence Transformers. See :class:`~transformers.TrainingArguments` for the complete list of
@@ -123,6 +135,18 @@ class BaseTrainingArguments(TransformersTrainingArguments):
     )
 
     def __post_init__(self):
+        # [FUNCTION DOC]
+        # Normalize and validate after construction. Warmup: on transformers v5+, if a warmup ratio is set and warmup
+        # steps is 0, moves the ratio into warmup steps, clears the ratio and logs a deprecation warning; on older
+        # versions, a float warmup steps strictly between 0 and 1 with ratio 0 is moved into the ratio and steps reset
+        # to 0. Then runs the parent post-init. Converts sampler strings to their enums (invalid names raise
+        # ValueError). A string prompts value is parsed as JSON if possible, else kept as one prompt. Learning-rate
+        # and router mappings: None becomes an empty dict, strings are parsed as JSON and invalid JSON raises
+        # ValueError. Forces prediction-loss-only on and buffer broadcasting under DDP off. In multi-GPU
+        # DataParallel mode logs a recommendation to use DDP; in DDP mode without drop-last, logs a warning and
+        # forces drop-last on. Logs a warning when using dataloader workers that are spawned without persistent
+        # workers. All warnings are suppressed when the output directory is the sentinel "unused" (used for
+        # defaults comparison), except that drop-last is still forced.
         # Handle compatibility for warmup arguments across different transformers versions. Transformers v5+ only
         # supports warmup_steps (which can be an int or a float ratio) and removes warmup_ratio, while older versions
         # only support warmup_ratio and warmup_steps as an int number of steps. The logic here ensures that users can
@@ -234,6 +258,9 @@ class BaseTrainingArguments(TransformersTrainingArguments):
 
     @staticmethod
     def _workers_are_spawned() -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Return whether multiprocessing workers would start with the "spawn" method. Uses the configured
+        # start method without locking it, or the platform default (first entry of available methods) if unset.
         """Whether dataloader workers start via ``spawn`` rather than ``fork``/``forkserver``.
 
         Only ``spawn`` pays the import cost per worker. A ``forkserver`` worker is forked from a server
@@ -249,6 +276,9 @@ class BaseTrainingArguments(TransformersTrainingArguments):
         return start_method == "spawn"
 
     def to_dict(self):
+        # [FUNCTION DOC]
+        # Serialize to a dict via the parent, removing the batch sampler and multi-dataset batch sampler entries
+        # when they are callables (not serializable). Returns the dict.
         training_args_dict = super().to_dict()
         if callable(training_args_dict["batch_sampler"]):
             del training_args_dict["batch_sampler"]

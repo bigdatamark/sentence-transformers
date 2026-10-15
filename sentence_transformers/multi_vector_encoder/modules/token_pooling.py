@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Token pooling for multi-vector encoders: strategies that reduce how many token embeddings each document
+# keeps (to cut index storage). A pooling can sit at the end of a model pipeline, be passed per encode call,
+# or be applied standalone to already computed embeddings; applying it more than once pools repeatedly.
+# Provides padding/unpadding helpers, an abstract base, a Ward hierarchical clustering pooling, and a pooling
+# wrapping a user callable.
 """Token pooling for multi-vector encoders.
 
 Reduce each document's per-token embedding count to lower storage cost. Three ways to apply:
@@ -29,6 +35,11 @@ from sentence_transformers.base.modules.module import Module
 
 
 def _unbind_padded(embeddings: Tensor, attention_mask: Tensor | None, padding_side: str) -> list[Tensor]:
+    # [FUNCTION DOC]
+    # HELPER: Split a padded batch by sequence by dim tensor into a list of per-sample 2D tensors. With a mask,
+    # keeps the rows where the mask is true. Without a mask, raises ValueError unless the padding side is "left"
+    # or "right"; detects rows with any non-zero value and trims trailing all-zero rows (right padding) or
+    # leading ones (left padding), keeping interior zero rows; a sample with no non-zero row becomes empty.
     """Split a padded ``(B, T, D)`` tensor into a list of ``(t_i, D)`` per-sample tensors.
 
     Pass ``attention_mask`` for the general case. Without a mask, falls back to zero-row detection
@@ -54,6 +65,9 @@ def _unbind_padded(embeddings: Tensor, attention_mask: Tensor | None, padding_si
 
 
 def _pad_to_3d(embeddings: list[Tensor], padding_side: str) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Pad a non-empty list of per-sample 2D tensors with zeros into a batch by max length by dim tensor,
+    # on the right, or on the left (by reversing each sample, right padding, and reversing the sequence axis).
     """Pad a list of ``(t_i, D)`` tensors back into a ``(B, max_t, D)`` tensor.
 
     Callers guarantee a non-empty list.
@@ -67,6 +81,10 @@ def _pad_to_3d(embeddings: list[Tensor], padding_side: str) -> Tensor:
 
 
 class BaseTokenPooling(Module, ABC):
+    # [CLASS DOC]
+    # Abstract pooling module. Config attribute: the list of tasks it applies to (single string becomes a
+    # one-item list, default only "document"; a missing task counts as "document"). Accepts the task as a
+    # forward keyword. Subclasses implement per-sample pooling of a tokens by dim tensor and declare config keys.
     """Abstract base for token pooling strategies. Subclasses implement :meth:`pool_one` (per-sample
     pooling) and set ``config_keys`` for save/load. See the module docstring for the three ways to
     apply a pooling (pipeline module, per-call ``token_pooling=`` kwarg, standalone :meth:`pool`).
@@ -83,16 +101,25 @@ class BaseTokenPooling(Module, ABC):
     forward_kwargs: set[str] = {"task"}
 
     def __init__(self, *, tasks: str | list[str] | None = None) -> None:
+        # [FUNCTION DOC]
+        # Initialize the base module and normalize the task list.
         super().__init__()
         if isinstance(tasks, str):
             tasks = [tasks]
         self.tasks: list[str] = list(tasks) if tasks is not None else ["document"]
 
     def applies_to(self, task: str | None) -> bool:
+        # [FUNCTION DOC]
+        # Return whether the pooling applies to the given task (None treated as "document").
         """Whether this pooling applies to inputs encoded for ``task`` (``None`` counts as ``"document"``)."""
         return (task or "document") in self.tasks
 
     def forward(self, features: dict[str, Tensor], task: str | None = None) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Pipeline forward. Returns features unchanged if the task does not apply or the batch is empty. Otherwise
+        # pools each sample's masked token embeddings, right-pads the results into a new 3D tensor on the original
+        # device, builds a boolean mask from the pooled lengths, and overwrites the token embeddings and attention
+        # mask in the features dict (mutation). Returns the dict.
         if not self.applies_to(task):
             return features
         token_embeddings = features["token_embeddings"]
@@ -120,6 +147,8 @@ class BaseTokenPooling(Module, ABC):
         attention_mask: Tensor | None = ...,
         padding_side: str = ...,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload (no body): a list of 2D tensors in, a list out.
 
     @overload
     def pool(
@@ -130,6 +159,8 @@ class BaseTokenPooling(Module, ABC):
         attention_mask: Tensor | None = ...,
         padding_side: str = ...,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload (no body): a 3D padded tensor in, a 3D padded tensor out.
 
     def pool(
         self,
@@ -139,6 +170,12 @@ class BaseTokenPooling(Module, ABC):
         attention_mask: Tensor | None = None,
         padding_side: str = "right",
     ) -> list[Tensor] | Tensor:
+        # [FUNCTION DOC]
+        # Standalone pooling. Returns the input unchanged if the task does not apply. For a tensor input: raises
+        # ValueError if not 3D or padding side invalid; an empty batch returns an empty 0 by 0 by dim tensor; else
+        # unpads (by mask or zero-row detection), pools each sample and re-pads on the given side. For a list input:
+        # an empty list returns empty; raises ValueError if entries are not 2D; else returns the list of pooled
+        # samples. Any other input type raises ValueError.
         """Apply the pool strategy to a list of 2D or a 3D padded tensor.
 
         Args:
@@ -181,13 +218,25 @@ class BaseTokenPooling(Module, ABC):
 
     @abstractmethod
     def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
+        # [FUNCTION DOC]
+        # Abstract: pool one tokens by dim tensor into a smaller outputs by dim tensor.
         """Pool a single ``(num_tokens, D)`` tensor into a ``(num_out, D)`` tensor."""
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Save only the module config (no weights) into the output directory.
         self.save_config(output_path)
 
 
 def _hierarchical_pool_one(embedding: Tensor, pool_factor: int, num_protected_tokens: int) -> Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Ward hierarchical pooling of one 2D embedding. Moves to CPU, splits off the leading protected
+    # tokens, and targets max(remaining count integer-divided by pool factor, 1) clusters; if that is not fewer
+    # than the remaining tokens, returns the input unchanged on its device. Otherwise computes cosine distance
+    # (one minus dot product, clipped to the range 0..2, assuming unit-norm vectors) on detached float32 copies,
+    # runs Ward linkage on the condensed upper-triangle distances (scipy) and cuts into at most the target number
+    # of clusters. Re-indexes cluster labels densely, averages the original (gradient-carrying) vectors per
+    # cluster, and returns the protected tokens followed by the cluster means, moved back to the original device.
     """Ward hierarchical clustering on cosine distance for a single 2D embedding."""
     from scipy.cluster import hierarchy
 
@@ -221,6 +270,10 @@ def _hierarchical_pool_one(embedding: Tensor, pool_factor: int, num_protected_to
 
 
 class HierarchicalTokenPooling(BaseTokenPooling):
+    # [CLASS DOC]
+    # Pooling via Ward hierarchical clustering. Config: pool factor (keep about one over it of tokens; 1
+    # disables), number of leading protected tokens (default 1, e.g. CLS), and tasks. Assumes L2-normalized
+    # embeddings.
     """Ward-linkage hierarchical clustering on cosine similarity. Keeps the first
     ``num_protected_tokens`` untouched (typically the ``[CLS]``), clusters the rest into
     ``num_tokens // pool_factor`` groups, and replaces each cluster with its mean.
@@ -249,6 +302,9 @@ class HierarchicalTokenPooling(BaseTokenPooling):
     def __init__(
         self, pool_factor: int = 1, *, num_protected_tokens: int = 1, tasks: str | list[str] | None = None
     ) -> None:
+        # [FUNCTION DOC]
+        # Initialize the task list via the base, then validate and store settings. Raises ValueError if the pool
+        # factor is below 1 or the protected token count is negative.
         super().__init__(tasks=tasks)
         if pool_factor < 1:
             raise ValueError(f"pool_factor must be >= 1, got {pool_factor}.")
@@ -258,16 +314,22 @@ class HierarchicalTokenPooling(BaseTokenPooling):
         self.num_protected_tokens = num_protected_tokens
 
     def forward(self, features: dict[str, Tensor], task: str | None = None) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Return features unchanged when the pool factor is 1 or less (disabled); otherwise use the base forward.
         # No-op fast path for the default disabled setting so an included-but-off module has no cost.
         if self.pool_factor <= 1:
             return features
         return super().forward(features, task=task)
 
     def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
+        # [FUNCTION DOC]
+        # Pool one sample with the hierarchical helper using the configured factor and protected count.
         return _hierarchical_pool_one(embedding, self.pool_factor, self.num_protected_tokens)
 
 
 class LambdaTokenPooling(BaseTokenPooling):
+    # [CLASS DOC]
+    # Pooling that applies a user-provided callable to each sample's tokens by dim tensor. Not serializable.
     """User-supplied pool function applied per-sample.
 
     Cannot be baked into a saved checkpoint (a Python callable isn't serializable), and will not
@@ -291,13 +353,19 @@ class LambdaTokenPooling(BaseTokenPooling):
     """
 
     def __init__(self, pool_fn: Callable[[Tensor], Tensor], *, tasks: str | list[str] | None = None) -> None:
+        # [FUNCTION DOC]
+        # Initialize tasks via the base and store the user callable.
         super().__init__(tasks=tasks)
         self.pool_fn = pool_fn
 
     def pool_one(self, embedding: Tensor, **kwargs) -> Tensor:
+        # [FUNCTION DOC]
+        # Return the user callable's result for one sample.
         return self.pool_fn(embedding)
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Always raises NotImplementedError, because a user callable cannot be saved.
         raise NotImplementedError(
             "LambdaTokenPooling wraps a user-supplied Python callable and cannot be saved. Use "
             "it standalone or per-call to encode(token_pooling=...). For a saveable pipeline module, "

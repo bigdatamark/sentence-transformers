@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Defines the Dense module: a linear projection followed by an activation, optionally with a residual connection,
+# reading one tensor from the feature dict and writing the result back under a configurable key. Supports saving the
+# config and weights and loading them back, importing the activation function from its saved dotted path (only torch
+# activations unless remote code is trusted). Logs via logging.
 from __future__ import annotations
 
 import inspect
@@ -19,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 class Dense(Module):
+    # [CLASS DOC]
+    # Feed-forward projection module. Attributes: in_features, out_features, bias (bool flag), activation_function
+    # (callable; Identity when None was given), linear (the linear layer), module_input_name / module_output_name (feature
+    # keys to read and write; output defaults to the input key), use_residual, and residual (a bias-free linear layer, only
+    # when use_residual is set and the dimensions differ). config_keys lists the saved settings; use_residual is omitted
+    # from the saved config when it has its default value so older releases can load new saves.
     """Applies a linear transformation with an optional activation function.
 
     Passes the embedding through a feed-forward layer (``nn.Linear`` + activation), useful for
@@ -67,6 +78,10 @@ class Dense(Module):
         module_output_name: str | None = None,
         use_residual: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Stores the settings, creates the linear layer (and the residual projection if needed), and replaces the weight and,
+        # when bias is enabled, the bias with the given initial tensors wrapped as parameters (an initial bias is ignored when
+        # bias is disabled).
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -86,6 +101,10 @@ class Dense(Module):
             self.linear.bias = nn.Parameter(init_bias)
 
     def forward(self, features: dict[str, Tensor]):
+        # [FUNCTION DOC]
+        # Reads the input tensor, applies the linear layer then the activation; if use_residual, adds the input (or its
+        # residual projection when the dimensions differ). Writes the result under the output key, mutating and returning the
+        # feature dict. Raises KeyError if the input key is missing.
         x = features[self.module_input_name]
         out = self.activation_function(self.linear(x))
         if self.use_residual:
@@ -95,9 +114,14 @@ class Dense(Module):
         return features
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns out_features.
         return self.out_features
 
     def get_config_dict(self):
+        # [FUNCTION DOC]
+        # Returns the base config dict with the activation function replaced by its fully-qualified class name and keys at
+        # their default values (use_residual False) removed.
         config = super().get_config_dict()
         config["activation_function"] = fullname(self.activation_function)
         for key, default in self._DEFAULT_CONFIG_VALUES.items():
@@ -106,6 +130,8 @@ class Dense(Module):
         return config
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Writes the config file and the weights (safetensors by default) into output_path.
         self.save_config(output_path)
         self.save_torch_weights(output_path, safe_serialization=safe_serialization)
 
@@ -122,6 +148,12 @@ class Dense(Module):
         init_defaults: dict[str, Any] | None = None,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads a Dense module from a local path or Hub repo subfolder. Reads the config; if it names an
+        # activation function, instantiates it from its dotted path when remote code is trusted or the path starts with
+        # "torch.", otherwise logs a warning and drops it (falling back to the default Tanh). Config keys that are not
+        # constructor parameters are dropped with a warning. init_defaults fill keys missing from the config. Constructs the
+        # module and loads its weights. Returns the module.
         hub_kwargs = {
             "subfolder": subfolder,
             "token": token,

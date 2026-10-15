@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pytest test module for the Sentence Transformers Transformer module with the "sequence-classification" transformers task, run across many tiny Hub model architectures (whole tree is skipped in CI by the shared conftest). This is CrossEncoder's default task, producing one score per input. Adds luke to a sequence-classification xfail list. Builds the base model key list from transformers' model mapping (or config mapping on ImportError). Tests are grouped in one class parametrised per architecture via class-scoped fixtures, and use subtests to cover every supported input modality/format.
 """
 Test suite for Transformer module with sequence-classification task.
 Tests various tiny model architectures that support sequence classification,
@@ -51,6 +53,8 @@ XFAIL_SEQUENCE_CLASSIFICATION = [
 
 
 def _get_seq_cls_archs() -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the architecture keys to test: those with a tiny model id, not in the general xfail list or the sequence-classification xfail list, not in the transformers-v4 xfail list unless transformers is v5 or newer, not faulty, present in transformers' sequence classification mapping, and present in the base model key list.
     """Get architectures that support sequence-classification."""
     return [
         key
@@ -67,18 +71,24 @@ def _get_seq_cls_archs() -> list[str]:
 
 @pytest.fixture(params=_get_seq_cls_archs(), scope="class")
 def arch(request):
+    # [FUNCTION DOC]
+    # HELPER: Class-scoped parametrised fixture; each parameter is one architecture key from the selection above. Returns the key.
     """Get the model architecture name for sequence-classification task."""
     return request.param
 
 
 @pytest.fixture(scope="class")
 def arch_model(arch):
+    # [FUNCTION DOC]
+    # HELPER: Class-scoped fixture loading the tiny Transformer module for the current architecture with the sequence-classification task via the shared loader. Returns a tuple of architecture key and module (shared, and mutable, across all tests of the class for that architecture).
     model = load_transformer(arch, transformer_task="sequence-classification")
     return arch, model
 
 
 @pytest.fixture
 def arch_model_modalities(arch_model):
+    # [FUNCTION DOC]
+    # HELPER: Function fixture returning a tuple of architecture key, module and the module's supported-modalities list. If reading the modalities raises, the test fails with the error message.
     """Create a Transformer instance and return it with its supported modalities."""
     try:
         arch, model = arch_model
@@ -89,9 +99,13 @@ def arch_model_modalities(arch_model):
 
 
 class TestSequenceClassificationArchitectures:
+    # [CLASS DOC]
+    # Test class run once per selected architecture (via the class-scoped fixtures) covering embedding dimension, save/load round trip, output name, and forward passes on all supported modality samples and pairs. No state of its own.
     """Test suite for Transformer module with sequence-classification task."""
 
     def test_get_embedding_dimension(self, arch_model):
+        # [FUNCTION DOC]
+        # Asserts the module's embedding dimension is a positive integer.
         """Test that embedding dimension can be retrieved."""
         arch, model = arch_model
         dim = model.get_embedding_dimension()
@@ -99,6 +113,8 @@ class TestSequenceClassificationArchitectures:
         assert dim > 0
 
     def test_save_load(self, arch_model, tmp_path):
+        # [FUNCTION DOC]
+        # Saves the module into a fresh "model" subdirectory of pytest's temporary path, reloads it as a Transformer from that path, and asserts the embedding dimension is unchanged. Writes to disk.
         """Test saving and loading the model."""
         arch, model = arch_model
         save_path = tmp_path / "model"
@@ -108,11 +124,15 @@ class TestSequenceClassificationArchitectures:
         assert loaded_model.get_embedding_dimension() == model.get_embedding_dimension()
 
     def test_module_output_name(self, arch_model):
+        # [FUNCTION DOC]
+        # Asserts the module's output name is "scores" for the sequence-classification task.
         """Test that the module output name is 'scores' for sequence-classification."""
         arch, model = arch_model
         assert model.module_output_name == "scores"
 
     def test_inference_with_supported_modalities(self, arch_model_modalities, subtests):
+        # [FUNCTION DOC]
+        # Runs preprocessing and a no-grad forward pass for every sample set produced by the shared sample builder (n of 2, using the module's message format). If the architecture requires CUDA it skips when CUDA is unavailable, else moves the module to the GPU (and later the features). For each, inside a subtest, it chooses the expected outcome: any exception if the architecture's forward is expected to fail for all modalities or for this description; ValueError, TypeError or AttributeError for image+video samples of image-video-failing architectures or image-only samples of image-only-failing architectures; ValueError for combined descriptions when the output is sentence embeddings without a multimodal-success exception, or for known multimodal failures; otherwise no exception. Within the expected context it preprocesses (skipping the subtest for older-transformers errors about image URLs/paths not being flattenable or missing image height), runs forward, and asserts the output contains the module output name with batch size equal to the number of inputs, and that the last dimension is 1.
         """Test inference with each supported modality (single and multi-modal)."""
         arch, model, modalities = arch_model_modalities
         if arch in REQUIRES_CUDA:
@@ -179,6 +199,9 @@ class TestSequenceClassificationArchitectures:
                     assert output_tensor.shape[-1] == 1, f"Output dimension mismatch for {modality_desc}"
 
     def test_inference_with_supported_modality_pairs(self, arch_model_modalities, subtests):
+        # [FUNCTION DOC]
+        # Runs preprocessing and forward on pair inputs. If the architecture requires CUDA it skips when CUDA is unavailable, else moves the module to the GPU (and later the features). If the module supports messages, first patches its chat template to accept query/document roles. Builds pair samples with n of 2 and, per pair description in a subtest, expects any exception only if the architecture's forward fails for all modalities. Preprocesses, runs forward without gradients, and asserts the output name is present, batch size equals the number of pairs, and the last dimension is 1.
+        # KNOWN ISSUE: Mutations here (moving to CUDA, patching the chat template) are applied to the class-scoped shared module and leak into later tests for the same architecture.
         """Test inference with pair inputs for each supported modality combination."""
         arch, model, modalities = arch_model_modalities
         if arch in REQUIRES_CUDA:

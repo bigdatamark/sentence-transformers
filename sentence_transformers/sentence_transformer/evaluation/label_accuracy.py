@@ -1,3 +1,5 @@
+# [MODULE DOC] Label accuracy evaluator: measures classification accuracy of a softmax classification head (such as the
+# SoftmaxLoss module) on a labeled data loader. Optionally appends results to a CSV.
 from __future__ import annotations
 
 import csv
@@ -18,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class LabelAccuracyEvaluator(BaseEvaluator):
+    # [CLASS DOC] Evaluator holding a DataLoader of labeled examples, a name, the softmax model (a module returning
+    # (representations, logits) when called with features and labels None), write_csv flag, CSV file name and
+    # headers. Primary metric is "accuracy".
     """
     Evaluate a model based on its accuracy on a labeled dataset
 
@@ -27,6 +32,8 @@ class LabelAccuracyEvaluator(BaseEvaluator):
     """
 
     def __init__(self, dataloader: DataLoader, name: str = "", softmax_model=None, write_csv: bool = True):
+        # [FUNCTION DOC] Store the data loader, name, softmax model and CSV settings; the CSV file name includes "_name" if a name is
+        # given; set primary_metric to "accuracy".
         """
         Constructs an evaluator for the given dataset
 
@@ -49,6 +56,12 @@ class LabelAccuracyEvaluator(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Put the model in eval mode, log a header, set the data loader's collate function to the model's legacy
+        # smart batching collate, then for each batch move every feature dict and the labels to the model device,
+        # run the softmax model without gradients and count predictions whose argmax equals the label. Accuracy is
+        # correct divided by total (ZeroDivisionError on an empty loader). Logs it, optionally writes/appends a CSV
+        # row (epoch, steps, accuracy), prefixes the metric with the name, stores it in the model card data and
+        # returns the dict. Side effects: mutates the data loader's collate function and the model's train/eval mode.
         model.eval()
         total = 0
         correct = 0

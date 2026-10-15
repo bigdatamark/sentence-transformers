@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: train distilroberta-base (max length 128) for general paraphrase embeddings with
+# MultipleNegativesRankingLoss on nine Hub datasets at once (AllNLI triplets, sentence-compression, simple-wiki,
+# altlex, quora-duplicates triplets, COCO and Flickr30k captions, yahoo-answers title/question/answer pairs,
+# stackexchange title pairs), passed as a name-keyed dataset dict with ROUND_ROBIN multi-dataset sampling and
+# NO_DUPLICATES batches. Batch 128, 1 epoch, fp16, eval/save every 1000 steps on STSb validation. Prints the dataset
+# dict, then evaluates on STSb test, saves to output/training_paraphrases_<model>-<timestamp>/final and tries a Hub push.
+# Side effects: large downloads, disk, GPU, logging.
 """
 Note: This script was modified with the v3 release of Sentence Transformers.
 As a result, it does not produce exactly the same behaviour as the original script.

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Defines Router, an input module that holds several named routes (each a sequential chain of modules) and sends each
+# batch through one of them, chosen from the task (e.g. "query"/"document") and/or the input modality. Supports
+# explicit (task, modality) route mappings with wildcards, direct lookup by route name, a default route, saving and
+# loading of all sub-modules plus a router config, and aggregate tokenizer / max sequence length / embedding dimension
+# accessors. Also defines the legacy alias Asym. Uses the transformers logger.
 from __future__ import annotations
 
 import json
@@ -27,6 +33,12 @@ logger = logging.get_logger(__name__)
 
 
 class Router(InputModule):
+    # [CLASS DOC]
+    # Routing input module. Class attributes: forward_kwargs ("task" and "modality"), config_keys (default_route,
+    # allow_empty_key, route_mappings) and config_file_name ("router_config.json"). Instance attributes: sub_modules (a
+    # module dict from route name to a Sequential of that route's modules), default_route (route used when nothing else
+    # matches, or None), allow_empty_key, and route_mappings (dict from (task or None, modality or None) to route name,
+    # with tuple modalities stored sorted).
     forward_kwargs = {"task", "modality"}
     config_keys: list[str] = ["default_route", "allow_empty_key", "route_mappings"]
     config_file_name = "router_config.json"
@@ -38,6 +50,11 @@ class Router(InputModule):
         allow_empty_key: bool = True,
         route_mappings: dict[tuple[str | None, str | tuple[str, ...] | None], str] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Builds the router. Raises ValueError if sub_modules is missing or empty, if default_route is given but not a route
+        # name, or if any route mapping targets a missing route. Wraps each route's module list in a Sequential inside a module
+        # dict. If allow_empty_key is set and no default route is given, the first route becomes the default. Stores the
+        # mappings with tuple modalities normalised to sorted tuples so they match inferred multimodal modalities.
         r"""
         This model allows creating flexible SentenceTransformer models that dynamically route inputs to different
         processing modules based on:
@@ -325,6 +342,9 @@ class Router(InputModule):
 
     @property
     def modalities(self) -> list[Modality]:
+        # [FUNCTION DOC]
+        # Property: sorted (by string form) union of the modalities of each route's first module (text if a module declares
+        # none).
         """The union of modalities supported by all sub-module input modules."""
         return sorted(
             {
@@ -336,6 +356,9 @@ class Router(InputModule):
         )
 
     def _get_routes_string(self):
+        # [FUNCTION DOC]
+        # HELPER: returns a human-readable list of available routes for error messages: every route name as a task, plus every
+        # mapping rendered by task, modality or both, joined as "a, b and c" (empty string if none).
         # Build concise but helpful error message
         routes = [f"task={name!r}" for name in self.sub_modules.keys()]
         for task, modality in self.route_mappings.keys():
@@ -354,6 +377,10 @@ class Router(InputModule):
     def _resolve_route_name(
         self, task: str | None = None, modality: str | tuple[str, ...] | None = None
     ) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: resolves a route name from task and modality (tuple modalities sorted first). Priority: exact (task,
+        # modality) mapping, (task, any), (any, modality), (any, any), then a route named like the task, then a route named like
+        # the modality. If nothing matched and a task was given, raises ValueError listing the routes; otherwise returns None.
         """
         Resolve the route key based on task and modality.
 
@@ -399,6 +426,11 @@ class Router(InputModule):
         return None
 
     def _resolve_route(self, task: str | None = None, modality: str | tuple[str, ...] | None = None) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: resolves the route via the name resolution and falls back to default_route. If still unresolved, raises
+        # ValueError: during training asking for a router mapping in the training arguments or a default route, otherwise
+        # naming the task/modality and available routes. Also raises ValueError if the resolved name is not a route. Returns the
+        # route name.
         route = self._resolve_route_name(task=task, modality=modality)
 
         # Fall back to default route if no route was found
@@ -434,6 +466,9 @@ class Router(InputModule):
         default_route: str | None = "document",
         allow_empty_key: bool = True,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method: creates a router with "query" and "document" routes from the given module lists, with default route
+        # "document" unless overridden.
         """
         Creates a Router model specifically for query and document modules, allowing convenient usage via `model.encode_query`
         and `model.encode_document`.
@@ -463,6 +498,10 @@ class Router(InputModule):
         modality: str | tuple[str, ...] | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Takes task and modality from the arguments or else from the "task"/"modality" entries of the features, resolves the
+        # route, adds task and modality to the keyword arguments, and runs the features through each module of the route,
+        # passing each module only the keyword arguments named in its forward_kwargs. Returns the resulting feature dict.
         """Route ``features`` through the resolved sub-module pipeline.
 
         Resolves the route from ``task`` and ``modality`` (falling back to values stored in
@@ -505,11 +544,15 @@ class Router(InputModule):
         return features
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the standard torch module representation (full sub-module tree) instead of the config-based one.
         # Use nn.Module's repr to show the full sub-module structure,
         # rather than Module's repr which only shows config_keys
         return nn.Module.__repr__(self)
 
     def extra_repr(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the extra representation text: the default route and route mappings when set, comma separated.
         parts = []
         if self.default_route is not None:
             parts.append(f"default_route={self.default_route!r}")
@@ -518,6 +561,8 @@ class Router(InputModule):
         return ", ".join(parts)
 
     def on_model_ready(self, model: BaseModel) -> None:
+        # [FUNCTION DOC]
+        # Forwards the model-ready hook to every library Module inside every route.
         # The model only sees the Router in its top-level module list, so forward the hook to the
         # routed modules. Without this, a route's module never resolves its model-dependent state.
         for sub_modules in self.sub_modules.values():
@@ -526,6 +571,10 @@ class Router(InputModule):
                     module.on_model_ready(model)
 
     def get_embedding_dimension(self) -> int | None:
+        # [FUNCTION DOC]
+        # Returns the embedding dimension: for each route, the dimension reported by the last module that provides an
+        # embedding-dimension method (new name or one of the deprecated names); None if no route reports one. If routes
+        # disagree, logs a one-time warning and returns the first route's value.
         dims = []
         for sub_modules in self.sub_modules.values():
             for module in reversed(sub_modules):
@@ -550,6 +599,11 @@ class Router(InputModule):
         return dims[0]
 
     def save(self, output_path: str, safe_serialization: bool = True, **kwargs):
+        # [FUNCTION DOC]
+        # Saves every route module into its own subfolder named "<route>_<index>_<ClassName>" (passing safe_serialization and
+        # kwargs, or no extra arguments if that raises TypeError), then writes router_config.json containing "types"
+        # (subfolder id to fully-qualified class path), "structure" (route name to its subfolder ids in order) and "parameters"
+        # (the config dict, with route mapping tuple keys converted to their string representations).
         model_lookup = {}
         model_types = {}
         model_structure = {}
@@ -596,6 +650,15 @@ class Router(InputModule):
         modality: Modality | None = None,
         **kwargs,
     ):
+        # [FUNCTION DOC]
+        # Preprocesses a batch for the routed input module. Backward compatibility: if task is not given and inputs are dicts
+        # whose keys are not modality names, the single shared key is taken as the task and the inputs are unwrapped (several
+        # different keys raise ValueError). If no modality is given, it is inferred from the batch (failures ignored). Resolves
+        # the route, calls the route's first module's preprocess with the prompt, task and kwargs, and adds "task" (and
+        # "modality" when known) to the returned feature dict so forward can route without re-inference.
+        # KNOWN ISSUE: the backward-compatibility check treats any dict input whose keys are not modality names as a
+        # task-keyed dict, so a batch of plain chat message dicts or audio/video array dicts with no explicit task is
+        # misinterpreted (raising ValueError for multiple keys, e.g. "role" and "content").
         """Resolve the route from ``task`` and ``modality``, then delegate preprocessing to the
         first module of the matched route. The returned dictionary includes ``"task"`` and (if
         available) ``"modality"`` keys so that :meth:`forward` can route without re-inference.
@@ -646,6 +709,13 @@ class Router(InputModule):
         module_classes: Mapping[str, type[nn.Module]] | None = None,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads a router. Reads router_config.json (or the legacy config.json) from the path/subfolder. For
+        # each saved module id, resolves its class from the given module_classes overrides or by importing it (remote code
+        # gated by trust_remote_code), then loads it from its subfolder with the hub options and extra kwargs, falling back to
+        # downloading the subfolder and calling a legacy single-argument load on TypeError. Rebuilds the route structure from
+        # the saved ids, parses the stringified route mapping keys back into tuples (skipping unparsable keys with a warning)
+        # and constructs the router.
         hub_kwargs = {
             "token": token,
             "cache_folder": cache_folder,
@@ -709,6 +779,8 @@ class Router(InputModule):
 
     @property
     def tokenizer(self):
+        # [FUNCTION DOC]
+        # Property: the tokenizer of the first route whose first module has a non-None tokenizer, or None.
         # We might have multiple tokenizers, one for each route, but we can only return one here.
         for sub_modules in self.sub_modules.values():
             input_module: InputModule = sub_modules[0]
@@ -718,6 +790,11 @@ class Router(InputModule):
 
     @property
     def max_seq_length(self) -> int | None:
+        # [FUNCTION DOC]
+        # Property: the distinct non-empty max_seq_length values of the routes' first modules; returns None if none, the value
+        # if all agree, else the maximum with a one-time warning.
+        # KNOWN ISSUE: the first module of a route is indexed before checking that the route is non-empty, so an empty route
+        # raises IndexError instead of being skipped.
         # Collect all unique max_seq_length values
         max_seq_lengths = set()
         for modules in self.sub_modules.values():
@@ -737,6 +814,9 @@ class Router(InputModule):
 
     @max_seq_length.setter
     def max_seq_length(self, value) -> None:
+        # [FUNCTION DOC]
+        # Setter: sets max_seq_length on every route's first module that has the attribute; logs a warning and does nothing if
+        # none has it.
         # Check which modules have max_seq_length
         has_max_seq_length_keys = []
         for key, models in self.sub_modules.items():

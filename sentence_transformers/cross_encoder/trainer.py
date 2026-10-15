@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Trainer for CrossEncoder models, built on the shared BaseTrainer (itself a Hugging Face Trainer subclass
+# handling datasets, samplers, evaluators, model cards and multi-dataset losses). Specializes defaults
+# (loss, collator, model card, args classes) and loss invocation, since CrossEncoder losses receive raw text
+# columns and tokenize internally.
 from __future__ import annotations
 
 import logging
@@ -32,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 
 class CrossEncoderTrainer(BaseTrainer):
+    # [CLASS DOC]
+    # Trainer class. Class attributes select the CrossEncoder model class, its model card data and callback
+    # classes, the CrossEncoder data collator and training-arguments classes used by the base trainer when
+    # building defaults. Iterable (streaming) datasets are not supported.
     """
     CrossEncoderTrainer is a simple but feature-complete training and eval loop for PyTorch
     based on the 🤗 Transformers :class:`~transformers.Trainer`.
@@ -136,6 +145,11 @@ class CrossEncoderTrainer(BaseTrainer):
         optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None = None,
         preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Construct the trainer. The deprecated "tokenizer" keyword is remapped to "processing_class". Raises
+        # ValueError if the train or eval dataset is an IterableDataset, or a dict containing one (the collator
+        # produces string values that the accelerate batch concatenation cannot handle). Otherwise passes every
+        # argument through to BaseTrainer and narrows the declared types of model, args and data collator.
         for dataset_name, dataset in zip(["train", "eval"], [train_dataset, eval_dataset]):
             if isinstance(dataset, IterableDataset) or (
                 isinstance(dataset, dict) and any(isinstance(d, IterableDataset) for d in dataset.values())
@@ -170,6 +184,9 @@ class CrossEncoderTrainer(BaseTrainer):
         self.data_collator: CrossEncoderDataCollator
 
     def get_default_loss(self, model: CrossEncoder) -> torch.nn.Module:
+        # [FUNCTION DOC]
+        # Return the default loss when none is given: binary cross entropy for single-output models, multi-class
+        # cross entropy otherwise. Logs which loss was chosen.
         if model.num_labels == 1:
             loss = BinaryCrossEntropyLoss(model)
         else:
@@ -180,6 +197,9 @@ class CrossEncoderTrainer(BaseTrainer):
     def collect_features(
         self, inputs: dict[str, torch.Tensor | Any]
     ) -> tuple[list[dict[str, torch.Tensor]], torch.Tensor | None]:
+        # [FUNCTION DOC]
+        # HELPER: Split a collated batch into features and labels: removes and returns "label" (None if absent) and
+        # returns the remaining values in insertion order as the list of input columns. Mutates the input dict.
         """Turn the inputs from the dataloader into the separate model inputs & the labels."""
         labels = inputs.pop("label", None)
         features = list(inputs.values())
@@ -192,6 +212,15 @@ class CrossEncoderTrainer(BaseTrainer):
         return_outputs: bool = False,
         num_items_in_batch=None,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Compute the training loss for one batch. Removes dataset name, prompt and task from the batch, splits off
+        # features and labels, and selects the per-dataset loss if the loss is a dict keyed by dataset name. If the
+        # model passed in is the wrapped model and differs from the loss's model, swaps the loss's model reference
+        # to it. Calls the loss with features, labels, prompt and task; if that raises TypeError, retries without
+        # prompt/task and logs a one-time warning. If the loss returns a dict of components, records them for
+        # logging and sums them. Returns the loss, or the loss with an empty outputs dict when requested.
+        # KNOWN ISSUE: Any TypeError raised inside a loss that does accept prompt/task (e.g. a genuine bug) is
+        # swallowed and the loss is re-run without them, hiding the real error behind a misleading warning.
         dataset_name = inputs.pop("dataset_name", None)
         prompt = inputs.pop("prompt", None)
         task = inputs.pop("task", None)

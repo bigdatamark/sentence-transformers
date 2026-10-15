@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Gradient-cached (GradCache) in-batch negatives contrastive loss for MultiVectorEncoder, allowing large
+# batches by embedding in mini-batches without gradients, caching the loss gradients with respect to the
+# token embeddings, and replaying the mini-batches with gradients from a backward hook.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
@@ -29,6 +33,12 @@ from sentence_transformers.util import (
 
 
 class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module. Attributes: model, scale (inverse temperature), contrastive scoring function (default
+    # ColBERT scores, query-major Q by D times N output), embedding mini-batch size, optional token budget per
+    # embedding mini-batch, scoring chunk size (defaults to the mini-batch size), cross-device gathering flag and
+    # progress-bar flag. Class flags request per-sample media counts and announce hook-based back-propagation.
+    # Inputs: (anchor, positive, optional negatives...) feature dicts.
     """A GradCache version of :class:`MultiVectorMultipleNegativesRankingLoss`.
 
     Enables much larger effective batch sizes than the non-cached loss at the cost of being slightly slower:
@@ -143,6 +153,9 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         gather_across_devices: bool = False,
         show_progress_bar: bool = False,
     ) -> None:
+        # [FUNCTION DOC]
+        # Validate and store settings. Raises ValueError (via the shared validator) for an invalid token budget or
+        # if the scale is not strictly positive.
         super().__init__()
         _validate_mini_batch_num_tokens(mini_batch_num_tokens)
         if not scale > 0:
@@ -157,6 +170,9 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         self.show_progress_bar = show_progress_bar
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the loss config: scale, scoring function name, mini-batch size, token budget, scoring chunk size and
+        # gather flag.
         return {
             "scale": self.scale,
             "similarity_fct": similarity_fct_name(self.similarity_fct),
@@ -175,6 +191,11 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         copy_random_state: bool,
         random_state: RandContext | None = None,
     ) -> tuple[Tensor, Tensor, RandContext | None]:
+        # [FUNCTION DOC]
+        # Embed one mini-batch (rows begin to end) of a column. Slices the features with the shared helper (aware of
+        # flattened vision tensors), reads the task stored in the features, and inside the optional replay RNG
+        # context and with or without gradients, optionally snapshots RNG state for the slice's tensors and runs the
+        # model. Returns the token embeddings, the boolean scoring mask from the output, and the RNG snapshot.
         grad_context = nullcontext if with_grad else torch.no_grad
         random_state_context = nullcontext() if random_state is None else random_state
         # Grid-aware slicing: flattened VLM tensors (pixel_values) and FA2 metadata can't be sliced per sample.
@@ -201,6 +222,10 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         random_states: list[RandContext] | None = None,
         ranges: list[tuple[int, int]] | None = None,
     ) -> Iterator[tuple[Tensor, Tensor, RandContext | None]]:
+        # [FUNCTION DOC]
+        # Generator over a column's mini-batches. Computes row ranges (by row count or token budget) unless given,
+        # then yields the embed-minibatch result for each range, passing the matching saved RNG state when replaying.
+        # Shows an optional progress bar.
         if ranges is None:
             ranges = _minibatch_ranges(sentence_feature, self.mini_batch_size, self.mini_batch_num_tokens)
         for i, (begin, end) in enumerate(
@@ -222,6 +247,15 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         *,
         with_backward: bool = False,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss from per-column lists of mini-batch embeddings and masks. Concatenates each column's
+        # chunks (padding the token axis to the column max). First column is queries, the rest documents. If
+        # gathering, all-gathers document embeddings/masks across ranks with gradients. Stacks documents into
+        # D by N by tokens. Target for query i is column i times N (plus rank times batch size times N when
+        # gathering). For each scoring chunk of queries, scores against all documents, takes summed cross entropy of
+        # scaled scores divided by the full batch size; when backward is requested, back-propagates each chunk
+        # immediately and detaches it. Returns the total of the chunk losses.
+        # KNOWN ISSUE: The cross-device target offset assumes all ranks have the same local batch size.
         # Each per-column ``reps[i]`` is a list of mini-batch ``(B_mini, T_mini, D)`` chunks. For
         # native-resolution VLMs (Qwen2-VL family) each mini-batch can emit a different ``T``, so
         # pad each chunk to the column's max ``T`` before concatenating along the batch axis.
@@ -272,6 +306,10 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         reps: list[list[Tensor]],
         masks_chunks: list[list[Tensor]],
     ) -> tuple[Tensor, list[list[Tensor]]]:
+        # [FUNCTION DOC]
+        # Compute the loss with per-chunk backward, then detach it into a fresh leaf requiring grad and collect each
+        # mini-batch embedding's gradient. Raises ValueError naming any column whose embeddings received no gradient.
+        # Returns the loss and the gradient cache (per column, per mini-batch).
         loss = self.calculate_loss(reps, masks_chunks, with_backward=True)
         loss = loss.detach().requires_grad_()
         cache = [[rep.grad for rep in rep_mbs] for rep_mbs in reps]
@@ -292,6 +330,14 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
         sentence_features: Iterable[dict[str, Tensor]],
         labels: Tensor | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss; labels are ignored. Copies each feature dict with a task stamped in (existing task kept,
+        # otherwise "query" for the first column and "document" for others). Precomputes mini-batch ranges per column
+        # before any forward. Embeds every column in mini-batches without gradients, storing detached embeddings that
+        # require grad, masks, and RNG snapshots (only when grad is enabled). Without grad, returns the plain loss.
+        # Otherwise computes the loss and gradient cache, registers the shared backward hook on the loss (which
+        # re-embeds each mini-batch with gradients using the same ranges and RNG states and back-propagates the cached
+        # gradients), and returns the loss.
         # Stamp the task on each column (respecting collator-supplied overrides) so both the first pass
         # here and the second pass in _backward_hook route to the same task, without needing an index.
         sentence_features = [
@@ -350,6 +396,8 @@ class CachedMultiVectorMultipleNegativesRankingLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Gao et al. 2021 (GradCache).
         return """
 @misc{gao2021scaling,
     title={Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup},

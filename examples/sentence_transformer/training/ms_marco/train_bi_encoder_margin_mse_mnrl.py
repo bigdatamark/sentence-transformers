@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Example script: train a distilbert-base-uncased bi-encoder on MS MARCO with a combined MarginMSELoss +
+# MultipleNegativesRankingLoss (dot-product, scale 1) sharing one forward pass. SYSTEMS maps 13 hard-negative mining
+# system names to Hub dataset repos, each with a "triplet-50-ids" subset of integer IDs. Seeds random/torch/numpy with
+# 12 and configures INFO logging at import; running as a script calls main().
 """
 This example shows how to train a bi-encoder on the MS MARCO Passage Ranking dataset
 (https://github.com/microsoft/MSMARCO-Passage-Ranking) with the combined
@@ -70,6 +75,16 @@ SYSTEMS = {
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Builds a dot-product SentenceTransformer (fp32, max length 300).
+    # Loads the msmarco-corpus passages and queries into id->text dicts and MiniLM-L6-v2 CrossEncoder scores into
+    # qid -> (pid -> score). For each mining system and row with a scored query and positive, adds up to 5 new scored
+    # negatives per system to that query's pid -> margin label (positive CE score minus negative CE score) dict.
+    # Keeps queries with at least 10 negatives, builds a Dataset of qid, pid, neg_pids, neg_labels and attaches an
+    # on-the-fly transform. Trains 1 epoch (batch 32, lr 5e-5, 10% warmup, bf16, eval/save every 10%) with the combined
+    # loss, evaluates NanoBEIR before and after under bf16 autocast, saves to models/<run_name>/final, tries a Hub push.
+    # Side effects: heavy network/disk/GPU use, logging.
+    # KNOWN ISSUE: if a query appears in several systems with different positives, the entry keeps the first positive id but later margin labels are computed against the new positive's CE score, mixing inconsistent labels.
     model_name = "distilbert/distilbert-base-uncased"
     train_batch_size = 32  # The MNRL component benefits from larger batches, but also increases memory usage
     max_seq_length = 300
@@ -150,6 +165,10 @@ def main():
     # The transform resolves IDs to text on-the-fly and samples fresh (negative, label) pairs
     # per batch, keeping only the ID/score mapping in memory until a batch is consumed.
     def ids_to_text_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: dataset transform applied per accessed batch. For each row samples 10 (neg_pid, label) pairs without
+        # replacement (random module, so fresh each access), then returns anchor (query text), positive (passage text),
+        # negative_1..negative_10 columns of passage texts and label, a list of 10 margin labels per row.
         sampled = [
             random.sample(list(zip(neg_pids, neg_labels)), num_negatives)
             for neg_pids, neg_labels in zip(batch["neg_pids"], batch["neg_labels"])
@@ -172,7 +191,12 @@ def main():
     # re-introduce magnitude normalization through the back door). We share the forward
     # pass across both losses so peak memory stays the same as a single loss.
     class CombinedMarginMSEMNRLLoss(nn.Module):
+        # [CLASS DOC]
+        # HELPER: torch module combining MarginMSELoss and MultipleNegativesRankingLoss (dot_score, scale 1.0) over shared
+        # embeddings. Attributes: model, margin_mse, mnrl, mnrl_weight.
         def __init__(self, model, mnrl_weight: float = 1.0):
+            # [FUNCTION DOC]
+            # Store the model, construct both component losses bound to it, and store mnrl_weight (default 1.0).
             super().__init__()
             self.model = model
             self.margin_mse = MarginMSELoss(model)
@@ -180,6 +204,10 @@ def main():
             self.mnrl_weight = mnrl_weight
 
         def forward(self, sentence_features, labels):
+            # [FUNCTION DOC]
+            # Input: list of tokenized feature dicts (anchor, positive, negatives) and labels. Encodes each once to
+            # "sentence_embedding" and returns a dict with "margin_mse" (MarginMSE loss on the labels) and "mnrl"
+            # (mnrl_weight times the MNRL loss on the same embeddings); the trainer sums the components and logs each.
             embeddings = [self.model(sf)["sentence_embedding"] for sf in sentence_features]
             # Returning a dict lets the trainer log each component separately while training with the sum
             return {

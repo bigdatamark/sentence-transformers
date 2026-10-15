@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for ParaphraseMiningEvaluator, which mines paraphrase pairs from a set of sentences and scores them against gold pairs.
+# KNOWN ISSUE: The module docstring says it tests BinaryClassificationEvaluator, but the module actually tests ParaphraseMiningEvaluator.
 """
 Tests the correct computation of evaluation scores from BinaryClassificationEvaluator
 """
@@ -13,6 +16,10 @@ from sentence_transformers.sentence_transformer.evaluation import ParaphraseMini
 def test_ParaphraseMiningEvaluator(
     paraphrase_distilroberta_base_v1_model: SentenceTransformer, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Builds four sentences keyed by integer id forming two obvious paraphrase pairs (0,1) and (2,3), runs the evaluator with
+    # those gold pairs, writing output files to tmp_path, and asserts the primary metric is above 0.99.
+    # Inputs: paraphrase_distilroberta_base_v1_model fixture and tmp_path.
     """Tests that the ParaphraseMiningEvaluator can be loaded"""
     model = paraphrase_distilroberta_base_v1_model
     sentences = {

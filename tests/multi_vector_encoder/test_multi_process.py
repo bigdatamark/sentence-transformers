@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests multi-process encoding of a MultiVectorEncoder (passing a list of devices spawns a worker pool) against single-process
+# encoding, on four texts of varying length.
 from __future__ import annotations
 
 import pytest
@@ -15,10 +18,15 @@ TEXTS = [
 
 @pytest.fixture(scope="module")
 def model() -> MultiVectorEncoder:
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture loading a tiny BERT-based MultiVectorEncoder from the Hub on CPU (network on first use).
     return MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors", device="cpu")
 
 
 def test_multi_process_matches_single_process(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Encodes the documents directly and via a two-worker CPU pool; asserts the same number of outputs and that each per-token
+    # embedding tensor matches within 1e-5.
     direct = model.encode_document(TEXTS)
     pooled = model.encode_document(TEXTS, device=["cpu", "cpu"])
     assert len(pooled) == len(direct)
@@ -27,6 +35,10 @@ def test_multi_process_matches_single_process(model: MultiVectorEncoder) -> None
 
 
 def test_multi_process_output_value_none(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Encodes with output_value None (raw output dicts) directly and via a two-worker pool. Asserts equal counts, matching dict keys,
+    # that pooled token embeddings live on CPU, and that token embeddings selected by the attention mask match within 1e-5
+    # (raw outputs are padded per batch, so padding differs between runs).
     direct = model.encode_document(TEXTS, output_value=None)
     pooled = model.encode_document(TEXTS, output_value=None, device=["cpu", "cpu"])
     assert len(pooled) == len(direct)

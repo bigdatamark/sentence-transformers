@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pytest tests for CrossEncoderTrainer: validation of dict losses against train/eval dataset types and keys, model
+# card reuse versus regeneration, short training runs across combinations of streaming, dataset dicts and loss dicts,
+# prompt propagation to the loss, and rejection of per-column prompts and router mappings by the CrossEncoder data
+# collator. Skips the module without the training extra. Uses the tiny reranker fixtures and the STSB dataset fixture;
+# writes to temporary directories.
 from __future__ import annotations
 
 import tempfile
@@ -24,6 +30,11 @@ if not is_training_available():
 
 
 def test_trainer_multi_dataset_errors(reranker_bert_tiny_model: CrossEncoder, stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # With a dict of three BinaryCrossEntropy losses keyed multi_nli, snli and stsb, asserts the trainer constructor
+    # raises ValueError with the specific messages when: the train dataset is a plain Dataset; the train DatasetDict
+    # has a key ("stsb-extra") absent from the loss dict; the eval dataset is a plain Dataset; and the eval
+    # DatasetDict has two keys missing from the loss dict (listed in the message).
     train_dataset = stsb_dataset_dict["train"]
     loss = {
         "multi_nli": BinaryCrossEntropyLoss(model=reranker_bert_tiny_model),
@@ -87,6 +98,10 @@ def test_trainer_multi_dataset_errors(reranker_bert_tiny_model: CrossEncoder, st
 
 
 def test_model_card_reuse(reranker_bert_tiny_model_v54: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts the v5.4 tiny reranker carries its original model card text, that saving it before any trainer exists
+    # writes exactly that text as README.md, and that after constructing a CrossEncoderTrainer for the model, saving
+    # writes a different (regenerated) README.
     model = reranker_bert_tiny_model_v54
     assert model._model_card_text
     # Reuse the model card if no training was done
@@ -122,6 +137,17 @@ def test_trainer(
     eval_dict: bool,
     loss_dict: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrised over streaming, train dict, eval dict and loss dict. Expects ValueError when streaming (iterable
+    # train datasets are unsupported), or when a loss dict is used with a non-dict train dataset, or with a non-dict
+    # eval dataset; otherwise no error. Uses 10 train and 10 validation STSB rows (converted to iterable datasets if
+    # streaming, duplicated under two keys if dicts), trains for 2 steps with evaluation every 2 steps and batch size
+    # 1 in a temporary output directory. When no error is expected, compares predictions of a pre-training deep copy
+    # and the trained model and asserts they differ.
+    # KNOWN ISSUE: The branch expecting the DatasetDict-with-IterableDataset error is unreachable, since streaming is
+    # checked first.
+    # KNOWN ISSUE: The final comparison predicts on a single string rather than a pair, and on two different strings
+    # ("on the mat" versus "on the the mat"), so the inequality can hold even if training changed nothing.
     """
     Some cases are not allowed:
     * streaming=True and train_dict=True: streaming is not supported with DatasetDict, because our DatasetDict
@@ -216,6 +242,13 @@ def test_trainer_prompts(
     eval_dict: bool,
     prompts: dict[str, str] | str | None,
 ):
+    # [FUNCTION DOC]
+    # Parametrised over train dict, eval dict and prompts (none, a single string, or a dict keyed by dataset name).
+    # Builds two tiny train and two tiny eval datasets (sentence1, sentence2, score), uses them singly or as
+    # DatasetDicts, wraps the loss's forward method to record the prompt argument of every call, and trains (4 steps
+    # if train dict else 2, evaluation at the same interval, batch size 1, no reporting). Asserts: no prompts gives
+    # only None; a string prompt gives only that string; dict prompts give both per-dataset prompts somewhere when
+    # either side is a DatasetDict, and only None when neither is.
     """Test that prompts are correctly passed to loss functions during CrossEncoder training."""
     model = reranker_bert_tiny_model
 
@@ -265,6 +298,9 @@ def test_trainer_prompts(
     old_forward = loss.forward
 
     def forward_tracker(inputs, labels, prompt=None, task=None):
+        # [FUNCTION DOC]
+        # HELPER: Replacement loss forward: appends the prompt to the tracking list and delegates to the original
+        # forward with the same inputs, labels, prompt and task, returning its result.
         tracked_prompts.append(prompt)
         return old_forward(inputs, labels, prompt=prompt, task=task)
 
@@ -307,6 +343,9 @@ def test_trainer_prompts(
 
 
 def test_trainer_prompts_per_column_rejected(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts constructing a CrossEncoderDataCollator with nested per-dataset, per-column prompts raises ValueError
+    # saying CrossEncoder prompts cannot be per-column.
     """Test that per-column prompts are rejected for CrossEncoder."""
     with pytest.raises(ValueError, match="CrossEncoder prompts cannot be per-column"):
         CrossEncoderDataCollator(
@@ -316,6 +355,9 @@ def test_trainer_prompts_per_column_rejected(reranker_bert_tiny_model: CrossEnco
 
 
 def test_trainer_router_mapping_per_column_rejected(reranker_bert_tiny_model: CrossEncoder):
+    # [FUNCTION DOC]
+    # Asserts constructing a CrossEncoderDataCollator with a nested per-column router mapping raises ValueError saying
+    # the CrossEncoder router mapping cannot be per-column.
     """Test that per-column router_mapping is rejected for CrossEncoder."""
     with pytest.raises(ValueError, match="CrossEncoder router_mapping cannot be per-column"):
         CrossEncoderDataCollator(

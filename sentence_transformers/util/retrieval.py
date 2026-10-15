@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Embedding-based retrieval utilities on torch tensors: paraphrase mining (top scoring distinct
+# pairs within one set), chunked exact semantic search of queries against a corpus (top-k per
+# query), and fast community detection (threshold-based clustering on cosine similarity).
+# Default scoring is cosine similarity from the similarity module. Chunking bounds memory use.
 from __future__ import annotations
 
 import heapq
@@ -34,6 +39,10 @@ def paraphrase_mining(
     prompt_name: str | None = None,
     prompt: str | None = None,
 ) -> list[list[float | int]]:
+    # [FUNCTION DOC]
+    # Encodes the sentences with the model (as a tensor, honoring batch size, progress bar,
+    # truncate_dim, prompt_name and prompt) and delegates to paraphrase_mining_embeddings with the
+    # chunk sizes, max_pairs, top_k and score function. Returns its list of [score, id1, id2].
     """
     Given a list of sentences / texts, this function performs paraphrase mining. It compares all sentences against all
     other sentences and returns a list with the pairs that have the highest cosine similarity score.
@@ -94,6 +103,17 @@ def paraphrase_mining_embeddings(
     top_k: int = 100,
     score_function: Callable[[Tensor, Tensor], Tensor] = cos_sim,
 ) -> list[list[float | int]]:
+    # [FUNCTION DOC]
+    # Finds the highest-scoring pairs of distinct items in an embedding matrix.
+    # Increments top_k by one (each item matches itself). Iterates over corpus chunks and query chunks,
+    # scores each block with score_function, takes the top min(top_k, block width) per query row, and
+    # for each hit with i != j and score above the running minimum pushes (score, i, j) onto a min
+    # priority queue. Once max_pairs pushes have happened, each further push also pops the lowest
+    # entry and raises the minimum threshold to its score.
+    # Afterwards drains the queue, normalizes each pair to (smaller id, larger id), drops duplicates,
+    # and returns a list of [score, id1, id2] sorted by descending score.
+    # KNOWN ISSUE: the initial minimum score is -1, so with non-cosine score functions, pairs scoring -1 or below are never returned.
+    # KNOWN ISSUE: both (i, j) and (j, i) occupy queue slots before de-duplication, so fewer than max_pairs unique pairs may be returned even when more exist.
     """
     Given a list of sentences / texts, this function performs paraphrase mining. It compares all sentences against all
     other sentences and returns a list with the pairs that have the highest cosine similarity score.
@@ -160,6 +180,8 @@ def paraphrase_mining_embeddings(
 
 
 def information_retrieval(*args, **kwargs) -> list[list[dict[str, int | float]]]:
+    # [FUNCTION DOC]
+    # HELPER: Deprecated alias that forwards all arguments to semantic_search and returns its result.
     """This function is deprecated. Use semantic_search instead"""
     return semantic_search(*args, **kwargs)
 
@@ -172,6 +194,16 @@ def semantic_search(
     top_k: int = 10,
     score_function: Callable[[Tensor, Tensor], Tensor] = cos_sim,
 ) -> list[list[dict[str, int | float]]]:
+    # [FUNCTION DOC]
+    # Exact top-k semantic search.
+    # Inputs: query and corpus embeddings (tensor, numpy array or list of tensors, converted to
+    # tensors; a 1-D query becomes a single row; dense or sparse COO), chunk sizes, top_k, score
+    # function. Queries are moved to the corpus device.
+    # For each query chunk and corpus chunk (sparse tensors sliced via index selection), computes the
+    # score matrix, takes the per-row top min(top_k, chunk width), and merges hits into a size-top_k
+    # min-heap per query keyed by score (pushing until full, then push-pop).
+    # Returns, per query, a list of dicts with "corpus_id" (global corpus index) and "score", sorted by
+    # decreasing score.
     """
     This function performs by default a cosine similarity search between a list of query embeddings  and a list of corpus embeddings.
     It can be used for Information Retrieval / Semantic Search for corpora up to about 1 Million entries.
@@ -262,6 +294,21 @@ def community_detection(
     batch_size: int = 1024,
     show_progress_bar: bool = False,
 ) -> list[list[int]]:
+    # [FUNCTION DOC]
+    # Fast community detection over embeddings.
+    # Inputs: embeddings (tensor or array), similarity threshold, minimum community size, batch size,
+    # progress bar flag. Normalizes embeddings to unit length and processes rows in batches, computing
+    # cosine similarity of each batch against all embeddings.
+    # On CUDA/NPU: keeps rows whose count of scores at or above threshold reaches min size, and for
+    # each such row takes the top "count" indices (sorted by score, so the row itself is first).
+    # Otherwise: for rows whose min_community_size-th best score reaches threshold, takes the top
+    # sort_max_size (initially max(2 * min size, 50), capped at corpus size, doubled while the last
+    # value still meets the threshold; this growth persists across rows) and keeps indices at or
+    # above threshold.
+    # Candidate communities are sorted largest first; then greedily each keeps only indices not yet
+    # claimed and is accepted if still at least min size, marking its members as claimed.
+    # Returns the accepted communities as lists of ints, largest first, first element being the
+    # central point. min_community_size is capped at the number of embeddings.
     """
     Function for Fast Community Detection.
 

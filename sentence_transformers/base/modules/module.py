@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Defines Module, the abstract base class of every module in a model pipeline. A module is a torch module whose forward
+# takes and returns a feature dict. The base class supplies config handling (config keys, deprecated key renames, JSON
+# config save/load), file and directory resolution for local paths or Hub repos (with subfolder support), weight saving
+# and loading (safetensors or legacy PyTorch bin), a post-construction hook, backward-compatible aliases for renamed
+# methods and a config-based representation.
 from __future__ import annotations
 
 import json
@@ -23,6 +29,11 @@ if TYPE_CHECKING:
 
 
 class Module(ABC, torch.nn.Module):
+    # [CLASS DOC]
+    # Abstract pipeline module. Class attributes: config_file_name (default "config.json"), config_keys (attribute names
+    # saved in the config), config_key_renames (old config key to new key, applied on load), save_in_root (False: saved in a
+    # numbered subfolder), forward_kwargs (names of extra keyword arguments the model forwards to this module), and a
+    # private mapping of deprecated method names to their new names. Subclasses implement forward and save.
     """
     Base class for all modules in the Sentence Transformers library.
 
@@ -81,10 +92,14 @@ class Module(ABC, torch.nn.Module):
     """
 
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # Passes all arguments to the parent initialisers.
         super().__init__(*args, **kwargs)
 
     @abstractmethod
     def forward(self, features: dict[str, torch.Tensor | Any], **kwargs) -> dict[str, torch.Tensor | Any]:
+        # [FUNCTION DOC]
+        # Abstract: transforms the feature dict (and optional keyword arguments) and returns the feature dict. No base body.
         """
         Forward pass of the module. This method should be overridden by subclasses to implement the specific behavior of the module.
 
@@ -111,6 +126,8 @@ class Module(ABC, torch.nn.Module):
         """
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a dict mapping each name in config_keys to the instance attribute of that name.
         """
         Returns a dictionary of the configuration parameters of the module.
 
@@ -135,6 +152,9 @@ class Module(ABC, torch.nn.Module):
         init_defaults: dict[str, Any] | None = None,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method: reads the saved config from the model path/subfolder (empty dict if missing), fills keys missing from
+        # it with init_defaults, and constructs the module from the result. Extra keyword arguments are accepted and ignored.
         """
         Load this module from a model checkpoint. The checkpoint can be either a local directory or a model id on Hugging Face.
 
@@ -183,6 +203,10 @@ class Module(ABC, torch.nn.Module):
         revision: str | None = None,
         local_files_only: bool = False,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Class method: resolves the config file (given name or config_file_name) in the model path/subfolder, locally or by
+        # downloading from the Hub. Returns an empty dict if not found. Otherwise parses the JSON and, for every deprecated key
+        # present whose new name is absent, renames it. Returns the config dict.
         """
         Load the configuration of the module from a model checkpoint. The checkpoint can be either a local directory or a model id on Hugging Face.
         The configuration is loaded from a JSON file, which contains the parameters used to initialize the module.
@@ -239,6 +263,9 @@ class Module(ABC, torch.nn.Module):
         revision: str | None = None,
         local_files_only: bool = False,
     ) -> str | None:
+        # [FUNCTION DOC]
+        # Static: delegates to the shared utility that returns the local path of a file in a model directory or Hub repo
+        # (downloading if needed), or None if the file does not exist.
         """
         A utility function to load a file from a model checkpoint. The checkpoint can be either a local directory or a model id on Hugging Face.
         The file is loaded from the specified subfolder within the model directory.
@@ -279,6 +306,9 @@ class Module(ABC, torch.nn.Module):
         revision: str | None = None,
         local_files_only: bool = False,
     ) -> str | None:
+        # [FUNCTION DOC]
+        # Static: delegates to the shared utility that returns the local path of a (sub)directory of a model directory or Hub
+        # repo, downloading it if needed.
         """
         A utility function to load a directory from a model checkpoint. The checkpoint can be either a local directory or a model id on Hugging Face.
 
@@ -318,6 +348,11 @@ class Module(ABC, torch.nn.Module):
         local_files_only: bool = False,
         model: Self | None = None,
     ):
+        # [FUNCTION DOC]
+        # Class method that loads weights from "model.safetensors" if present, else from "pytorch_model.bin" (CPU, weights
+        # only). With a model given, the weights are loaded into it and the model returned; otherwise the state dict is
+        # returned. For safetensors, loading is non-strict but any missing or unexpected keys raise RuntimeError listing them;
+        # for the bin file, a strict state dict load is used. Raises ValueError if neither file exists.
         """
         A utility function to load the PyTorch weights of a model from a checkpoint. The checkpoint can be either a
         local directory or a model id on Hugging Face. The weights are loaded from either a ``model.safetensors``
@@ -387,6 +422,9 @@ class Module(ABC, torch.nn.Module):
         return weights
 
     def on_model_ready(self, model: BaseModel) -> None:
+        # [FUNCTION DOC]
+        # Hook called once the owning model is fully built; the default does nothing. Subclasses override it to resolve
+        # model-dependent state.
         """
         Hook called once the owning model is fully constructed, with every module, the tokenizer or
         processor, and any legacy checkpoint fixups in place. Override it to resolve model-dependent
@@ -404,6 +442,8 @@ class Module(ABC, torch.nn.Module):
 
     @abstractmethod
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Abstract: saves the module into the output directory. No base body.
         """
         Save the module to disk. This method should be overridden by subclasses to implement the specific behavior of the module.
 
@@ -416,6 +456,8 @@ class Module(ABC, torch.nn.Module):
         """
 
     def save_config(self, output_path: str, filename: str | None = None) -> None:
+        # [FUNCTION DOC]
+        # Writes get_config_dict as indented JSON to the given filename (default config_file_name) inside output_path.
         """
         Save the configuration of the module to a JSON file.
 
@@ -433,6 +475,9 @@ class Module(ABC, torch.nn.Module):
             json.dump(config, f, indent=4)
 
     def save_torch_weights(self, output_path: str, safe_serialization: bool = True) -> None:
+        # [FUNCTION DOC]
+        # Writes the module's weights into output_path as "model.safetensors" (safetensors model saving) or, if
+        # safe_serialization is false, the state dict as "pytorch_model.bin".
         """
         Save the PyTorch weights of the module to disk.
 
@@ -455,6 +500,11 @@ class Module(ABC, torch.nn.Module):
     }
 
     def __getattr__(self, name: str):
+        # [FUNCTION DOC]
+        # Attribute fallback for renamed methods: if the requested name is a deprecated alias and the new method is defined on
+        # the class hierarchy, emits a FutureWarning and returns the new bound method; otherwise defers to the torch module
+        # attribute lookup (parameters, buffers, submodules), which raises AttributeError for unknown names. Keeps the check
+        # for the old name false on modules lacking the new method.
         """Provide backward compatibility for renamed methods.
 
         We use ``__getattr__`` instead of defining regular deprecated methods so that
@@ -474,4 +524,6 @@ class Module(ABC, torch.nn.Module):
         return super().__getattr__(name)
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the class name followed by the config dict in parentheses.
         return f"{self.__class__.__name__}({self.get_config_dict()})"

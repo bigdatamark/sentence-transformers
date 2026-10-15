@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests that SpladeLoss's merged forward pass (concatenating like-kind feature columns into one model call)
+# gives the same loss values as embedding each column separately, including document-only regularization
+# and router models that route queries and documents through different modules. Defines fixed query,
+# document and negative sentence lists used as columns.
 """SparseEncoder losses share the merged forward pass of the SentenceTransformer losses.
 
 SpladeLoss embeds all columns itself before handing them to the wrapped loss and the regularizers.
@@ -26,6 +31,10 @@ _NEGATIVES = ["The stock market closed early on Friday.", "She prefers cycling a
 def _columns(
     model: SparseEncoder, columns: Sequence[Sequence[str]], tasks: Sequence[str | None] | None = None
 ) -> list[dict[str, Tensor]]:
+    # [FUNCTION DOC]
+    # HELPER: Preprocesses each column of texts with the model (optionally with a per-column task), moves tensor
+    # values to the model device, adds a "task" key when a task is given, and returns the list of feature dicts.
+    # The tasks argument defaults to None for every column.
     tasks = tasks or [None] * len(columns)
     features = []
     for texts, task in zip(columns, tasks):
@@ -41,6 +50,9 @@ def _columns(
 
 
 def _build_loss(model: SparseEncoder) -> SpladeLoss:
+    # [FUNCTION DOC]
+    # HELPER: Returns a SpladeLoss wrapping SparseMultipleNegativesRankingLoss on the model with document
+    # regularizer weight 3e-5 and query regularizer weight 5e-5.
     return SpladeLoss(
         model=model,
         loss=SparseMultipleNegativesRankingLoss(model=model),
@@ -50,6 +62,10 @@ def _build_loss(model: SparseEncoder) -> SpladeLoss:
 
 
 def test_splade_loss_merged_forward_matches_per_column(splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts the document and negative columns are mergeable, then computes the loss dict without gradients
+    # with merging enabled and again with merging disabled, and asserts the same keys and approximately equal
+    # values per key.
     model = splade_bert_tiny_model
     assert merge_feature_batches(_columns(model, [_QUERIES, _DOCUMENTS, _NEGATIVES])[1:]) is not None
     loss = _build_loss(model)
@@ -65,6 +81,10 @@ def test_splade_loss_merged_forward_matches_per_column(splade_bert_tiny_model: S
 def test_splade_loss_document_only_mode_merges_every_column(
     splade_bert_tiny_model: SparseEncoder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Builds a SpladeLoss with only the document regularizer, asserts the two document columns are mergeable,
+    # monkeypatches the model forward to record batch sizes, computes the loss and asserts exactly one forward of
+    # batch size 4 occurred, then compares against the non-merged loss values per key.
     """With use_document_regularizer_only every column is a document under one regularizer, so
     there is no query column to keep on its own forward and all columns merge."""
     model = splade_bert_tiny_model
@@ -79,6 +99,8 @@ def test_splade_loss_document_only_mode_merges_every_column(
     original_forward = model.forward
 
     def counting_forward(features, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the input_ids batch size into the enclosing list and delegates to the original forward.
         batch_sizes.append(features["input_ids"].shape[0])
         return original_forward(features, **kwargs)
 
@@ -94,6 +116,9 @@ def test_splade_loss_document_only_mode_merges_every_column(
 
 
 def test_router_task_document_columns_still_merge(inference_free_splade_bert_tiny_model: SparseEncoder) -> None:
+    # [FUNCTION DOC]
+    # On an inference-free model with tasks query/document/document, asserts all three columns cannot merge but
+    # the two document columns can, then asserts merged and non-merged loss values match per key.
     """On an inference-free model the query routes through a different module than the documents,
     so the query column could never share their forward. The document columns share the
     ``document`` task and still merge with each other."""

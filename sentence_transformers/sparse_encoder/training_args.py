@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Training arguments for SparseEncoder training.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +9,10 @@ from sentence_transformers.base.training_args import BaseTrainingArguments
 
 @dataclass
 class SparseEncoderTrainingArguments(BaseTrainingArguments):
+    # [CLASS DOC]
+    # Dataclass of training arguments for SparseEncoderTrainer. Adds no fields; all options (prompts,
+    # batch samplers, router_mapping, learning_rate_mapping and the Hugging Face TrainingArguments)
+    # come from BaseTrainingArguments. It exists to give sparse training a distinct type.
     r"""
     SparseEncoderTrainingArguments extends :class:`~sentence_transformers.base.training_args.BaseTrainingArguments`
     with additional arguments specific to Sentence Transformers. See :class:`~transformers.TrainingArguments` for

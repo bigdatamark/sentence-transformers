@@ -1,3 +1,8 @@
+# [PACKAGE DOC] Evaluators for SentenceTransformer models. Re-exports the base evaluator classes (BaseEvaluator,
+# SentenceEvaluator, SequentialEvaluator) and SimilarityFunction so the deprecated top-level evaluation path
+# can still resolve them, plus the binary classification, embedding similarity, information retrieval,
+# label accuracy, MSE, MSE-from-dataframe, NanoBEIR, paraphrase mining, reranking, translation and
+# triplet evaluators.
 from __future__ import annotations
 
 # Re-exported from base so the deprecated path `sentence_transformers.evaluation` (which

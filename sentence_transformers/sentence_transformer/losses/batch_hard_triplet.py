@@ -1,3 +1,7 @@
+# [MODULE DOC] Batch-hard triplet loss and the pairwise distance functions shared by the batch triplet losses. For each
+# anchor in a batch of class-labeled inputs the loss uses the farthest same-label item and the closest
+# different-label item. Also provides static helpers that build valid-triplet and anchor-positive /
+# anchor-negative masks from labels.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -11,15 +15,22 @@ from sentence_transformers.util import pytorch_cos_sim
 
 
 class BatchHardTripletLossDistanceFunction:
+    # [CLASS DOC] HELPER: Namespace of static functions mapping an embedding matrix (batch, dim) to a (batch, batch) distance
+    # matrix: cosine distance and Euclidean distance (with a misspelled backwards-compatible alias).
     """This class defines distance functions, that can be used with Batch[All/Hard/SemiHard]TripletLoss"""
 
     @staticmethod
     def cosine_distance(embeddings: Tensor) -> Tensor:
+        # [FUNCTION DOC] Return one minus the cosine similarity matrix of the embeddings with themselves.
         """Compute the 2D matrix of cosine distances (1-cosine_similarity) between all embeddings."""
         return 1 - pytorch_cos_sim(embeddings, embeddings)
 
     @staticmethod
     def euclidean_distance(embeddings: Tensor, squared=False) -> Tensor:
+        # [FUNCTION DOC] Compute pairwise Euclidean distances from the Gram matrix: squared norm of each row (diagonal of the Gram
+        # matrix) plus the other's squared norm minus twice the dot product; negative values from rounding are set to 0.
+        # Returns squared distances if squared is true; otherwise takes the square root, adding a tiny epsilon where the
+        # distance is exactly 0 before the root and masking those entries back to exactly 0 (avoids infinite gradients).
         """
         Compute the 2D matrix of euclidean distances between all the embeddings.
         Args:
@@ -60,12 +71,16 @@ class BatchHardTripletLossDistanceFunction:
 
 
 class BatchHardTripletLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: sentence_embedder (model), triplet_margin (default 5), distance_metric (function from
+    # embedding matrix to distance matrix; default Euclidean).
+    # KNOWN ISSUE: The docstring points to SiameseDistanceMetric for metrics, but this loss calls the metric with a single embedding matrix; only BatchHardTripletLossDistanceFunction metrics fit.
     def __init__(
         self,
         model: SentenceTransformer,
         distance_metric=BatchHardTripletLossDistanceFunction.euclidean_distance,
         margin: float = 5,
     ) -> None:
+        # [FUNCTION DOC] Store the model, margin and distance metric.
         """
         BatchHardTripletLoss takes a batch with (input, label) pairs and computes the loss for all possible, valid
         triplets, i.e., anchor and positive must have the same label, anchor and negative a different label. It then looks
@@ -148,10 +163,12 @@ class BatchHardTripletLoss(nn.Module):
         self.distance_metric = distance_metric
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor):
+        # [FUNCTION DOC] Embed the first input column into sentence embeddings and compute the loss with the labels.
         rep = self.sentence_embedder(sentence_features[0])["sentence_embedding"]
         return self.compute_loss_from_embeddings([rep], labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute the batch-hard loss from the first embedding tensor and labels.
         return self.batch_hard_triplet_loss(labels, embeddings[0])
 
     # Hard Triplet Loss
@@ -159,6 +176,9 @@ class BatchHardTripletLoss(nn.Module):
     # Paper: In Defense of the Triplet Loss for Person Re-Identification, https://huggingface.co/papers/1703.07737
     # Blog post: https://omoindrot.github.io/triplet-loss
     def batch_hard_triplet_loss(self, labels: Tensor, embeddings: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute pairwise distances. Hardest positive per anchor: max of distances masked to same-label distinct items
+        # (invalid entries 0). Hardest negative: min of distances after adding the row maximum to same-label entries.
+        # Per-anchor loss is hardest positive minus hardest negative plus margin, clamped at 0; returns the mean.
         """Build the triplet loss over a batch of embeddings.
         For each anchor, we get the hardest positive and hardest negative to form a triplet.
         Args:
@@ -200,6 +220,8 @@ class BatchHardTripletLoss(nn.Module):
 
     @staticmethod
     def get_triplet_mask(labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Return a boolean (batch, batch, batch) mask that is true at (i, j, k) when i, j, k are pairwise distinct,
+        # labels i and j are equal, and labels i and k differ.
         """Return a 3D mask where mask[a, p, n] is True iff the triplet (a, p, n) is valid.
         A triplet (i, j, k) is valid if:
             - i, j, k are distinct
@@ -226,6 +248,7 @@ class BatchHardTripletLoss(nn.Module):
 
     @staticmethod
     def get_anchor_positive_triplet_mask(labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Return a boolean (batch, batch) mask true where the two items are distinct and share a label.
         """Return a 2D mask where mask[a, p] is True iff a and p are distinct and have same label.
         Args:
             labels: tf.int32 `Tensor` with shape [batch_size]
@@ -245,6 +268,7 @@ class BatchHardTripletLoss(nn.Module):
 
     @staticmethod
     def get_anchor_negative_triplet_mask(labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Return a boolean (batch, batch) mask true where the two items have different labels.
         """Return a 2D mask where mask[a, n] is True iff a and n have distinct labels.
         Args:
             labels: tf.int32 `Tensor` with shape [batch_size]
@@ -257,6 +281,7 @@ class BatchHardTripletLoss(nn.Module):
         return ~(labels.unsqueeze(0) == labels.unsqueeze(1))
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the distance metric's name and the margin.
         return {
             "distance_metric": getattr(self.distance_metric, "__name__", str(self.distance_metric)),
             "margin": self.triplet_margin,
@@ -264,6 +289,7 @@ class BatchHardTripletLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for "In Defense of the Triplet Loss for Person Re-Identification".
         return """
 @misc{hermans2017defense,
     title={In Defense of the Triplet Loss for Person Re-Identification},

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example script: same as matryoshka_nli.py but appends a Dense layer projecting the pooled embedding down to 256
+# dims (module name "reduced_dim") and trains MatryoshkaLoss (over MultipleNegativesRankingLoss) at dims
+# 256/128/64/32/16 on AllNLI triplets. Batch 128, 1 epoch, fp16, NO_DUPLICATES; per-dim STSb validation evaluators
+# combined in a SequentialEvaluator (main score = first); eval/save every 100 steps. Afterwards per-dim STSb test
+# evaluation, saves to output/matryoshka_nli_reduced_<model>-<timestamp>/final and attempts a Hub push of
+# "<model>-nli-matryoshka-reduced". Side effects: network, disk, INFO logging.
+# KNOWN ISSUE: the docstring says the model is trained at dims [768, 512, 256, 128, 64], but the code uses [256, 128, 64, 32, 16].
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with MatryoshkaLoss using MultipleNegativesRankingLoss. This trains a model at output dimensions [768, 512, 256, 128, 64].

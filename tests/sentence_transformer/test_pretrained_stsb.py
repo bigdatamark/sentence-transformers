@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Regression tests that pretrained SentenceTransformer models downloaded from the Hugging Face Hub (network)
+# reach expected Spearman correlation scores on the STS-Benchmark test split. Defines a scoring helper with a
+# fast variant (first 100 test samples) and a slow variant (whole split, used by the slow-marked tests).
 """
 Tests that the pretrained models produce the correct scores on the STSbenchmark dataset
 """
@@ -20,6 +24,12 @@ def pretrained_model_score(
     max_test_samples: int = 100,
     cache_dir: str | None = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Loads the model by name (optionally into a cache folder), truncates the dataset to the first
+    # max_test_samples rows unless it is -1, evaluates with an EmbeddingSimilarityEvaluator named "sts-test"
+    # over cosine, euclidean, manhattan and dot similarities, prints the primary metric times 100 and asserts it is
+    # greater than the expected score minus 0.1. The module rebinds this name to a partial with 100 samples and
+    # derives a slow partial with all samples.
     model = SentenceTransformer(model_name, cache_folder=cache_dir)
 
     if max_test_samples != -1:
@@ -45,6 +55,8 @@ pretrained_model_score_slow = partial(pretrained_model_score, max_test_samples=-
 
 @pytest.mark.slow
 def test_bert_base_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks four BERT-base NLI models against their expected full-split scores.
     score = partial(pretrained_model_score_slow, sts_dataset=stsb_dataset_dict["test"])
     score("sentence-transformers/bert-base-nli-mean-tokens", 77.12)
     score("sentence-transformers/bert-base-nli-max-tokens", 77.21)
@@ -54,6 +66,8 @@ def test_bert_base_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_bert_large_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks four BERT-large NLI models against their expected full-split scores.
     score = partial(pretrained_model_score_slow, sts_dataset=stsb_dataset_dict["test"])
     score("sentence-transformers/bert-large-nli-mean-tokens", 79.19)
     score("sentence-transformers/bert-large-nli-max-tokens", 78.41)
@@ -63,6 +77,8 @@ def test_bert_large_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_roberta_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks four RoBERTa NLI models against their expected full-split scores.
     score = partial(pretrained_model_score_slow, sts_dataset=stsb_dataset_dict["test"])
     score("sentence-transformers/roberta-base-nli-mean-tokens", 77.49)
     score("sentence-transformers/roberta-large-nli-mean-tokens", 78.69)
@@ -72,6 +88,8 @@ def test_roberta_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_distilbert_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks two DistilBERT NLI models and a paraphrase DistilRoBERTa model.
     score = partial(pretrained_model_score_slow, sts_dataset=stsb_dataset_dict["test"])
     score("sentence-transformers/distilbert-base-nli-mean-tokens", 78.69)
     score("sentence-transformers/distilbert-base-nli-stsb-mean-tokens", 85.16)
@@ -80,6 +98,8 @@ def test_distilbert_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_multiling_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks three multilingual models.
     score = partial(pretrained_model_score_slow, sts_dataset=stsb_dataset_dict["test"])
     score("sentence-transformers/distiluse-base-multilingual-cased", 80.75)
     score("sentence-transformers/paraphrase-xlm-r-multilingual-v1", 83.50)
@@ -88,6 +108,8 @@ def test_multiling_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_mpnet_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks the paraphrase MPNet base model.
     pretrained_model_score_slow(
         "sentence-transformers/paraphrase-mpnet-base-v2", 86.99, sts_dataset=stsb_dataset_dict["test"]
     )
@@ -95,6 +117,8 @@ def test_mpnet_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_other_models_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks the Komninos average word embeddings model.
     pretrained_model_score_slow(
         "sentence-transformers/average_word_embeddings_komninos", 60.98, sts_dataset=stsb_dataset_dict["test"]
     )
@@ -102,6 +126,8 @@ def test_other_models_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_msmarco_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks two MS MARCO retrieval models.
     score = partial(pretrained_model_score_slow, sts_dataset=stsb_dataset_dict["test"])
     score("sentence-transformers/msmarco-roberta-base-ance-firstp", 77.0)
     score("sentence-transformers/msmarco-distilbert-base-v3", 78.85)
@@ -109,6 +135,8 @@ def test_msmarco_slow(stsb_dataset_dict: DatasetDict) -> None:
 
 @pytest.mark.slow
 def test_sentence_t5_slow(stsb_dataset_dict: DatasetDict) -> None:
+    # [FUNCTION DOC]
+    # Slow: checks the Sentence-T5 base model.
     pretrained_model_score_slow("sentence-transformers/sentence-t5-base", 85.52, sts_dataset=stsb_dataset_dict["test"])
 
 
@@ -144,4 +172,7 @@ def test_sentence_t5_slow(stsb_dataset_dict: DatasetDict) -> None:
 def test_pretrained(
     model_name: str, expected_score: float, stsb_dataset_dict: DatasetDict, cache_dir: str | None = None
 ) -> None:
+    # [FUNCTION DOC]
+    # Slow (to avoid Hub rate limits) and parametrized over model names with expected scores on the first 100
+    # test samples; runs the fast scoring helper with the cache_dir argument (default None).
     pretrained_model_score(model_name, expected_score, sts_dataset=stsb_dataset_dict["test"], cache_dir=cache_dir)

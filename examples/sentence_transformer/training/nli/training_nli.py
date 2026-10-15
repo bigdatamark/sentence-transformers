@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: train a transformer (default bert-base-uncased, or first CLI arg) on 10k AllNLI pair-class rows
+# with SoftmaxLoss (3 labels on concatenated sentence-pair features). Evaluates on STSb validation (cosine) before
+# training and during training (eval/save every 100 steps), 1 epoch, batch 16, fp16. Afterwards evaluates on STSb
+# test, saves to output/training_nli_<model>-<timestamp>/final and tries a Hub push of "<model>-nli-v1".
+# Side effects: network, disk, GPU, logging.
+# KNOWN ISSUE: the docstring says evaluation runs every 1000 training steps, but the code evaluates every 100 steps.
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with softmax loss function. At every 1000 training steps, the model is evaluated on the

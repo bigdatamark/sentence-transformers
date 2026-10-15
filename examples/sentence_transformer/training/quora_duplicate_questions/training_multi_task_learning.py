@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Example script: multi-task training of stsb-distilbert-base on Quora duplicates with two objectives at once:
+# MultipleNegativesRankingLoss on the triplet subset ("mnrl") and ContrastiveLoss with margin 0.5 on the pair-class
+# subset ("cl"); each uses the first 100k rows for training and the next 1000 for evaluation, combined with PROPORTIONAL
+# multi-dataset sampling and NO_DUPLICATES batches. A SequentialEvaluator runs BinaryClassificationEvaluator (last
+# 1000 pair-class train rows), ParaphraseMiningEvaluator (quora-duplicates-mining dev) and InformationRetrievalEvaluator
+# (BeIR/quora validation qrels, corpus shrunk to relevant docs plus 10,000 random docs), using the IR score as main
+# score. Evaluates before training, trains 1 epoch (batch 64, fp16, eval/save every 250 steps), saves to
+# output/training_mnrl-<timestamp>/final and tries a Hub push. Side effects: network, disk, GPU, logging.
 """
 This script combines training_online_contrastive_loss.py with training_multiple_negatives_ranking_loss.py
 

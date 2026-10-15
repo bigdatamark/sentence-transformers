@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for the Dense module (sentence_transformers.base.modules.Dense): saving and loading in
+# several floating precisions inside a SentenceTransformer, custom input/output feature keys,
+# round-tripping those keys through save/load, tolerance of unknown config keys on load, and
+# omission of the default use_residual flag from the saved config. Relies on the shared
+# static_embedding fixture (a 768-dimensional StaticEmbedding) and pytest's tmp_path/caplog.
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,6 +18,12 @@ from sentence_transformers.sentence_transformer.modules import StaticEmbedding
 
 
 def test_dense_load_and_save_in_other_precisions(static_embedding: StaticEmbedding, tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Builds a model of the static embedding plus a 768-to-256 Dense with tanh, encodes one text, saves
+    # and reloads it and checks float32 weights of shape (256, 768) and near-identical embeddings
+    # (tolerance 1e-6). Repeats with deep copies cast to float64 (tolerance 1e-6) and float16 (1e-3),
+    # checking the reloaded weight dtype is preserved, and with bfloat16 (1e-2) only when CUDA with
+    # bf16 support is available. Writes model directories under tmp_path.
     base_model = SentenceTransformer(modules=[static_embedding, Dense(768, 256, activation_function=nn.Tanh())])
     test_text = ["This is a test"]
     base_embedding = base_model.encode(test_text, convert_to_tensor=True)
@@ -55,6 +67,10 @@ def test_dense_load_and_save_in_other_precisions(static_embedding: StaticEmbeddi
 
 
 def test_dense_custom_features_key() -> None:
+    # [FUNCTION DOC]
+    # Checks Dense forward on feature dicts: by default reads and overwrites "sentence_embedding"
+    # (2x768 to 2x256); with a custom input name it transforms "token_embeddings" in place (2x10x768 to
+    # 2x10x256); with distinct input and output names it writes the output key and keeps the input key.
     """Test that Dense can operate on custom feature keys."""
     # Test with sentence_embedding (default)
     dense_default = Dense(768, 256, activation_function=nn.Tanh())
@@ -86,6 +102,10 @@ def test_dense_custom_features_key() -> None:
 
 
 def test_dense_save_load_custom_keys(static_embedding: StaticEmbedding, tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Saves a Dense with custom input/output names to a tmp directory, loads it with Dense.load and
+    # checks the names and feature sizes are restored and that forward writes the custom output key
+    # with shape (2, 256).
     """Test that Dense with custom keys can be saved and loaded."""
     import os
 
@@ -118,6 +138,10 @@ def test_dense_save_load_custom_keys(static_embedding: StaticEmbedding, tmp_path
 
 
 def test_dense_load_ignores_unknown_config_keys(tmp_path: Path, caplog) -> None:
+    # [FUNCTION DOC]
+    # Saves a bias-free identity Dense, injects an unknown key into its config.json, loads it while
+    # capturing WARNING logs from the dense module logger, and checks loading succeeds, the unknown key
+    # is not set as an attribute, sizes are intact, a warning names the key, and forward still works.
     """A newer or foreign save (e.g. a future PyLate ``Dense``) may record a config key this class's
     constructor does not accept. ``Dense.load`` should drop such keys with a warning rather than crash in
     ``cls(**config)``."""
@@ -152,6 +176,9 @@ def test_dense_load_ignores_unknown_config_keys(tmp_path: Path, caplog) -> None:
 
 
 def test_dense_config_omits_default_use_residual(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Checks that saving a Dense with default use_residual (False) leaves the key out of config.json,
+    # while use_residual True is written as true and restored by Dense.load.
     """``use_residual`` at its default (False) must not be written to config.json: released
     5.4-5.6 ``Dense.load`` does ``cls(**config)`` without unknown-key dropping, so any new key at
     default would make fresh saves unloadable there. A non-default value must still round-trip."""

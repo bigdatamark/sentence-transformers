@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script: Contrastive Tension with in-batch negatives on sentences from a text file (first CLI arg; gzip if .gz;
+# lines shorter than 10 characters skipped). Optional second arg names the output folder output/train_ct-improved-<name>-<timestamp>;
+# without arguments it prints usage and exits. Model: distilbert-base-uncased, max length 75, mean pooling. Trains on a
+# single "text1" column, batch 128, 1 epoch, lr 5e-5, 10% warmup, AdamW, save every 50%, log every 10%; logs the similarity
+# of the first two sentences, saves to <output>/final and tries a Hub push. Side effects: file reading, network, disk, GPU, logging.
 """
 This file loads sentences from a provided text file. It is expected, that the there is one sentence per line in that text file.
 CT will be training using these sentences.

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for the deprecated import path redirection in sentence_transformers.util.deprecated_import: each old
+# module path in the deprecation mapping must import with a DeprecationWarning and resolve to the same object
+# as its new path, and class-named paths must not shadow the class with a module.
 from __future__ import annotations
 
 import importlib
@@ -11,6 +15,12 @@ from sentence_transformers.util.deprecated_import import DEPRECATED_MODULE_PATHS
 
 @pytest.mark.parametrize(("deprecated_path", "new_path"), DEPRECATED_MODULE_PATHS.items())
 def test_deprecated_import_paths(deprecated_path: str, new_path: str):
+    # [FUNCTION DOC]
+    # Parametrized over (deprecated path, new path) pairs. Removes the deprecated path from the global module
+    # cache, imports it while recording warnings and asserts at least one DeprecationWarning carries the exact
+    # "Importing from ... is deprecated ... Please use ... instead." message; then imports the new path and asserts
+    # no DeprecationWarning is raised; finally asserts both imports return the identical module object. Mutates
+    # the global module registry.
     """Test that deprecated import paths point to the correct new paths."""
     # Remove from sys.modules so the meta path finder is triggered fresh
     sys.modules.pop(deprecated_path, None)
@@ -50,6 +60,10 @@ def test_deprecated_import_paths(deprecated_path: str, new_path: str):
 
 @pytest.mark.parametrize("deprecated_path", DEPRECATED_MODULE_PATHS.keys())
 def test_imported_from_partial_path_first(deprecated_path: str):
+    # [FUNCTION DOC]
+    # Parametrized over deprecated paths; skips unless the last path component starts with an uppercase letter
+    # (a class name). Imports the parent module first and gets the class attribute, then imports the full path and
+    # gets the same-named attribute, and asserts both are non-None and identical.
     """Test that classes from deprecated paths are the same object as from new paths."""
     module_name = ".".join(deprecated_path.split(".")[:-1])
     class_name = deprecated_path.split(".")[-1]
@@ -72,6 +86,9 @@ def test_imported_from_partial_path_first(deprecated_path: str):
 
 @pytest.mark.parametrize("deprecated_path", DEPRECATED_MODULE_PATHS.keys())
 def test_imported_from_full_path_first(deprecated_path: str):
+    # [FUNCTION DOC]
+    # Same as the previous test but imports the full deprecated path first and the parent module second, guarding
+    # against the parent package attribute being replaced by a submodule object.
     """Test that classes from deprecated paths are the same object as from new paths.
 
     Some import mechanisms had significant issues with e.g.:

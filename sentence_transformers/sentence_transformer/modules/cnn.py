@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# 1D convolution module that applies several parallel convolutions with different kernel sizes over
+# token embeddings and concatenates their outputs.
 from __future__ import annotations
 
 try:
@@ -13,6 +16,10 @@ from sentence_transformers.util.decorators import deprecated_kwargs
 
 
 class CNN(Module):
+    # [CLASS DOC]
+    # Module applying one Conv1d per kernel size to token embeddings. Output token embedding size is
+    # out_channels times the number of kernels. Config keys: in_embedding_dimension, out_channels,
+    # kernel_sizes (stored in cnn_config.json); the old key in_word_embedding_dimension is renamed.
     """CNN-layer with multiple kernel-sizes over the word embeddings"""
 
     config_keys: list[str] = ["in_embedding_dimension", "out_channels", "kernel_sizes"]
@@ -27,6 +34,14 @@ class CNN(Module):
         kernel_sizes: list[int] = [1, 3, 5],
         stride_sizes: list[int] | None = None,
     ):
+        # [FUNCTION DOC]
+        # Creates the convolutions. Inputs: input embedding dimension, out_channels per conv (default 256),
+        # kernel_sizes (default 1, 3, 5) and optional stride_sizes (default all 1). Each conv uses padding
+        # of half of (kernel size minus 1), rounded down, so odd kernels keep sequence length.
+        # Deprecated keyword names are accepted through the deprecated_kwargs decorator.
+        # KNOWN ISSUE: stride_sizes is not in config_keys, so non-default strides are lost when saving
+        # and reloading. Even kernel sizes (or strides above 1) change the sequence length, so the outputs of
+        # different convs cannot be concatenated.
         nn.Module.__init__(self)
         self.in_embedding_dimension = in_embedding_dimension
         self.out_channels = out_channels
@@ -51,6 +66,10 @@ class CNN(Module):
             self.convs.append(conv)
 
     def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Reads "token_embeddings" (batch, seq, dim), transposes to channel-first, applies each conv,
+        # concatenates along channels, transposes back, and writes the result into the features dict
+        # under "token_embeddings" (mutating it). Returns the dict.
         token_embeddings = features["token_embeddings"]
 
         token_embeddings = token_embeddings.transpose(1, -1)
@@ -61,9 +80,13 @@ class CNN(Module):
         return features
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the output embedding dimension (out_channels times number of kernels).
         return self.embeddings_dimension
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves the config JSON and the torch weights (safetensors when safe_serialization) to output_path.
         self.save_config(output_path)
         self.save_torch_weights(output_path, safe_serialization=safe_serialization)
 
@@ -78,6 +101,10 @@ class CNN(Module):
         local_files_only: bool = False,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads the module from a local path or Hub repo: loads the config using the
+        # hub options (subfolder, token, cache folder, revision, local_files_only), constructs the module,
+        # loads its weights into it and returns it.
         hub_kwargs = {
             "subfolder": subfolder,
             "token": token,

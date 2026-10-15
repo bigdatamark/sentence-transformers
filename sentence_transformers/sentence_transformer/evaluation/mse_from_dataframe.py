@@ -1,3 +1,6 @@
+# [MODULE DOC] MSE evaluator for multilingual distillation driven by a table of parallel sentences: for each
+# (source language, target language) combination it compares teacher embeddings of source sentences with
+# student embeddings of their translations.
 from __future__ import annotations
 
 import csv
@@ -18,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 class MSEEvaluatorFromDataFrame(BaseEvaluator):
+    # [CLASS DOC] Evaluator holding combinations (list of source/target language pairs), data (pair to aligned source and
+    # target sentence lists), teacher_embeddings (source sentence to embedding), name, batch_size, truncate_dim,
+    # write_csv, CSV file name and headers (epoch, steps, one "<src>-<trg>" column per combination). Primary
+    # metric is "negative_mse".
     """
     Computes the mean squared error (x100) between the computed sentence embedding and some target sentence embedding.
 
@@ -49,6 +56,10 @@ class MSEEvaluatorFromDataFrame(BaseEvaluator):
         write_csv: bool = True,
         truncate_dim: int | None = None,
     ):
+        # [FUNCTION DOC] For each language combination, collect rows where both the source and target cells are non-blank (raises
+        # KeyError if a row lacks a language column), store aligned lists, and add a CSV header. Then encode the
+        # unique set of all source sentences once with the teacher model (logging a message) and store a map from
+        # sentence to embedding.
         super().__init__()
         self.combinations = combinations
         self.name = name
@@ -87,6 +98,10 @@ class MSEEvaluatorFromDataFrame(BaseEvaluator):
     def __call__(
         self, model: SentenceTransformer, output_path: str | None = None, epoch: int = -1, steps: int = -1
     ) -> dict[str, float]:
+        # [FUNCTION DOC] Put the model in eval mode; for each combination look up teacher embeddings, encode the target sentences
+        # with the student model, compute 100 times the mean squared element-wise difference and log it. Optionally
+        # write/append a CSV row with all per-combination values. Return {"<name>_negative_mse": negative mean of the
+        # per-combination MSEs} after storing it in model card data.
         model.eval()
 
         mse_scores = []
@@ -126,6 +141,7 @@ class MSEEvaluatorFromDataFrame(BaseEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> np.ndarray:
+        # [FUNCTION DOC] HELPER: Encode inputs to numpy using the batch size and truncation settings (no progress bar option).
         return model.encode(
             sentences,
             batch_size=self.batch_size,
@@ -136,4 +152,5 @@ class MSEEvaluatorFromDataFrame(BaseEvaluator):
 
     @property
     def description(self) -> str:
+        # [FUNCTION DOC] Return the description "Knowledge Distillation".
         return "Knowledge Distillation"

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example script: train a CSR (Contrastive Sparse Representation) sparse encoder on top of the dense
+# mixedbread-ai/mxbai-embed-large-v1 model for Natural Questions retrieval. Running as a script calls main().
 """
 This example trains a SparseEncoder for the Natural Questions (NQ) dataset.
 The training script fine-tunes a SparseEncoder using the CSR loss function for retrieval.
@@ -32,6 +35,14 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads the model as a SparseEncoder (cosine similarity, fp32), freezes the
+    # first module (the transformer encoder) and prints total/trainable parameter counts. Takes 100k NQ pairs, holds out 1k
+    # (seed 12). Loss: CSRLoss (gamma 0.1) wrapping SparseMultipleNegativesRankingLoss with cosine similarity and scale 20.
+    # Evaluation: a SequentialEvaluator of SparseInformationRetrievalEvaluators on the held-out pairs (query i relevant to
+    # answer i) with max_active_dims 4..256, main score from the 256-dim one; run before, during and after training.
+    # Trains 1 epoch (batch 64, lr 4e-5, bf16, NO_DUPLICATES, eval/save every 300 steps, keep 3), saves to
+    # models/<run_name>/final and tries a Hub push. Side effects: network, disk, GPU, stdout/logging.
     model_name = "mixedbread-ai/mxbai-embed-large-v1"
 
     train_batch_size = 64

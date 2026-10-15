@@ -1,3 +1,5 @@
+# [MODULE DOC] Cosine similarity regression loss: compares the cosine similarity of paired embeddings (optionally transformed)
+# to float gold labels with a configurable loss (MSE by default).
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,12 +14,16 @@ from sentence_transformers.util import fullname
 
 
 class CosineSimilarityLoss(nn.Module):
+    # [CLASS DOC] Loss module. Attributes: model, loss_fct (comparison loss module, default mean squared error),
+    # cos_score_transformation (module applied to the cosine scores, default identity).
     def __init__(
         self,
         model: SentenceTransformer,
         loss_fct: nn.Module = nn.MSELoss(),
         cos_score_transformation: nn.Module = nn.Identity(),
     ) -> None:
+        # [FUNCTION DOC] Store the model, comparison loss and score transformation. Note that the default modules are shared instances
+        # created once at function definition time.
         """
         CosineSimilarityLoss expects that the inputs consist of two inputs (e.g. texts) and a float label. It computes the
         vectors ``u = model(input_A)`` and ``v = model(input_B)`` and measures the cosine-similarity between the two.
@@ -77,11 +83,15 @@ class CosineSimilarityLoss(nn.Module):
         self.cos_score_transformation = cos_score_transformation
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Embed every input column with the shared column embedding helper and compute the loss with the labels.
         embeddings = embed_columns(self.model, sentence_features)
 
         return self.compute_loss_from_embeddings(embeddings, labels)
 
     def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute row-wise cosine similarity between the first two embedding columns, apply the transformation, and
+        # return the comparison loss against the labels cast to float and flattened.
+        # KNOWN ISSUE: The docstring describes the default objective as an L2 norm of the difference, but the default loss is the mean squared error.
         """
         Compute the CosineSimilarity loss from embeddings.
 
@@ -96,6 +106,7 @@ class CosineSimilarityLoss(nn.Module):
         return self.loss_fct(output, labels.float().view(-1))
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return a config dict with the fully qualified class names of the comparison loss and the transformation.
         return {
             "loss_fct": fullname(self.loss_fct),
             "cos_score_transformation": fullname(self.cos_score_transformation),

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# ListMLE listwise loss for CrossEncoder, implemented as PListMLE without position weighting.
 from __future__ import annotations
 
 from torch import nn
@@ -7,6 +9,10 @@ from sentence_transformers.cross_encoder.losses.plist_mle import PListMLELoss
 
 
 class ListMLELoss(PListMLELoss):
+    # [CLASS DOC]
+    # PListMLELoss subclass with the lambda (position) weight disabled, giving plain ListMLE: the negative
+    # log-likelihood of the ground-truth permutation of each query's documents under a Plackett-Luce model of
+    # the predicted scores.
     def __init__(
         self,
         model: CrossEncoder,
@@ -14,6 +20,9 @@ class ListMLELoss(PListMLELoss):
         mini_batch_size: int | None = None,
         respect_input_order: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Forward model, activation, mini-batch size, and whether to keep the given document order as the ground
+        # truth ranking (true) or sort by labels (false) to PListMLELoss with no lambda weight.
         """
         This loss function implements the ListMLE learning to rank algorithm, which uses a list-wise
         approach based on maximum likelihood estimation of permutations. It maximizes the likelihood
@@ -102,6 +111,8 @@ class ListMLELoss(PListMLELoss):
         )
 
     def get_config_dict(self) -> dict[str, float | int | str | None]:
+        # [FUNCTION DOC]
+        # Return the parent config with the lambda weight entry removed.
         """
         Get configuration parameters for this loss function.
 
@@ -114,6 +125,8 @@ class ListMLELoss(PListMLELoss):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Xia et al. 2008 (ListMLE).
         return """
 @inproceedings{10.1145/1390156.1390306,
     title = {Listwise Approach to Learning to Rank - Theory and Algorithm},

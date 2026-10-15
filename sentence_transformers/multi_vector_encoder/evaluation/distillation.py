@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Distillation evaluator for MultiVectorEncoder: measures how closely the model's late-interaction scores
+# match teacher scores, via KL divergence of softmaxed distributions and Spearman rank correlation.
 from __future__ import annotations
 
 import csv
@@ -22,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 class MultiVectorDistillationEvaluator(BaseEvaluator):
+    # [CLASS DOC]
+    # Evaluator holding queries, documents (either one per query or a fixed-size candidate list per query),
+    # teacher scores as a float32 tensor (1D or queries by N), shared/student/teacher temperatures, an optional
+    # pairwise scoring override, name, batch size, progress-bar and CSV flags, the CSV file name
+    # ("distillation_evaluation", optional underscore name, "_results.csv") and headers. Primary metric is
+    # Spearman.
     """Distillation evaluator for :class:`~sentence_transformers.multi_vector_encoder.model.MultiVectorEncoder` models.
 
     Two data shapes are supported:
@@ -121,6 +130,12 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         show_progress_bar: bool = False,
         write_csv: bool = True,
     ) -> None:
+        # [FUNCTION DOC]
+        # Validate and store inputs. Raises ValueError if queries, documents and scores differ in length. Treats
+        # documents as nested candidate lists when the first entry is a list/tuple that is not a chat conversation
+        # (a list of message dicts). Nested: raises ValueError if candidate lists differ in length or scores are not
+        # 2D with N columns. Flat: raises ValueError if scores are not 1D. Student/teacher temperatures fall back to
+        # the shared one; raises ValueError if any temperature is not positive and finite.
         super().__init__()
         if not (len(queries) == len(documents) == len(scores)):
             raise ValueError(
@@ -175,6 +190,17 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         epoch: int = -1,
         steps: int = -1,
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Evaluate the model. Logs a header, encodes queries with the query encoder. Nested case: flattens and
+        # encodes all candidates as documents, then for each candidate position takes every N-th embedding and
+        # scores it pairwise against its query (override function or the model's pairwise similarity), stacking into
+        # queries by N; log-softmaxes teacher and student scores over the candidate axis with their temperatures.
+        # Flat case: encodes documents, scores pairwise, and log-softmaxes over the whole dataset as one
+        # distribution. KL(teacher || student) uses batch-mean reduction when nested and sum when flat, scaled by the
+        # student temperature squared. Spearman: nested is the mean of per-query correlations skipping undefined
+        # (NaN) ones, 0.0 if none remain; flat is one global correlation, 0.0 if undefined. Logs both, appends a CSV
+        # row (creating directory/file with headers) when enabled, sets the primary metric, prefixes metric names,
+        # stores them in the model card data, and returns the metrics dict.
         if epoch != -1:
             out_txt = f" after epoch {epoch}" if steps == -1 else f" in epoch {epoch} after {steps} steps"
         else:
@@ -254,6 +280,9 @@ class MultiVectorDistillationEvaluator(BaseEvaluator):
         return metrics
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the evaluator config for model cards: the temperature if not 1.0, student/teacher temperatures if
+        # they differ from it, and the scoring override's name if set.
         config_dict = {}
         if self.temperature != 1.0:
             config_dict["temperature"] = self.temperature

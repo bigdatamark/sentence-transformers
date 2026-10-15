@@ -1,3 +1,6 @@
+# [MODULE DOC] Deprecated model card templating used by the legacy fit training loop (pre v3.0). Holds markdown
+# template strings with placeholder tokens and helpers producing pooling-function code snippets and
+# training-objective descriptions.
 """
 This file contains the templating for model cards prior to the v3.0 release. It still exists to be used alongside
 SentenceTransformer.old_fit for backwards compatibility, but will be removed in a future release.
@@ -11,6 +14,9 @@ from ..util import fullname
 
 
 class ModelCardTemplate:
+    # [CLASS DOC] Namespace class of template constants: default tags, default placeholder values, the main model card
+    # markdown template, the training section template and the plain-transformers usage template. Placeholders
+    # are curly-brace tokens replaced by the caller via string substitution.
     __TAGS__ = ["sentence-transformers", "feature-extraction", "sentence-similarity"]
     __DEFAULT_VARS__ = {
         "{PIPELINE_TAG}": "sentence-similarity",
@@ -123,6 +129,9 @@ print(sentence_embeddings)
 
     @staticmethod
     def model_card_get_pooling_function(pooling_mode):
+        # [FUNCTION DOC] Return a pair (function name, source code text) for a pooling function matching the pooling mode, used in
+        # the plain-transformers usage snippet: "max" gives max pooling (padding set to a large negative value),
+        # "mean" gives mask-aware mean pooling, "cls" gives first-token pooling. Any other mode returns None.
         if pooling_mode == "max":
             return (
                 "max_pooling",
@@ -158,6 +167,12 @@ def cls_pooling(model_output, attention_mask):
 
     @staticmethod
     def get_train_objective_info(dataloader, loss):
+        # [FUNCTION DOC] Build markdown strings describing a training objective. Gets data loader parameters from its config dict
+        # method if present, otherwise collects batch size (or "unknown") and the full class names of sampler and
+        # batch sampler when present. Returns a list of two strings: the data loader description (class name, length,
+        # parameters) and the loss description (class name plus its config dict when available). On any exception,
+        # tries to log a warning and returns an empty string.
+        # KNOWN ISSUE: The except branch calls logging.WARN, which is an integer constant and not callable, so it raises TypeError instead of logging.
         try:
             if hasattr(dataloader, "get_config_dict"):
                 loader_params = dataloader.get_config_dict()

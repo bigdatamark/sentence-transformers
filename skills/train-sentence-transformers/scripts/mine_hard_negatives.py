@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Command-line script that mines hard negatives for an (anchor, positive) dataset with
+# sentence_transformers.util.mine_hard_negatives. Loads a Hub/local dataset, a bi-encoder, an
+# optional cross-encoder and an optional separate corpus dataset, runs mining with the CLI options,
+# then saves the result to disk and/or pushes it to the Hub. Configures INFO-level root logging at
+# import time and silences noisy HTTP/hub library loggers to WARNING. Exits with main's return code.
+# KNOWN ISSUE: the module docstring describes --relative-margin as "negative_score < positive_score * (1 - margin)", but the library uses positive_score minus abs(positive_score) times margin.
+# KNOWN ISSUE: --range-max always defaults to 100 and is passed through, so the library's automatic range_max derivation never applies and include_positives always triggers the "non-default values" warning.
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
@@ -81,6 +89,12 @@ for _noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3", "filelock", "f
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # [FUNCTION DOC]
+    # HELPER: Builds the argument parser (module docstring as description): dataset/subset/split,
+    # model, optional cross-encoder, anchor/positive column names, num negatives (3), range min/max
+    # (0/100), sampling strategy, max/min score, absolute/relative margin, output format,
+    # include-positives and output-scores flags, batch size, faiss flag, optional corpus dataset with
+    # subset/split/column ("text"), output path, Hub repo id and private flag. Returns the parser.
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", required=True)
     p.add_argument("--subset", default=None)
@@ -131,6 +145,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # [FUNCTION DOC]
+    # Parses arguments, loads the dataset split (with subset if given) and prints its size, loads the
+    # SentenceTransformer and optional CrossEncoder. If a corpus dataset is given, loads it and extracts
+    # the corpus column as a list, exiting with an error message (SystemExit) if the column is missing.
+    # Calls mine_hard_negatives with all options, prints the result's size and columns, saves to disk
+    # and/or pushes to the Hub (optionally private), or prints that nothing was persisted. Returns 0.
+    # Side effects: network downloads, disk writes, Hub uploads, stdout.
     args = build_parser().parse_args()
 
     dataset = (

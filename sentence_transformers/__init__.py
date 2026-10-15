@@ -1,3 +1,13 @@
+# [PACKAGE DOC]
+# Top-level sentence_transformers package. Defines __version__ ("6.1.0") and __MODEL_HUB_ORGANIZATION__
+# ("sentence-transformers") and re-exports the public API: the SentenceTransformer, CrossEncoder, SparseEncoder and
+# MultiVectorEncoder model classes with their trainers, training arguments and model card data classes, legacy datasets
+# (SentencesDataset, ParallelSentencesDataset, InputExample), batch samplers, ONNX/OpenVINO export helpers,
+# quantize_embeddings, mine_hard_negatives, resolve_ids, SimilarityFunction and LoggingHandler (listed in __all__).
+# Import-time side effects: installs backward-compatible aliases for moved/renamed modules, sets the CODECARBON_LOG_LEVEL
+# environment variable to "error" when codecarbon is installed and the variable is unset, and installs a global warnings
+# filter silencing the PyTorch "Sparse CSR tensor support is in beta state" warning.
+# KNOWN ISSUE: it calls importlib.util.find_spec after only importing importlib, which relies on importlib.util having been imported elsewhere.
 from __future__ import annotations
 
 __version__ = "6.1.0"

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Training arguments dataclass for the CrossEncoder trainer.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +9,12 @@ from sentence_transformers.base.training_args import BaseTrainingArguments
 
 @dataclass
 class CrossEncoderTrainingArguments(BaseTrainingArguments):
+    # [CLASS DOC]
+    # Dataclass of training hyperparameters for CrossEncoder training. Adds no fields or logic of its own; it
+    # inherits everything (output directory, prompts, batch samplers, router mapping, per-parameter learning
+    # rate mapping, and all Hugging Face TrainingArguments fields) from BaseTrainingArguments. Exists to give
+    # CrossEncoder its own type and documentation, which notes that prompts and router mappings may only be
+    # given globally or per dataset, not per column, because columns are combined into pairs.
     r"""
     CrossEncoderTrainingArguments extends :class:`~sentence_transformers.base.training_args.BaseTrainingArguments`
     with additional arguments specific to Sentence Transformers. See :class:`~transformers.TrainingArguments` for

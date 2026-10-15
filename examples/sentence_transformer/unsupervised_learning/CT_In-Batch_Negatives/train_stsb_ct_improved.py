@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Example script: Contrastive Tension with in-batch negatives (dot-product similarity, scale 1) for distilbert-base-uncased
+# (max length 75, mean pooling) on the first 1000 wiki1m-for-simcse sentences (stripped). Batch 128, 1 epoch, lr 5e-5,
+# 10% warmup, fp16, eval every 10% on STSb validation, no checkpoints. Evaluates STSb validation and test after training,
+# saves to output/training_stsb_ct-improved-<model>-<timestamp>-final and tries a Hub push of "<model>-stsb-ct".
+# Side effects: network, disk, GPU, stdout/logging.
+# KNOWN ISSUE: the comment says 1 million Wikipedia sentences are used, but only the first 1000 are loaded.
 import logging
 from datetime import datetime
 

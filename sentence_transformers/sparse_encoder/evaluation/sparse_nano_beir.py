@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse version of the NanoBEIR evaluator: runs SparseInformationRetrievalEvaluator on a set of
+# small BEIR retrieval datasets from the Hugging Face Hub, aggregates the retrieval metrics, and
+# reports aggregated sparsity statistics and FLOPS across all datasets.
 from __future__ import annotations
 
 import logging
@@ -26,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 
 class SparseNanoBEIREvaluator(NanoBEIREvaluator):
+    # [CLASS DOC]
+    # Subclass of NanoBEIREvaluator that builds one SparseInformationRetrievalEvaluator per dataset
+    # (information_retrieval_class). Adds max_active_dims, sparsity_stats and lengths (per side,
+    # number of queries or corpus documents per dataset).
     """
     This evaluator extends :class:`~sentence_transformers.sentence_transformer.evaluation.NanoBEIREvaluator` but is specifically designed for sparse encoder models.
 
@@ -218,6 +226,11 @@ class SparseNanoBEIREvaluator(NanoBEIREvaluator):
         corpus_prompts: str | dict[str, str] | None = None,
         write_predictions: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Stores max_active_dims and empty statistics, delegates dataset names, Hub dataset id, k lists,
+        # progress bar, batch size, CSV flag, score functions, main score function, aggregation function
+        # and key, query/corpus prompts and write_predictions to the parent (which loads the datasets,
+        # a network access), and appends an underscore and max_active_dims to the evaluator name when set.
         self.max_active_dims = max_active_dims
         self.sparsity_stats = defaultdict(list)
         super().__init__(
@@ -243,12 +256,18 @@ class SparseNanoBEIREvaluator(NanoBEIREvaluator):
             self.name += f"_{self.max_active_dims}"
 
     def _get_human_readable_name(self, dataset_name: DatasetNameType) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the parent's human-readable dataset name with an underscore and max_active_dims
+        # appended when it is set.
         human_readable_name = super()._get_human_readable_name(dataset_name)
         if self.max_active_dims is not None:
             human_readable_name += f"_{self.max_active_dims}"
         return human_readable_name
 
     def _append_csv_headers(self, score_function_names):
+        # [FUNCTION DOC]
+        # Extends the parent's CSV headers; only when score_function_names is non-empty appends the query
+        # and corpus active dims and sparsity ratios and avg_flops.
         super()._append_csv_headers(score_function_names)
         # To avoid adding the sparse-specific headers multiple times, we only add them if the superclass will
         # add metric columns for the specified score functions
@@ -266,6 +285,18 @@ class SparseNanoBEIREvaluator(NanoBEIREvaluator):
     def __call__(
         self, model: SparseEncoder, output_path: str | None = None, epoch: int = -1, steps: int = -1, *args, **kwargs
     ) -> dict[str, float]:
+        # [FUNCTION DOC]
+        # Runs all per-dataset evaluators through the parent call and returns the parent's results dict
+        # extended with aggregated sparsity statistics. Collects each evaluator's query and corpus sizes,
+        # its flattened sparsity stats, and sums the query and corpus count vectors across datasets.
+        # Averages each stat (except avg_flops) weighted by the dataset's query or corpus count (chosen by
+        # the key prefix). Recomputes avg_flops as the dot product of the overall average query and
+        # corpus count vectors. Adds the stats (prefixed with name) to the results, stores the
+        # aggregated entries (keys starting with the name, excluding the name itself) in the model card
+        # data, logs the sparsity and FLOPS, and appends the stats to the last CSV row when output_path
+        # is given and write_csv is set.
+        # KNOWN ISSUE: The summed count vectors start as the first evaluator's own tensors and are added to
+        # in place, so that evaluator's count_vectors are mutated.
         self.sparsity_stats = defaultdict(list)
         self.lengths = defaultdict(list)
         per_dataset_results = super().__call__(
@@ -321,11 +352,17 @@ class SparseNanoBEIREvaluator(NanoBEIREvaluator):
     def _load_dataset(
         self, dataset_name: DatasetNameType | str, **ir_evaluator_kwargs
     ) -> SparseInformationRetrievalEvaluator:
+        # [FUNCTION DOC]
+        # HELPER: Builds the per-dataset evaluator, forcing max_active_dims to this evaluator's value and
+        # removing any truncate_dim argument (not supported by sparse evaluation), then delegating to the
+        # parent loader.
         ir_evaluator_kwargs["max_active_dims"] = self.max_active_dims
         ir_evaluator_kwargs.pop("truncate_dim", None)
         return super()._load_dataset(dataset_name, **ir_evaluator_kwargs)
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the parent config dict plus max_active_dims when it is set.
         config_dict = super().get_config_dict()
         if self.max_active_dims is not None:
             config_dict["max_active_dims"] = self.max_active_dims

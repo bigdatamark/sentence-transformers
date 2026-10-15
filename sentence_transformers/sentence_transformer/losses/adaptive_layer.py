@@ -1,3 +1,7 @@
+# [MODULE DOC] Adaptive layer loss modifier: applies a wrapped loss not only to the final transformer layer but also to
+# (sampled) earlier layers, plus an optional KL-divergence term that pulls earlier-layer embeddings toward the
+# final layer's, so the model can later be truncated to fewer layers. Works by temporarily replacing the
+# forward functions of the model's first module (Transformer) and of the model itself with caching decorators.
 from __future__ import annotations
 
 import math
@@ -18,6 +22,9 @@ from sentence_transformers.sentence_transformer.model import SentenceTransformer
 
 
 class TransformerDecorator:
+    # [CLASS DOC] HELPER: Callable that replaces the Transformer module's forward. Attributes: transformer, original_forward,
+    # layer_idx (None means run the real forward and record hidden states; an int means reuse cached hidden states),
+    # num_layers (set after a real forward).
     """
     Decorator that caches the embeddings of all layers of the transformer.
     When `layer_idx` is set, it returns the cached embeddings of that layer instead.
@@ -26,19 +33,26 @@ class TransformerDecorator:
     """
 
     def __init__(self, transformer: Transformer, original_forward) -> None:
+        # [FUNCTION DOC] Store the transformer and its original forward; start in "grow cache" mode (layer_idx None).
         self.transformer = transformer
         self.original_forward = original_forward
         self.layer_idx = None
 
     def set_layer_idx(self, layer_idx) -> None:
+        # [FUNCTION DOC] Set the layer index to serve from the cache.
         self.layer_idx = layer_idx
 
     def __call__(self, features) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Dispatch: with no layer index run the real forward and keep all hidden states, otherwise substitute the
+        # cached layer's token embeddings.
         if self.layer_idx is None:
             return self.call_grow_cache(features)
         return self.call_use_cache(features)
 
     def call_grow_cache(self, features: dict[str, Tensor]) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Temporarily enable output of all hidden states on the underlying Hugging Face model config, run the original
+        # forward, record the number of layers from the "all_layer_embeddings" output, and always restore the original
+        # config flag. Returns the forward output (whose features dict carries all layer embeddings for later calls).
         """
         Temporarily sets the output_hidden_states to True, runs the model, and then restores the original setting.
         Use the all_layer_embeddings to get the embeddings of all layers.
@@ -55,10 +69,14 @@ class TransformerDecorator:
         return output
 
     def call_use_cache(self, features: dict[str, Tensor]) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Return a shallow copy of the features dict with "token_embeddings" replaced by the cached embeddings at the
+        # current layer index (features must already contain "all_layer_embeddings").
         return {**features, "token_embeddings": features["all_layer_embeddings"][self.layer_idx]}
 
 
 class ForwardDecorator:
+    # [CLASS DOC] HELPER: Callable that replaces the whole model's forward and records each output's "sentence_embedding".
+    # Attributes: fn (original forward) and embeddings (list of recorded tensors).
     """
     Decorator that caches the embeddings after all modules (e.g. pooling) of the model.
     Required to get the embeddings after all modules for the KL-divergence loss.
@@ -67,21 +85,27 @@ class ForwardDecorator:
     """
 
     def __init__(self, fn) -> None:
+        # [FUNCTION DOC] Store the original forward and start with an empty list.
         self.fn = fn
         self.embeddings = []
 
     def __call__(self, features: dict[str, Tensor]) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Run the original forward, append the sentence embedding to the list, return the output.
         output = self.fn(features)
         self.embeddings.append(output["sentence_embedding"])
         return output
 
     def get_embeddings(self) -> Tensor:
+        # [FUNCTION DOC] Concatenate all recorded embeddings along the batch axis, clear the list, and return the tensor.
         embeddings = torch.concat(self.embeddings, dim=0)
         self.embeddings = []
         return embeddings
 
 
 class AdaptiveLayerLoss(nn.Module):
+    # [CLASS DOC] Loss module wrapping another loss to train every layer. Attributes: model (whose first module must be a
+    # Transformer), loss, n_layers_per_step, last_layer_weight, prior_layers_weight, kl_div_weight, kl_temperature
+    # (0 disables the KL term), layer_weighting ("uniform", "log", "linear" or a callable from layer index to weight).
     def __init__(
         self,
         model: SentenceTransformer,
@@ -93,6 +117,8 @@ class AdaptiveLayerLoss(nn.Module):
         kl_temperature: float = 0.3,
         layer_weighting: Literal["uniform", "log", "linear"] | Callable[[int], float] = "uniform",
     ) -> None:
+        # [FUNCTION DOC] Store settings. Raises ValueError for an invalid layer_weighting string; asserts the first module is a
+        # Transformer. Emits a warning if the wrapped loss uses gradient caching, which is incompatible.
         """
         The AdaptiveLayerLoss can be seen as a loss *modifier* that allows you to use other loss functions at non-final
         layers of the Sentence Transformer model. This is useful for when you want to train a model where users have
@@ -202,6 +228,8 @@ class AdaptiveLayerLoss(nn.Module):
             warnings.warn(f"AdaptiveLayerLoss is not compatible with {loss.__class__.__name__}.", stacklevel=2)
 
     def get_layer_weight(self, layer_idx: int) -> float:
+        # [FUNCTION DOC] Return the weight for a prior layer index: the callable's value; "log" gives one over (1 plus natural log of
+        # (1 plus index)); "linear" gives one over (1 plus index); "uniform" gives 1.
         if not isinstance(self.layer_weighting, str):
             return self.layer_weighting(layer_idx)
         if self.layer_weighting == "log":
@@ -211,6 +239,16 @@ class AdaptiveLayerLoss(nn.Module):
         return 1.0
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC] Compute the loss. Unwraps DDP/compile wrappers until reaching a BaseModel (TypeError if impossible). Installs
+        # the transformer and forward decorators. With column merging disabled: computes the wrapped loss on the final
+        # layer times last_layer_weight (filling the layer cache); if KL is enabled, takes the recorded final embeddings,
+        # applies a temperature-scaled softmax and detaches them as the teacher. Prior layer candidates are all but the
+        # last layer index; if n_layers_per_step is positive and smaller than that count, a random sample of that size
+        # is used (Python global RNG). If there are none, returns the final-layer loss. For each chosen layer, reruns the
+        # wrapped loss using cached hidden states and adds it times the layer weight times prior_layers_weight divided
+        # by the number of chosen layers; with KL enabled, also adds the batch-mean KL divergence between the layer's
+        # temperature-scaled log-softmax embeddings and the teacher, times temperature and kl_div_weight. Always
+        # restores both original forwards. Returns the scalar loss.
         # Unwrap DDP (`.module`) / torch.compile (`_orig_mod`) wrappers so `self.model[0]`
         # decoration still works under multi-GPU or compiled training.
         unwrapped_model = self.model
@@ -281,6 +319,8 @@ class AdaptiveLayerLoss(nn.Module):
         return loss
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the config: wrapped loss class name, the numeric settings, and layer_weighting as its string or the
+        # callable's name ("custom" if unnamed).
         if isinstance(self.layer_weighting, str):
             layer_weighting = self.layer_weighting
         else:
@@ -297,6 +337,7 @@ class AdaptiveLayerLoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC] Return the BibTeX citation for the 2D Matryoshka Sentence Embeddings paper.
         return """
 @misc{li20242d,
     title={2D Matryoshka Sentence Embeddings},

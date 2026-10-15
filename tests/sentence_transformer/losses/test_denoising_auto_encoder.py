@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests encoder/decoder weight tying in DenoisingAutoEncoderLoss (TSDAE). The loss builds a decoder (with cross-attention) from
+# the encoder's checkpoint or a given one, and when tying is enabled shares same-named base-model parameters between them.
+# Uses the tiny BERT model fixture; constructing the loss may download the decoder from the Hub.
 from __future__ import annotations
 
 import torch
@@ -9,6 +13,9 @@ TINY_MODEL = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
 
 def _base_params(loss: DenoisingAutoEncoderLoss) -> tuple[dict, dict]:
+    # [FUNCTION DOC]
+    # HELPER: Returns two dicts mapping parameter name to parameter: one for the encoder's underlying transformers model and one
+    # for the decoder's base model (looked up via the decoder's base_model_prefix submodule).
     """Return ``(encoder_params, decoder_base_params)`` keyed by name, for the shared base models."""
     encoder = loss.encoder.transformers_model
     decoder_base = loss.decoder._modules[loss.decoder.base_model_prefix]
@@ -16,12 +23,18 @@ def _base_params(loss: DenoisingAutoEncoderLoss) -> tuple[dict, dict]:
 
 
 def test_tie_encoder_decoder_does_not_raise(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Regression test: constructing the loss with tying enabled must not raise (it used to fail on transformers 5 because a
+    # private tying helper was removed).
     """Regression for #3737: tying raised a RuntimeError on transformers>=5.0.0, which removed
     the ``PreTrainedModel._tie_encoder_decoder_weights`` helper this loss relied on."""
     DenoisingAutoEncoderLoss(stsb_bert_tiny_model, tie_encoder_decoder=True)
 
 
 def test_tied_weights_share_storage(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # With tying, asserts the word-embedding weight is the identical object in encoder and decoder, that the two share at least
+    # one parameter name, and that every shared-name parameter points at the same storage (same data pointer).
     """With tying, every parameter shared by name between encoder and decoder is the *same object*."""
     loss = DenoisingAutoEncoderLoss(stsb_bert_tiny_model, tie_encoder_decoder=True)
     encoder_params, decoder_params = _base_params(loss)
@@ -40,6 +53,8 @@ def test_tied_weights_share_storage(stsb_bert_tiny_model: SentenceTransformer) -
 
 
 def test_decoder_only_weights_are_not_tied(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts the decoder has cross-attention parameters and none of them exist in the encoder, so they cannot have been tied.
     """Cross-attention is decoder-only, so it has no encoder counterpart and must be skipped."""
     loss = DenoisingAutoEncoderLoss(stsb_bert_tiny_model, tie_encoder_decoder=True)
     encoder_params, decoder_params = _base_params(loss)
@@ -50,6 +65,9 @@ def test_decoder_only_weights_are_not_tied(stsb_bert_tiny_model: SentenceTransfo
 
 
 def test_tying_preserves_decoder_lm_head(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts that after tying, the encoder input embeddings, decoder input embeddings and decoder LM-head weight are one and the
+    # same tensor object (the test model ties its word embeddings).
     """The decoder's weight-tied LM head must stay bound to the shared input embeddings. Tying the
     encoder *to* the decoder keeps all three as one tensor. Reversing the direction would rebind the
     decoder's input embeddings to the encoder's and orphan the LM head (silently untying it)."""
@@ -65,6 +83,8 @@ def test_tying_preserves_decoder_lm_head(stsb_bert_tiny_model: SentenceTransform
 
 
 def test_untied_weights_are_independent(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Without tying and with an explicit decoder checkpoint, asserts the encoder and decoder word embeddings use different storage.
     """Without tying, the encoder and decoder keep independent storage."""
     loss = DenoisingAutoEncoderLoss(stsb_bert_tiny_model, decoder_name_or_path=TINY_MODEL, tie_encoder_decoder=False)
     encoder_params, decoder_params = _base_params(loss)
@@ -74,6 +94,9 @@ def test_untied_weights_are_independent(stsb_bert_tiny_model: SentenceTransforme
 
 
 def test_forward_backward_flows_grad_to_tied_weight(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Moves the loss to the model device, preprocesses one sentence onto that device, and calls the loss with the same features as
+    # noisy input and target. Asserts a finite scalar result, backpropagates, and asserts the shared word embedding received a gradient.
     """A train step produces a finite scalar and flows gradient into the tied embedding."""
     loss = DenoisingAutoEncoderLoss(stsb_bert_tiny_model, tie_encoder_decoder=True)
     loss = loss.to(stsb_bert_tiny_model.device)  # the trainer normally handles device placement
@@ -93,6 +116,8 @@ def test_forward_backward_flows_grad_to_tied_weight(stsb_bert_tiny_model: Senten
 
 
 def test_tie_without_decoder_name_does_not_require_it(stsb_bert_tiny_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts that with tying and no decoder path given, the loss still builds a decoder (defaulting to the encoder's checkpoint).
     """When tying, ``decoder_name_or_path`` may be omitted: it defaults to the encoder's checkpoint."""
     loss = DenoisingAutoEncoderLoss(stsb_bert_tiny_model, tie_encoder_decoder=True)
     assert loss.decoder is not None

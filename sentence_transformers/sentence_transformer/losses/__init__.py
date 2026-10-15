@@ -1,3 +1,7 @@
+# [PACKAGE DOC] Loss functions for training SentenceTransformer (dense embedding) models. Imports CoSENTLoss first (AnglELoss
+# depends on it), then re-exports all loss classes plus related helpers: distance metric enums for contrastive,
+# triplet and batch-hard triplet losses, and the contrastive tension data loader. Each loss is a torch module
+# called with a list of tokenized feature dicts (one per input column) and a labels tensor, returning a scalar loss.
 # CoSENTLoss must be imported before AnglELoss
 from __future__ import annotations
 

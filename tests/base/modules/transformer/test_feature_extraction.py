@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pytest test module for the Sentence Transformers Transformer module with the "feature-extraction" transformers task, run across many tiny Hub model architectures (whole tree is skipped in CI by the shared conftest). The default task, producing token or sentence embeddings. Adds reformer to a feature-extraction-specific xfail list. Builds the base model key list from transformers' model mapping (or config mapping on ImportError). Tests are grouped in one class parametrised per architecture via class-scoped fixtures, and use subtests to cover every supported input modality/format. The class also checks that the model's supports method agrees with its modalities list.
 """
 Test suite for Transformer module with feature-extraction task (default).
 Tests various tiny model architectures with pre-built tiny models from
@@ -65,18 +67,24 @@ XFAIL_FEATURE_EXTRACTION = [
     scope="class",
 )
 def arch(request):
+    # [FUNCTION DOC]
+    # HELPER: Class-scoped fixture parametrised over architectures with a tiny model id that are not in the general or feature-extraction xfail lists, not v4-xfailed (unless transformers is v5+), not faulty, and in the base model key list. Returns the key.
     """Get the model architecture name."""
     return request.param
 
 
 @pytest.fixture(scope="class")
 def arch_model(arch):
+    # [FUNCTION DOC]
+    # HELPER: Class-scoped fixture loading the tiny Transformer module for the current architecture with the feature-extraction task via the shared loader. Returns a tuple of architecture key and module (shared, and mutable, across all tests of the class for that architecture).
     model = load_transformer(arch, transformer_task="feature-extraction")
     return arch, model
 
 
 @pytest.fixture
 def arch_model_modalities(arch_model):
+    # [FUNCTION DOC]
+    # HELPER: Function fixture returning a tuple of architecture key, module and the module's supported-modalities list. If reading the modalities raises, the test fails with the error message.
     """Create a Transformer instance and return it with its supported modalities.
 
     Returns:
@@ -91,9 +99,13 @@ def arch_model_modalities(arch_model):
 
 
 class TestTransformerArchitectures:
+    # [CLASS DOC]
+    # Test class run once per selected architecture covering embedding dimension, save/load, the modalities property, consistency of supports with modalities, and forward passes on all supported samples.
     """Test suite for Transformer module with various tiny model architectures (feature-extraction task)."""
 
     def test_get_embedding_dimension(self, arch_model):
+        # [FUNCTION DOC]
+        # Asserts the module's embedding dimension is a positive integer.
         """Test that word embedding dimension can be retrieved."""
         arch, model = arch_model
         dim = model.get_embedding_dimension()
@@ -101,6 +113,8 @@ class TestTransformerArchitectures:
         assert dim > 0
 
     def test_save_load(self, arch_model, tmp_path):
+        # [FUNCTION DOC]
+        # Saves the module into a fresh "model" subdirectory of pytest's temporary path, reloads it as a Transformer from that path, and asserts the embedding dimension is unchanged. Writes to disk.
         """Test saving and loading the model."""
         arch, model = arch_model
 
@@ -113,12 +127,16 @@ class TestTransformerArchitectures:
         assert loaded_model.get_embedding_dimension() == model.get_embedding_dimension()
 
     def test_modalities_property(self, arch_model_modalities):
+        # [FUNCTION DOC]
+        # Asserts the modalities property is a non-empty list.
         """Test that the modalities property returns a list."""
         arch, model, modalities = arch_model_modalities
         assert isinstance(modalities, list)
         assert len(modalities) > 0
 
     def test_supports_consistency(self, arch_model_modalities, subtests):
+        # [FUNCTION DOC]
+        # Checks the base model's supports method against the module's modalities, each check in a subtest: every listed modality is supported; every single modality of the Modality type that is not listed is unsupported; for every 2-combination of listed non-message modalities, the tuple is supported when "message" is listed, else supported only if that exact tuple is listed; and, if there is a single modality that appears neither alone nor inside any listed tuple (excluding "message"), a tuple of the first listed non-message modality and that unlisted one is unsupported.
         """Test that supports() is consistent with the modalities property.
 
         For each architecture, verifies that:
@@ -168,6 +186,8 @@ class TestTransformerArchitectures:
                 assert not BaseModel.supports(model, bad_tuple)
 
     def test_inference_with_supported_modalities(self, arch_model_modalities, subtests):
+        # [FUNCTION DOC]
+        # Runs preprocessing and a no-grad forward pass for every sample set produced by the shared sample builder (n of 2, using the module's message format). If the architecture requires CUDA it skips when CUDA is unavailable, else moves the module to the GPU (and later the features). For each, inside a subtest, it chooses the expected outcome: any exception if the architecture's forward is expected to fail for all modalities or for this description; ValueError, TypeError or AttributeError for image+video samples of image-video-failing architectures, for image-only (no plus) samples of image-only-failing architectures, or audio samples of audio-failing architectures; ValueError for combined descriptions when output is sentence embeddings and the architecture is not a multimodal-success exception, or for known multimodal failures; otherwise no exception. Within the expected context it preprocesses (skipping the subtest for older-transformers errors about image URLs/paths not being flattenable or missing image height), runs forward, and asserts the output contains the module output name with batch size equal to the number of inputs, that the last dimension equals the embedding dimension, and that token embeddings are 3-D while sentence embeddings are 2-D.
         """Test inference with each supported modality (single and multi-modal)."""
         arch, model, modalities = arch_model_modalities
         if arch in REQUIRES_CUDA:

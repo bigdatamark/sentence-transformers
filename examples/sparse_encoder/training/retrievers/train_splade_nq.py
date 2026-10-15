@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example script: train a SPLADE sparse encoder from distilbert-base-uncased on Natural Questions pairs with SpladeLoss over
+# SparseMultipleNegativesRankingLoss (query/document regularizer weights 5e-5/3e-5). Running as a script calls main().
 """
 This example trains a SparseEncoder for the Natural Questions (NQ) dataset.
 The training script fine-tunes a SparseEncoder using the Splade loss function for retrieval.
@@ -30,6 +33,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Full training pipeline; no inputs, returns None. Loads the model (fp32, max length 256), takes 100k NQ rows and holds out 1k
+    # (seed 12), evaluates SparseNanoBEIREvaluator (msmarco, nfcorpus, nq) before, during and after training, and trains 1 epoch
+    # (batch 16, lr 2e-6, 10% warmup, bf16, NO_DUPLICATES, eval/save every 20%, log every 5%). Saves to models/<run_name>/final
+    # and tries a Hub push. Side effects: network, disk, GPU, logging.
     model_name = "distilbert/distilbert-base-uncased"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
     global_batch_size = 16

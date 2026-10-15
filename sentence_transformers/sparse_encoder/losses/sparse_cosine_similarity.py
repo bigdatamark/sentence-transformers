@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Sparse cosine similarity loss: regresses the cosine similarity of sparse embedding pairs onto
+# float labels, reusing the dense CosineSimilarityLoss computation. Must be wrapped in SpladeLoss
+# or CSRLoss.
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -10,12 +14,20 @@ from sentence_transformers.sparse_encoder.model import SparseEncoder
 
 
 class SparseCosineSimilarityLoss(CosineSimilarityLoss):
+    # [CLASS DOC]
+    # CosineSimilarityLoss subclass for SparseEncoder models. The inherited compute_loss_from_embeddings
+    # computes the cosine similarity of each pair, applies cos_score_transformation, and compares it to
+    # the labels with loss_fct (MSE by default).
     def __init__(
         self,
         model: SparseEncoder,
         loss_fct: nn.Module = nn.MSELoss(),
         cos_score_transformation: nn.Module = nn.Identity(),
     ) -> None:
+        # [FUNCTION DOC]
+        # Sets the model's similarity_fn_name to "cosine" (mutating the model) and initializes the parent
+        # with the model, loss function and score transformation. The default loss and transformation
+        # modules are single instances created at definition time and shared between all instances.
         """
         SparseCosineSimilarityLoss expects that the inputs consists of a pair of inputs (e.g., texts) and a float label.
         It computes the vectors ``u = model(input_A)`` and ``v = model(input_B)`` and measures the cosine-similarity
@@ -74,4 +86,6 @@ class SparseCosineSimilarityLoss(CosineSimilarityLoss):
         super().__init__(model, loss_fct=loss_fct, cos_score_transformation=cos_score_transformation)
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Always raises AttributeError: this loss must be used inside SpladeLoss or CSRLoss.
         raise AttributeError("SparseCosineSimilarityLoss should not be used alone. Use it with SpladeLoss or CSRLoss.")

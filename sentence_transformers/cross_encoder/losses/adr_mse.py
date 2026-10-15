@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# ADR-MSE (approximate discounted rank MSE) listwise loss for CrossEncoder, from Rank-DistiLLM.
 from __future__ import annotations
 
 import torch
@@ -8,6 +10,10 @@ from sentence_transformers.util import batch_to_device, fullname
 
 
 class ADRMSELoss(nn.Module):
+    # [CLASS DOC]
+    # Torch loss module wrapping a single-output CrossEncoder. Attributes: the model, alpha (sharpness inside the
+    # sigmoid of the approximate rank), activation applied to logits (identity when None), and optional
+    # mini-batch size. Inputs per row: a query, a variable-length document list and matching relevance labels.
     def __init__(
         self,
         model: CrossEncoder,
@@ -15,6 +21,9 @@ class ADRMSELoss(nn.Module):
         activation_fn: nn.Module | None = nn.Identity(),
         mini_batch_size: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Store settings (None activation becomes identity). Raises ValueError unless the model has exactly one
+        # output label.
         r"""
         ADR-MSE (Approx Discounted Rank Mean Squared Error) listwise ranking loss for cross-encoders.
         This loss directly minimizes the error between true rank positions and differentiable
@@ -115,6 +124,11 @@ class ADRMSELoss(nn.Module):
             )
 
     def approximate_ranks(self, scores: Tensor, mask: Tensor) -> Tensor:
+        # [FUNCTION DOC]
+        # Differentiable approximate ranks. Inputs: scores (queries by documents) and a boolean validity mask. For
+        # each document i, rank is 1 plus the sum over valid documents j of sigmoid(alpha times (score j minus score
+        # i)), excluding the self term (which contributes one half and is subtracted). Returns a tensor of the same
+        # shape; values at padded positions are meaningless.
         """Compute differentiable approximate ranks using the ApproxRank formulation.
 
         For each document i: ``approx_rank(i) = 1 + sum_{j != i} sigmoid(alpha * (s_j - s_i))``.
@@ -132,6 +146,15 @@ class ADRMSELoss(nn.Module):
         prompt: str | None = None,
         task: str | None = None,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Compute the loss. Raises ValueError if labels are a single tensor, there are not exactly two columns, or
+        # per-query document and label counts differ. Scores all (query, document) pairs in chunks (mini-batch size,
+        # default number of queries; non-positive means all at once), applies the activation, and scatters into a
+        # padded queries by max-documents matrix (padding a very large negative) with a validity mask and padded
+        # label matrix. True ranks use average ranks for ties: number of valid documents with a strictly higher
+        # label plus (number with an equal label, including itself, plus one) over two. Computes approximate ranks,
+        # weights the squared rank error by one over log2 of (true rank plus one), and returns the sum over valid
+        # positions divided by the number of valid positions.
         """
         Compute ADR-MSE loss for a batch of queries and their documents.
 
@@ -217,6 +240,8 @@ class ADRMSELoss(nn.Module):
         return loss.sum() / mask.sum()
 
     def get_config_dict(self) -> dict[str, float | int | str | None]:
+        # [FUNCTION DOC]
+        # Return the loss config: alpha, activation qualified name and mini-batch size.
         return {
             "alpha": self.alpha,
             "activation_fn": fullname(self.activation_fn),
@@ -225,6 +250,8 @@ class ADRMSELoss(nn.Module):
 
     @property
     def citation(self) -> str:
+        # [FUNCTION DOC]
+        # Return the BibTeX citation for Rank-DistiLLM (Schlatt et al. 2025).
         return """
 @inproceedings{schlatt2025rankdistillm,
     title={Rank-DistiLLM: Closing the Effectiveness Gap Between Cross-Encoders and LLMs for Passage Re-ranking},

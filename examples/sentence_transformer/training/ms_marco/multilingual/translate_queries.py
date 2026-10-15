@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Script: machine-translate MS MARCO training queries from English into a target language (first CLI arg, required)
+# with EasyNMT "opus-mt". Output: multilingual-data/train_queries.en-<lang>.tsv, one "qid<TAB>translation" line per
+# query (tabs in translations replaced by spaces). Resumable: qids already present in the output file are skipped and
+# new lines are appended. Queries are the qids in the mteb/msmarco "default" train qrels, with text from the
+# "queries" split (qids without text are dropped). Translates as a stream (beam 2, no sentence splitting, chunk 256,
+# batch 64), flushing after each line. Side effects: creates the folder, downloads data/models, prints progress.
 """
 This script translates the queries in the MS MARCO dataset to the defined target languages.
 

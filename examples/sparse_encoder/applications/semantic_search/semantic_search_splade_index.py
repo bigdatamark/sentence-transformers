@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script: sparse semantic search with the splade_index package. Loads rasyosef/splade-tiny, builds a SPLADE index over the
+# first 10,000 Natural Questions answers (batch 16), then loops forever: retrieves the top 5 documents for the current
+# queries (initially the first two dataset queries; the index encodes the queries itself), prints timing and each hit's
+# score, text and id, and reads the next query from stdin. Side effects: network, in-memory index, stdin/stdout.
 """
 This script contains an example how to perform semantic search with splade_index.
 For more information, please refer to the documentation:

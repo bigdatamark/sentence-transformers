@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Example script: finetune the multimodal Qwen/Qwen3-VL-Embedding-2B (flash attention 2, bf16, image pixels bounded
+# to 28*28..600*600) for visual document retrieval: text queries vs. document screenshot images. Trains on
+# query/image/negative_0 columns with MatryoshkaLoss (dims 2048..64) wrapping CachedMultipleNegativesRankingLoss
+# (mini-batch 1); batch 64, lr 2e-5, 10% warmup, bf16, NO_DUPLICATES, eval/save every 10%.
+# Evaluation: InformationRetrievalEvaluator where each eval query i is relevant only to its image i, with the corpus
+# also containing all four negatives of every row (ids offset by multiples of the eval size). Evaluates before and
+# after training, then per Matryoshka dim via truncate_dim. Saves to models/<run_name>/final and tries a Hub push.
+# Side effects: network, disk, GPU, logging.
 """
 This example shows how to finetune a multimodal Sentence Transformer model for document screenshot embedding
 using MatryoshkaLoss and CachedMultipleNegativesRankingLoss.
