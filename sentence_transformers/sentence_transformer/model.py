@@ -1,3 +1,8 @@
+# [MODULE DOC] The SentenceTransformer model class: a sequential stack of modules (typically a Transformer followed by Pooling
+# and optional Dense / Normalize modules) that maps texts or other inputs to fixed-size dense embeddings. Builds on
+# BaseModel (loading, saving, prompts, preprocessing, multi-process pools, Hub integration) and FitMixin (legacy
+# training). Adds encode / encode_query / encode_document, similarity functions, embedding truncation and default
+# module construction for plain Hugging Face checkpoints. ALLOWED_PRECISIONS lists the supported output precisions.
 from __future__ import annotations
 
 import copy
@@ -38,6 +43,10 @@ ALLOWED_PRECISIONS = {"float32", "int8", "uint8", "binary", "ubinary"}
 
 
 class SentenceTransformer(BaseModel, FitMixin):
+    # [CLASS DOC] Dense embedding model. Class attributes: model card data class, default Hub organization, default prompts (query
+    # and document set to None), model type name, and the tuple of supported similarity function names (cosine, dot,
+    # euclidean, manhattan). Instance state added on top of BaseModel: similarity_fn_name (lazily defaulting to cosine,
+    # with cached matrix and pairwise similarity callables) and truncate_dim (optional output dimension truncation).
     """
     Loads or creates a SentenceTransformer model that can be used to map text and other inputs to dense embeddings.
 
@@ -175,6 +184,12 @@ class SentenceTransformer(BaseModel, FitMixin):
         similarity_fn_name: Literal["cosine", "dot", "euclidean", "manhattan"] | SimilarityFunction | None = None,
         truncate_dim: int | None = None,
     ) -> None:
+        # [FUNCTION DOC] Set similarity_fn_name (validated by its setter; ValueError for unsupported names) and truncate_dim before calling
+        # the base constructor, which loads or assembles modules and parses the saved config (which may fill these if unset).
+        # The deprecated use_auth_token is mapped to token with a FutureWarning; passing both raises ValueError. The
+        # deprecated keyword tokenizer_kwargs is remapped to processor_kwargs by a decorator. For the known INSTRUCTOR
+        # checkpoints, disables prompt inclusion in pooling; for other repo names containing "instructor", logs a warning
+        # when any Pooling module still includes the prompt. Side effects: downloads/loads model files.
         # Set before super().__init__() so _parse_model_config can check these
         self.similarity_fn_name = similarity_fn_name
         self.truncate_dim = truncate_dim
@@ -243,6 +258,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode_query(
@@ -264,6 +280,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode_query(
@@ -285,6 +302,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode_query(
@@ -306,6 +324,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     # Catch-all so calls with union-typed arguments or output_value overrides still resolve.
     @overload
@@ -327,6 +346,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @deprecated_kwargs(sentences="inputs")
     def encode_query(
@@ -347,6 +367,9 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = None,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]:
+        # [FUNCTION DOC] Encode inputs as queries: when neither prompt_name nor prompt is given and a "query" prompt exists, use it; then
+        # delegate to encode with every argument plus task "query" (which routers use to pick query-specific modules).
+        # Returns whatever encode returns. The deprecated keyword sentences is remapped to inputs.
         """
         Computes embeddings specifically optimized for query representation.
 
@@ -406,6 +429,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode_document(
@@ -427,6 +451,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode_document(
@@ -448,6 +473,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode_document(
@@ -469,6 +495,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     # Catch-all so calls with union-typed arguments or output_value overrides still resolve.
     @overload
@@ -490,6 +517,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @deprecated_kwargs(sentences="inputs")
     def encode_document(
@@ -510,6 +538,8 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = None,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]:
+        # [FUNCTION DOC] Encode inputs as documents: when neither prompt_name nor prompt is given, use the first existing prompt named
+        # "document", "passage" or "corpus"; then delegate to encode with task "document". Returns what encode returns.
         """
         Computes embeddings specifically optimized for document/passage representation.
 
@@ -554,6 +584,8 @@ class SentenceTransformer(BaseModel, FitMixin):
         )
 
     def is_singular_input(self, inputs: Any) -> TypeIs[SingleInput]:
+        # [FUNCTION DOC] Return whether the input is one example rather than a batch, delegating to the base implementation (redeclared
+        # only for type narrowing).
         """Check if the input is a single example rather than a batch. Redeclared with
         :class:`~typing_extensions.TypeIs` so type checkers narrow the branches in :meth:`encode`."""
         return super().is_singular_input(inputs)
@@ -580,6 +612,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -601,6 +634,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -622,6 +656,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -643,6 +678,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -664,6 +700,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> dict[str, Tensor]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -685,6 +722,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -706,6 +744,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @overload
     def encode(
@@ -727,6 +766,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from encode_query) still resolve.
     @overload
@@ -748,6 +788,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = ...,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC] Typing-only overload signature (no runtime behavior); the implementation below handles the call.
 
     @torch.inference_mode()
     @deprecated_kwargs(sentences="inputs")
@@ -769,6 +810,22 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = None,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]:
+        # [FUNCTION DOC] Compute embeddings. Runs in inference mode (no autograd). On HPU devices, wraps the model in an HPU graph once.
+        # Progress bar defaults to on at INFO/DEBUG log level. convert_to_tensor disables numpy conversion; any output_value
+        # other than "sentence_embedding" disables both conversions. Raises ValueError for non-positive batch size, for extra
+        # keyword arguments not accepted by the model (besides task and processing_kwargs), or for an unsupported precision.
+        # A singular input is wrapped in a one-item list; other non-list iterables are materialized to a list. If a pool or a
+        # non-empty device list is given, encodes via multiple processes in float32, then quantizes the merged result once
+        # (restoring tensor or list format) and unwraps singular input. Otherwise resolves the prompt, moves the model to the
+        # device and sets eval mode, uses truncate_dim or the model default, sorts inputs by descending length (interleaved
+        # when inputs can be flattened) and processes them in batches: preprocess with the prompt and kwargs, pad on HPU,
+        # move to device, run the model, truncate sentence embeddings if requested. For "token_embeddings", each row is
+        # trimmed after its last non-padded token; for None, each item becomes a dict of that row's values for every output
+        # key (non-indexable values copied as is); for sentence embeddings, optionally L2-normalized and moved to CPU when
+        # converting to numpy. Results are restored to input order, quantized when precision is not float32, then returned
+        # as one stacked tensor (empty tensor if no inputs), a 2-D numpy array (bfloat16 upcast to float32), or a list of
+        # tensors; singular input returns its single element.
+        # KNOWN ISSUE: The docstring says convert_to_numpy returns a list of numpy vectors, but the code returns one 2-D numpy array.
         """
         Computes embeddings for the given inputs.
 
@@ -1002,6 +1059,9 @@ class SentenceTransformer(BaseModel, FitMixin):
 
     @staticmethod
     def _pad_features_for_hpu(features: dict[str, Tensor]) -> dict[str, Tensor]:
+        # [FUNCTION DOC] HELPER: For HPU graphs, right-pad input_ids (with ones), attention_mask and token_type_ids (with zeros) as int8 to
+        # the next power-of-two sequence length. Returns the features unchanged when there are no input_ids or no padding
+        # is needed; otherwise mutates and returns the dict.
         """Pad input features to the next power of 2 for HPU graph compatibility."""
         if "input_ids" not in features:
             return features
@@ -1026,6 +1086,7 @@ class SentenceTransformer(BaseModel, FitMixin):
 
     @property
     def similarity_fn_name(self) -> Literal["cosine", "dot", "euclidean", "manhattan"]:
+        # [FUNCTION DOC] Return the similarity function name; if unset, set it to cosine first (which also builds the similarity callables).
         """Return the name of the similarity function.
 
         If not previously set, accessing this property defaults it to ``"cosine"``.
@@ -1038,6 +1099,9 @@ class SentenceTransformer(BaseModel, FitMixin):
     def similarity_fn_name(
         self, value: Literal["cosine", "dot", "euclidean", "manhattan"] | SimilarityFunction | None
     ) -> None:
+        # [FUNCTION DOC] Accept a name or SimilarityFunction member (converted to its string value) or None. Raises ValueError for names not
+        # in the supported tuple (with a hint to use MultiVectorEncoder for "maxsim"). For non-None values, build the matrix
+        # and pairwise similarity callables. Stores the name.
         if isinstance(value, SimilarityFunction):
             value = value.value
         if value is not None and value not in self.SUPPORTED_SIMILARITY_FN_NAMES:
@@ -1056,6 +1120,8 @@ class SentenceTransformer(BaseModel, FitMixin):
         embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
+        # [FUNCTION DOC] Return the matrix of similarities between every embedding in the first and second input using the configured
+        # function (initializing the default first). Inputs may be tensors, arrays or lists of them.
         """
         Compute the similarity between two collections of embeddings. The output is a matrix with the
         similarity scores between all embeddings from the first parameter and all embeddings from the
@@ -1077,6 +1143,7 @@ class SentenceTransformer(BaseModel, FitMixin):
         embeddings1: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
     ) -> Tensor:
+        # [FUNCTION DOC] Return the similarity between aligned pairs of embeddings (row i with row i) using the configured pairwise function.
         """
         Compute the pairwise similarity between two collections of embeddings, i.e. the similarity
         between ``embeddings1[i]`` and ``embeddings2[i]`` for each ``i``.
@@ -1109,6 +1176,8 @@ class SentenceTransformer(BaseModel, FitMixin):
         normalize_embeddings: bool = False,
         truncate_dim: int | None = None,
     ) -> np.ndarray:
+        # [FUNCTION DOC] Deprecated wrapper: encode sentences with the given pool and settings via encode, returning a numpy array of
+        # sentence embeddings. Emits a deprecation warning.
         """
         .. warning::
             This method is deprecated. You can now call :meth:`SentenceTransformer.encode`
@@ -1139,6 +1208,11 @@ class SentenceTransformer(BaseModel, FitMixin):
         chunk_size: int | None = None,
         **encode_kwargs,
     ) -> list | Tensor | np.ndarray:
+        # [FUNCTION DOC] HELPER: Multi-process encoding. Disables per-worker progress bars. Creates a pool from the device list when none is
+        # given (and stops it afterwards). Chunk size defaults to about a tenth of the per-process share, capped at 5000 and at
+        # least 1. Puts (chunk id, chunk, kwargs) jobs on the input queue, collects as many results from the output queue
+        # (optional progress bar), sorts them by chunk id, and concatenates: lists are chained, tensors and arrays are
+        # concatenated; with no inputs returns an empty tensor, empty array or empty list according to the conversion flags.
         """Internal method for multi-process encoding.
 
         Either ``pool`` or ``device`` (as a list) must be provided. If ``pool`` is ``None`` and ``device``
@@ -1198,6 +1272,9 @@ class SentenceTransformer(BaseModel, FitMixin):
     def _multi_process_worker(
         target_device: str, model: SentenceTransformer, input_queue: Queue, results_queue: Queue
     ) -> None:
+        # [FUNCTION DOC] HELPER: Worker process loop: repeatedly take a job from the input queue, encode it on the target device with the
+        # given kwargs, move tensor (or dict of tensor) results to CPU, and put (chunk id, result) on the results queue.
+        # KNOWN ISSUE: The queue get call blocks without a timeout, so the queue.Empty handler that should end the loop is never reached; the worker only stops when its process is terminated.
         """Internal working process to encode inputs in multi-process setup.
 
         Workers are terminated externally via ``stop_multi_process_pool``.
@@ -1219,6 +1296,7 @@ class SentenceTransformer(BaseModel, FitMixin):
                 break
 
     def set_pooling_include_prompt(self, include_prompt: bool) -> None:
+        # [FUNCTION DOC] Set include_prompt on the first Pooling module found in the model (no-op if none).
         """
         Sets the `include_prompt` attribute in the pooling layer in the model, if there is one.
 
@@ -1232,9 +1310,13 @@ class SentenceTransformer(BaseModel, FitMixin):
 
     @deprecated("The `get_sentence_features` method is deprecated and will be removed in a future version.")
     def get_sentence_features(self, *features) -> dict[str, Tensor]:
+        # [FUNCTION DOC] Deprecated: delegate to the first module's get_sentence_features with the given arguments.
         return self[0].get_sentence_features(*features)
 
     def get_embedding_dimension(self) -> int | None:
+        # [FUNCTION DOC] Return the output embedding dimension: scanning modules from last to first, use the first non-None value of an
+        # embedding-dimension getter (new name, then legacy sentence or word embedding names). If truncate_dim is set, return
+        # the minimum of the two (or truncate_dim if unknown). Returns None if nothing is known.
         """
         Returns the number of dimensions in the output of :meth:`SentenceTransformer.encode`.
 
@@ -1265,10 +1347,13 @@ class SentenceTransformer(BaseModel, FitMixin):
         category=FutureWarning,
     )
     def get_sentence_embedding_dimension(self) -> int | None:
+        # [FUNCTION DOC] Deprecated alias (FutureWarning) for get_embedding_dimension.
         return self.get_embedding_dimension()
 
     @contextmanager
     def truncate_embeddings(self, truncate_dim: int | None) -> Iterator[None]:
+        # [FUNCTION DOC] Context manager that temporarily sets truncate_dim to the given value and restores the previous value on exit,
+        # even on errors.
         """
         In this context, :meth:`SentenceTransformer.encode` outputs
         embeddings truncated at dimension ``truncate_dim``.
@@ -1303,12 +1388,14 @@ class SentenceTransformer(BaseModel, FitMixin):
         category=FutureWarning,
     )
     def truncate_sentence_embeddings(self, truncate_dim: int | None) -> Iterator[None]:
+        # [FUNCTION DOC] Deprecated alias (FutureWarning) for the truncate_embeddings context manager.
         with self.truncate_embeddings(truncate_dim):
             yield
 
     @staticmethod
     @deprecated("SentenceTransformer.load(...) is deprecated, use SentenceTransformer(...) instead.")
     def load(input_path: str) -> SentenceTransformer:
+        # [FUNCTION DOC] Deprecated: construct and return a SentenceTransformer from the given path.
         """Deprecated: Use SentenceTransformer(input_path) instead."""
         return SentenceTransformer(input_path)
 
@@ -1324,6 +1411,11 @@ class SentenceTransformer(BaseModel, FitMixin):
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC] HELPER: Build default modules for a plain Hugging Face checkpoint. Merges token, trust_remote_code, revision and
+        # local_files_only into model, processor and config kwargs (user values win), creates a Transformer module (with the
+        # cache dir and backend), and if it outputs token embeddings appends a Pooling module: last-token pooling for causal
+        # LM architectures (unless the config says is_causal is false), mean pooling otherwise. Unless loading local files
+        # only, records the base model in the model card data. Returns the module list and an empty extra-config dict.
         """
         Creates a simple Transformer + Mean Pooling model and returns the modules, except for
         CausalLM-based models which use Last Token pooling instead.
@@ -1379,6 +1471,8 @@ class SentenceTransformer(BaseModel, FitMixin):
         return modules, {}
 
     def _parse_model_config(self, model_config: dict[str, Any]) -> None:
+        # [FUNCTION DOC] Parse the saved model config via the base class; adopt the saved similarity_fn_name if none was set and the saved
+        # name is supported; adopt the saved truncate_dim if none was set.
         super()._parse_model_config(model_config)
         # Inherit a supported saved similarity_fn_name unless the user overrode it (multi-vector
         # names like "maxsim", e.g. from converted MultiVectorEncoder saves, fall through).
@@ -1389,6 +1483,7 @@ class SentenceTransformer(BaseModel, FitMixin):
             self.truncate_dim = model_config.get("truncate_dim", None)
 
     def _get_model_config(self) -> dict[str, Any]:
+        # [FUNCTION DOC] Return the base config extended with similarity_fn_name and, when set, truncate_dim.
         config = super()._get_model_config() | {
             "similarity_fn_name": self.similarity_fn_name,
         }
@@ -1397,6 +1492,8 @@ class SentenceTransformer(BaseModel, FitMixin):
         return config
 
     def _push_to_hub_usage_tip(self, repo_id: str) -> str:
+        # [FUNCTION DOC] Return a markdown usage snippet for the Hub push message showing how to load the pushed repo with this class and
+        # the current backend.
         class_name = self.__class__.__name__
         backend = self.get_backend()
         return f"""\
