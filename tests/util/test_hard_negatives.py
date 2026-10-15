@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Tests for sentence_transformers.util.mine_hard_negatives, which, for each (anchor, positive) row of a dataset,
+# retrieves candidate passages from a corpus (the dataset's positives or a separate corpus) with an embedding
+# model (optionally FAISS, a cross-encoder rescorer, multi-processing and an embedding cache), filters them by
+# rank window (range_min/range_max), score bounds and absolute/relative margins against the positive, samples
+# negatives ("top" or "random"), and emits them as triplet, n-tuple, labeled-pair or labeled-list datasets with
+# optional scores. Covers column naming, prompts, scores consistency, multiple positives, parameter validation,
+# FAISS padding edge cases and deprecated parameters. Uses eight fixed queries with matching passages plus eight
+# non-matching passages; skipped at module level when datasets is unavailable.
 from __future__ import annotations
 
 import importlib.util
@@ -56,18 +65,24 @@ PASSAGES = [
 
 @pytest.fixture(scope="session")
 def queries():
+    # [FUNCTION DOC]
+    # Session fixture returning a copy of the query list.
     """Return a list of sample queries."""
     return QUERIES.copy()
 
 
 @pytest.fixture(scope="session")
 def passages():
+    # [FUNCTION DOC]
+    # Session fixture returning a copy of the passage list.
     """Return a list of sample passages."""
     return PASSAGES.copy()
 
 
 @pytest.fixture(scope="session")
 def dataset(queries, passages):
+    # [FUNCTION DOC]
+    # Session fixture returning a dataset of the eight queries with their matching passages.
     """Return a sample dataset with matching queries and passages."""
     return Dataset.from_dict(
         {
@@ -79,6 +94,9 @@ def dataset(queries, passages):
 
 @pytest.fixture(scope="session")
 def multiple_positive_queries_dataset(queries, passages):
+    # [FUNCTION DOC]
+    # Session fixture where each query appears twice with two prefixed ("Copy 0", "Copy 1") versions of its passage,
+    # so each query has two distinct positives.
     """Return a sample dataset with multiple matching passages for each query."""
     return Dataset.from_dict(
         {
@@ -90,6 +108,11 @@ def multiple_positive_queries_dataset(queries, passages):
 
 @pytest.fixture(scope="session")
 def multiple_positive_passages_dataset(queries, passages):
+    # [FUNCTION DOC]
+    # Session fixture with two prefixed copies of each query paired with the same passage, so each passage is the
+    # positive of two distinct queries.
+    # KNOWN ISSUE: The docstring says each query has multiple matching passages, but here each passage has multiple
+    # matching queries (the queries are the ones duplicated with prefixes).
     """Return a sample dataset with multiple matching passages for each query."""
     return Dataset.from_dict(
         {
@@ -101,6 +124,10 @@ def multiple_positive_passages_dataset(queries, passages):
 
 @pytest.fixture(scope="session")
 def multiple_positive_dataset(queries, passages):
+    # [FUNCTION DOC]
+    # Session fixture repeating the whole query-passage dataset twice (exact duplicate rows).
+    # KNOWN ISSUE: The docstring claims multiple matching passages per query, but the rows are exact duplicates, so
+    # every query still has a single distinct positive.
     """Return a sample dataset with multiple matching passages for each query."""
     return Dataset.from_dict(
         {
@@ -111,6 +138,8 @@ def multiple_positive_dataset(queries, passages):
 
 
 def test_basic_functionality(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Mines with defaults and asserts query, passage and negative columns and at least as many rows as the input.
     """Test the basic functionality with default parameters."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(dataset=dataset, model=model, verbose=False)
@@ -127,6 +156,8 @@ def test_basic_functionality(dataset: Dataset, static_retrieval_mrl_en_v1_model:
 def test_column_names(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts custom anchor/positive column names are preserved alongside a negative column.
     """Test specifying custom column names."""
     model = static_retrieval_mrl_en_v1_model
     renamed_dataset = Dataset.from_dict({"question": queries, "answer": passages[: len(queries)]})
@@ -148,6 +179,8 @@ def test_column_names(
 def test_fully_custom_column_names(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer
 ):
+    # [FUNCTION DOC]
+    # Asserts custom column names are preserved in triplet output and in n-tuple output with two negative columns.
     """Test dataset with completely different column names."""
     model = static_retrieval_mrl_en_v1_model
     # Create dataset with completely custom column names
@@ -188,6 +221,8 @@ def test_fully_custom_column_names(
 def test_separate_corpus(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, passages: list[str]
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines against a separate corpus (passages from index 5) and asserts at least one negative comes from it.
     """Test using a separate corpus for negative mining."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(
@@ -210,6 +245,8 @@ def test_separate_corpus(
 def test_cross_encoder(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, reranker_bert_tiny_model: CrossEncoder
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines with a cross-encoder rescorer and a max score filter and asserts the triplet columns.
     """Test using a cross-encoder for rescoring."""
     model = static_retrieval_mrl_en_v1_model
     cross_encoder = reranker_bert_tiny_model
@@ -230,6 +267,9 @@ def test_cross_encoder(
 def test_cross_encoder_detailed(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, reranker_bert_tiny_model: CrossEncoder
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines with a cross-encoder, range_min 1, score bounds and two negatives in n-tuple format and asserts the
+    # columns.
     """Test using a cross-encoder with different parameters."""
     model = static_retrieval_mrl_en_v1_model
     cross_encoder = reranker_bert_tiny_model
@@ -258,6 +298,8 @@ def test_cross_encoder_with_multiple_positives_non_faiss(
     static_retrieval_mrl_en_v1_model: SentenceTransformer,
     reranker_bert_tiny_model: CrossEncoder,
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines the duplicate-row dataset with a cross-encoder and two negatives and asserts non-empty triplet output.
     model = static_retrieval_mrl_en_v1_model
     cross_encoder = reranker_bert_tiny_model
 
@@ -277,6 +319,8 @@ def test_cross_encoder_with_multiple_positives_non_faiss(
 
 
 def test_range_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts mining with range_min 1 and range_max 4 still returns triplet columns.
     """Test range_min and range_max parameters."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(
@@ -294,6 +338,8 @@ def test_range_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_model: Se
 
 
 def test_score_filters(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts mining with min and max score filters still returns triplet columns.
     """Test max_score and min_score parameters."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(
@@ -311,6 +357,8 @@ def test_score_filters(dataset: Dataset, static_retrieval_mrl_en_v1_model: Sente
 
 
 def test_margin_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts mining with an absolute margin and, separately, a relative margin both return a negative column.
     """Test absolute_margin and relative_margin parameters."""
     model = static_retrieval_mrl_en_v1_model
     # Test absolute_margin
@@ -335,6 +383,8 @@ def test_margin_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_model: S
 
 
 def test_num_negatives(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts n-tuple output with two negatives has negative_1 and negative_2 but no negative_3.
     """Test num_negatives parameter."""
     model = static_retrieval_mrl_en_v1_model
     num_neg = 2
@@ -351,6 +401,8 @@ def test_num_negatives(dataset: Dataset, static_retrieval_mrl_en_v1_model: Sente
 
 
 def test_sampling_strategies(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts both "top" and "random" sampling return a negative column.
     """Test different sampling strategies."""
     model = static_retrieval_mrl_en_v1_model
     # Test 'top' strategy
@@ -365,6 +417,8 @@ def test_sampling_strategies(dataset: Dataset, static_retrieval_mrl_en_v1_model:
 
 
 def test_prompts(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts raw query and corpus prompts still give triplet columns.
     """Test query_prompt and corpus_prompt parameters."""
     model = static_retrieval_mrl_en_v1_model
     query_prompt = "query: "
@@ -385,6 +439,8 @@ def test_prompts(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTra
 
 
 def test_include_positives(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts include_positives forces n-tuple style output even when triplet format is requested.
     """Test include_positives parameter."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(
@@ -398,6 +454,11 @@ def test_include_positives(dataset: Dataset, static_retrieval_mrl_en_v1_model: S
 def test_include_positives_with_labeled_formats(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts that with include_positives, requested labeled-pair and labeled-list formats both produce n-tuple
+    # style columns (negative_1 to negative_3) where negative_1 equals the positive passage.
+    # KNOWN ISSUE: The docstring and comments speak of labeled formats and labels, but include_positives forces the
+    # n-tuple layout, so neither labeled format nor any label is actually verified here.
     """Test include_positives with labeled pair and list formats."""
     model = static_retrieval_mrl_en_v1_model
     # Test with labeled-pair format
@@ -442,6 +503,11 @@ def test_include_positives_with_labeled_formats(
 
 
 def test_output_formats(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Exhaustively checks the columns of every output format with and without scores: triplet (scores as a
+    # two-element list), n-tuple (scores list of one plus negatives), the deprecated n-tuple-scores alias,
+    # labeled-pair (label 0/1, or a score column replacing the label) and labeled-list (list passages with labels
+    # 1 then 0s, or a scores list replacing labels).
     """Test all output_format options."""
     model = static_retrieval_mrl_en_v1_model
 
@@ -584,6 +650,9 @@ def test_output_formats(dataset: Dataset, static_retrieval_mrl_en_v1_model: Sent
 
 
 def _compute_similarity(model: SentenceTransformer, query: str, passage: str) -> float:
+    # [FUNCTION DOC]
+    # HELPER: Encodes the query with the query encoder and the passage with the document encoder (normalized
+    # tensors, no progress bar) and returns the model's pairwise similarity as a float.
     """Compute similarity between a single query and passage using the model.
 
     This helper mirrors the internal scoring logic in `mine_hard_negatives` by
@@ -610,6 +679,9 @@ def _compute_similarity(model: SentenceTransformer, query: str, passage: str) ->
 def test_triplet_output_scores_match_similarity(
     request: pytest.FixtureRequest, static_retrieval_mrl_en_v1_model: SentenceTransformer, test_dataset: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over the four dataset fixtures; mines two negatives in triplet format with scores and asserts
+    # each row's positive and negative scores match recomputed similarities within 1e-5.
     """Verify that triplet scores match recomputed query-positive/negative similarity.
 
     We validate both the simple dataset and the multiple-positive dataset to
@@ -651,6 +723,9 @@ def test_triplet_output_scores_match_similarity(
 def test_n_tuple_output_scores_match_similarity(
     request: pytest.FixtureRequest, static_retrieval_mrl_en_v1_model: SentenceTransformer, test_dataset: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over the dataset fixtures; asserts n-tuple scores have one plus two entries matching recomputed
+    # similarities of the positive and each negative.
     """Verify that n-tuple scores match recomputed query-positive/negatives similarity.
 
     Runs over both the single- and multiple-positive datasets.
@@ -698,6 +773,8 @@ def test_n_tuple_output_scores_match_similarity(
 def test_n_tuple_scores_alias_output_scores_match_similarity(
     request: pytest.FixtureRequest, static_retrieval_mrl_en_v1_model: SentenceTransformer, test_dataset: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Same as the previous test using the deprecated n-tuple-scores format.
     """Verify that n-tuple-scores (deprecated alias) exposes correct similarity scores.
 
     Runs over both the single- and multiple-positive datasets.
@@ -742,6 +819,9 @@ def test_n_tuple_scores_alias_output_scores_match_similarity(
 def test_labeled_pair_output_scores_match_similarity(
     request: pytest.FixtureRequest, static_retrieval_mrl_en_v1_model: SentenceTransformer, test_dataset: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over the dataset fixtures; asserts each labeled-pair score matches the recomputed similarity of
+    # its query and passage.
     """Verify that labeled-pair scores match recomputed query-passage similarity.
 
     Runs over both the single- and multiple-positive datasets.
@@ -776,6 +856,9 @@ def test_labeled_pair_output_scores_match_similarity(
 def test_labeled_list_output_scores_match_similarity(
     request: pytest.FixtureRequest, static_retrieval_mrl_en_v1_model: SentenceTransformer, test_dataset: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over the dataset fixtures; asserts each labeled-list row has as many scores as passages and each
+    # matches the recomputed similarity.
     """Verify that labeled-list scores match recomputed query-passage similarity for all items.
 
     Runs over both the single- and multiple-positive datasets.
@@ -805,6 +888,8 @@ def test_labeled_list_output_scores_match_similarity(
 
 
 def test_batch_size(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts a small encoding batch size still returns triplet columns.
     """Test batch_size parameter."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(
@@ -822,6 +907,10 @@ def test_batch_size(dataset: Dataset, static_retrieval_mrl_en_v1_model: Sentence
 
 @pytest.mark.skipif(importlib.util.find_spec("faiss") is None, reason="faiss not installed")
 def test_faiss(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Skipped without faiss. Mines twice with FAISS and a small FAISS batch size and asserts triplet columns.
+    # KNOWN ISSUE: The two mining calls are identical, so the second run adds no coverage (likely meant to vary a
+    # parameter).
     """Test use_faiss parameter."""
     model = static_retrieval_mrl_en_v1_model
     result = mine_hard_negatives(
@@ -854,6 +943,10 @@ def test_faiss(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTrans
 def test_non_faiss_batched_search_matches_single_batch(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches the model's similarity function to record query chunk sizes, mines with FAISS batch size 3 and
+    # then 100 (without FAISS), asserts chunk sizes 3, 3, 2 and then 8, and that both results have identical columns,
+    # texts and approximately equal scores.
     """Test that batching the non-FAISS similarity search splits the queries and does not change the mined negatives."""
     model = static_retrieval_mrl_en_v1_model
     model.similarity_fn_name  # noqa: B018 (trigger lazy init of _similarity)
@@ -861,6 +954,8 @@ def test_non_faiss_batched_search_matches_single_batch(
     chunk_sizes = []
 
     def similarity_spy(embeddings1, embeddings2):
+        # [FUNCTION DOC]
+        # HELPER: Records the number of query embeddings and delegates to the original similarity function.
         chunk_sizes.append(len(embeddings1))
         return original_similarity(embeddings1, embeddings2)
 
@@ -895,6 +990,9 @@ def test_non_faiss_batched_search_matches_single_batch(
 
 
 def test_cache(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Mines twice with a cache folder in a temp directory; asserts query and corpus embedding cache files are created
+    # and both runs return the same number of rows.
     """Test cache_folder parameter."""
     model = static_retrieval_mrl_en_v1_model
     cache_dir = os.path.join(tmp_path, "embeddings_cache")
@@ -918,6 +1016,9 @@ def test_cache(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTrans
 def test_cache_respects_prompt(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines twice with different query prompts into the same cache folder and asserts a second, distinct query
+    # embedding cache file is added.
     """The cache key must incorporate the prompt arguments, so a different `query_prompt`
     produces its own cache file rather than silently reusing embeddings computed with a different prompt."""
     model = static_retrieval_mrl_en_v1_model
@@ -949,6 +1050,9 @@ def test_cache_respects_prompt(
 def test_multiple_positives_per_query(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer
 ):
+    # [FUNCTION DOC]
+    # Mines a dataset where some queries repeat with different positives and asserts triplet columns and at least as
+    # many rows as input.
     """Test dataset with multiple positives per query."""
     model = static_retrieval_mrl_en_v1_model
     # Create dataset with duplicate queries
@@ -972,6 +1076,9 @@ def test_multiple_positives_per_query(
 def test_faiss_multiple_positives_matches_non_faiss(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Skipped without faiss. With repeated queries (two positives) and three negatives with range_max 3, asserts the
+    # FAISS and non-FAISS paths mine the same number of rows.
     """FAISS and non-FAISS paths must mine the same number of negatives when queries have multiple positives.
 
     Regression test for the FAISS branch requesting only ``range_max + 1`` candidates from
@@ -1002,6 +1109,9 @@ def test_faiss_multiple_positives_matches_non_faiss(
 def test_faiss_corpus_smaller_than_k(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer, range_max: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Skipped without faiss; parametrized over range_max. Uses a four-document corpus smaller than the number of
+    # requested candidates and asserts no mined negative is the row's passage or any positive of its query.
     """Candidates must never include a query's own positives when ``k`` exceeds the corpus size.
 
     FAISS pads short result sets with index -1 and score -3.4e38. The score survives the -inf filters and
@@ -1042,6 +1152,9 @@ def test_faiss_corpus_smaller_than_k_with_cross_encoder(
     static_retrieval_mrl_en_v1_model: SentenceTransformer,
     reranker_bert_tiny_model: CrossEncoder,
 ) -> None:
+    # [FUNCTION DOC]
+    # Same as the previous test with a cross-encoder rescorer and a negative absolute margin, asserting FAISS padding
+    # slots are never mined as negatives.
     """The FAISS -1 padding must stay disqualified after the CrossEncoder rescoring.
 
     The rescoring assigns a fresh score to every candidate, so disqualifying the padding at search time
@@ -1078,6 +1191,9 @@ def test_faiss_corpus_smaller_than_k_with_cross_encoder(
 
 
 def test_deprecated_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts deprecated parameters still work: as_triplets True gives three columns, as_triplets False gives
+    # n-tuple columns, and margin gives triplet columns.
     """Test deprecated parameters: as_triplets and margin."""
     model = static_retrieval_mrl_en_v1_model
     # Test as_triplets=True
@@ -1102,6 +1218,9 @@ def test_deprecated_parameters(dataset: Dataset, static_retrieval_mrl_en_v1_mode
 def test_margin_with_default_range_max(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts the deprecated margin with the auto-derived range_max (larger than the corpus) gives non-empty
+    # triplet output.
     """Test the deprecated margin parameter with the auto-derived range_max, which exceeds the
     corpus size and relies on the candidate set being capped at the corpus size."""
     model = static_retrieval_mrl_en_v1_model
@@ -1124,6 +1243,9 @@ def test_margin_with_default_range_max(
 def test_multi_process(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, reranker_bert_tiny_model: CrossEncoder
 ) -> None:
+    # [FUNCTION DOC]
+    # Skipped when CI is set. Mines with a cross-encoder, relative margin and multi-processing and asserts triplet
+    # columns.
     """Test use_multi_process parameter if multiple CPUs available."""
     model = static_retrieval_mrl_en_v1_model
     cross_encoder = reranker_bert_tiny_model
@@ -1148,6 +1270,8 @@ def test_multi_process(
 
 
 def test_empty_dataset(static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts an empty dataset raises ValueError.
     """Test behavior with an empty dataset."""
     model = static_retrieval_mrl_en_v1_model
     empty_dataset = Dataset.from_dict({"query": [], "passage": []})
@@ -1160,6 +1284,9 @@ def test_empty_dataset(static_retrieval_mrl_en_v1_model: SentenceTransformer) ->
 def test_num_negatives_exceeds_range_window(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, sampling_strategy: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over sampling strategies; asserts ten negatives with a window of three raises a ValueError
+    # explaining only three candidates remain.
     """Requesting more negatives than the range window holds must explain itself, not fail on a tensor shape.
 
     Both strategies reach the same invalid window by a different route: "top" slices the candidate matrix to
@@ -1182,6 +1309,8 @@ def test_num_negatives_exceeds_range_window(
 def test_num_negatives_must_be_positive(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, num_negatives: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over 0, -1 and -5; asserts a ValueError saying num_negatives must be at least 1.
     """range_max is derived from num_negatives, so a non-positive value must be named rather than mined around.
 
     Without the check, 0 quietly returns the dataset with no negative columns at all, and a negative value
@@ -1199,6 +1328,9 @@ def test_num_negatives_must_be_positive(
 def test_num_negatives_exceeds_range_window_capped_by_faiss(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Skips without faiss; monkeypatches faiss to report one GPU and asserts the error mentions range_max being capped
+    # to 2047 for FAISS on GPU.
     """The FAISS GPU cap can shrink an auto-derived range_max below num_negatives, so the error mentions the cap."""
     faiss = pytest.importorskip("faiss")
     monkeypatch.setattr(faiss, "get_num_gpus", lambda: 1)
@@ -1217,6 +1349,9 @@ def test_num_negatives_exceeds_range_window_capped_by_faiss(
 def test_use_faiss_on_cpu_is_not_capped(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Skips without faiss; monkeypatches faiss to report no GPUs and removes the GPU cloner options, and asserts the
+    # same arguments mine without error, returning zero rows.
     """FAISS on CPU has no 2048-document limit, so the same arguments must mine instead of raising."""
     faiss = pytest.importorskip("faiss")
     monkeypatch.setattr(faiss, "get_num_gpus", lambda: 0)
@@ -1238,6 +1373,9 @@ def test_use_faiss_on_cpu_is_not_capped(
 def test_num_negatives_matching_range_window_is_allowed(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, sampling_strategy: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over sampling strategies; asserts a window equal to num_negatives works, giving five n-tuple
+    # columns and one row per input.
     """A window exactly the size of num_negatives is still satisfiable, under either strategy, and must not raise."""
     result = mine_hard_negatives(
         dataset=dataset,
@@ -1257,6 +1395,8 @@ def test_num_negatives_matching_range_window_is_allowed(
 def test_range_min_must_be_non_negative(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts a negative range_min raises ValueError.
     """A negative range_min would silently slice the candidate window from the wrong end."""
     with pytest.raises(ValueError, match="range_min must be non-negative"):
         mine_hard_negatives(
@@ -1272,6 +1412,8 @@ def test_range_min_must_be_non_negative(
 def test_range_min_must_be_below_range_max(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, range_min: int, range_max: int
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized; asserts range_min at or above range_max raises ValueError.
     """A range_min at or above range_max leaves no candidate window at all."""
     with pytest.raises(ValueError, match="range_min must be smaller than range_max"):
         mine_hard_negatives(
@@ -1286,6 +1428,9 @@ def test_range_min_must_be_below_range_max(
 def test_range_min_above_faiss_capped_range_max(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # [FUNCTION DOC]
+    # Skips without faiss; with one GPU reported, asserts range_min above the capped range_max raises a ValueError
+    # mentioning the cap.
     """The FAISS GPU cap can push an auto-derived range_max below range_min, so the error mentions the cap."""
     faiss = pytest.importorskip("faiss")
     monkeypatch.setattr(faiss, "get_num_gpus", lambda: 1)
@@ -1303,6 +1448,9 @@ def test_range_min_above_faiss_capped_range_max(
 def test_larger_dataset_with_combinations(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines a 32-row dataset (queries suffixed with an index) with combined range, score, margin and batch options in
+    # n-tuple format and asserts exactly two negative columns.
     """Test with a larger dataset and challenging parameter combinations."""
     model = static_retrieval_mrl_en_v1_model
     # Create a larger dataset with 32 entries
@@ -1341,6 +1489,9 @@ def test_larger_dataset_with_combinations(
 
 
 def test_prompt_combinations(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Deep-copies the model with named prompts and asserts mining with prompt names, and with a raw query prompt
+    # overriding the name, both give triplet columns only.
     """Test various prompt configurations."""
     model = static_retrieval_mrl_en_v1_model
     # Test with prompt_names instead of raw prompts
@@ -1381,6 +1532,9 @@ def test_prompt_combinations(dataset: Dataset, static_retrieval_mrl_en_v1_model:
 def test_n_tuple_scores_format_details(
     dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Asserts the n-tuple-scores format gives scores lists of three entries where the positive score is at least
+    # every negative score.
     """Test details of n-tuple-scores output format."""
     model = static_retrieval_mrl_en_v1_model
     num_neg = 2
@@ -1418,6 +1572,9 @@ def test_n_tuple_scores_format_details(
 def test_tiny_corpus(
     queries: list[str], passages: list[str], static_retrieval_mrl_en_v1_model: SentenceTransformer
 ) -> None:
+    # [FUNCTION DOC]
+    # Mines two pairs with one negative and range_max 1 and asserts a dataset with triplet columns and at least one
+    # row.
     """Test with a very small corpus to test edge case handling."""
     model = static_retrieval_mrl_en_v1_model
     # Create a dataset with just 2 pairs
@@ -1443,6 +1600,8 @@ def test_tiny_corpus(
 
 
 def test_verbose_mode(dataset: Dataset, static_retrieval_mrl_en_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Asserts verbose mode runs and returns non-empty triplet output.
     """Test that verbose=True doesn't cause any crashes."""
     model = static_retrieval_mrl_en_v1_model
 
@@ -1463,6 +1622,12 @@ def test_verbose_mode(dataset: Dataset, static_retrieval_mrl_en_v1_model: Senten
 
 @pytest.mark.skipif(not is_datasets_available(), reason="datasets library is not available")
 def test_mine_hard_negatives_with_prompt(paraphrase_distilroberta_base_v1_model: SentenceTransformer) -> None:
+    # [FUNCTION DOC]
+    # Replaces the model's preprocess with a recorder, mines without a prompt and asserts every call had task query
+    # or document with an empty prompt, then mines with a query prompt and asserts query calls carry it while
+    # document calls do not; both results are non-empty. Restores the original preprocess at the end.
+    # KNOWN ISSUE: The original preprocess is restored only on success (not in a finally block), so a failing assertion
+    # leaves the patched method on the fixture model.
     """
     Tests that mine_hard_negatives runs with and without a prompt.
     """
@@ -1503,6 +1668,8 @@ def test_mine_hard_negatives_with_prompt(paraphrase_distilroberta_base_v1_model:
     preprocess_calls = []
 
     def mock_preprocess(texts, **kwargs) -> dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # HELPER: Records the keyword arguments and delegates to the original preprocess.
         preprocess_calls.append(kwargs)
         return original_preprocess(texts, **kwargs)
 
@@ -1576,6 +1743,10 @@ def test_multiple_positives(
     output_format: str,
     test_dataset: str,
 ):
+    # [FUNCTION DOC]
+    # Parametrized over output formats and dataset fixtures; mines three negatives and asserts all rows are unique and
+    # that the row count is: unique pairs times 3 for triplet, unique pairs plus unique queries times 3 for
+    # labeled-pair, and unique pairs for the other formats.
     model = static_retrieval_mrl_en_v1_model
     # Get the actual dataset from the fixture using the parameter name
     dataset = request.getfixturevalue(test_dataset)
@@ -1622,6 +1793,10 @@ def test_missing_negatives(
     output_format: str,
     test_dataset: str,
 ):
+    # [FUNCTION DOC]
+    # Parametrized like the previous test; asserts the default mining reaches the expected maximum row count, then
+    # mines with max score 0 and range_max 4 and asserts fewer rows and a printed "Could not find enough negatives"
+    # message.
     model = static_retrieval_mrl_en_v1_model
     # Get the actual dataset from the fixture using the parameter name
     dataset = request.getfixturevalue(test_dataset)
@@ -1660,6 +1835,10 @@ def test_missing_negatives(
 
 
 class ControlledNegativeScoreModel:
+    # [CLASS DOC]
+    # HELPER: Deterministic stand-in model with a CPU device and minimal card data. Holds fixed 2-D unit embeddings
+    # for a query "q", a positive "p" with negative similarity, a negative more similar than the positive, and a far
+    # negative.
     """Deterministic model whose anchor-positive score is negative, with a candidate negative
     that is *more* similar to the anchor than the positive (see #3819)."""
 
@@ -1667,6 +1846,8 @@ class ControlledNegativeScoreModel:
     model_card_data = SimpleNamespace(base_model="controlled-negative-score-model")
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stores the fixed embedding table.
         self.embeddings = {
             "q": torch.tensor([1.0, 0.0]),
             "p": torch.tensor([-0.50, math.sqrt(1 - 0.50**2)]),
@@ -1675,21 +1856,32 @@ class ControlledNegativeScoreModel:
         }
 
     def encode_query(self, texts, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Returns a numpy array stacking the embeddings of the given texts (unknown texts raise KeyError).
         return torch.stack([self.embeddings[text] for text in texts]).numpy()
 
     def encode_document(self, texts, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Same as the query encoder, for documents.
         return torch.stack([self.embeddings[text] for text in texts]).numpy()
 
     def similarity(self, queries, corpus):
+        # [FUNCTION DOC]
+        # HELPER: Returns the dot-product matrix between float32 query and corpus embeddings.
         return torch.as_tensor(queries, dtype=torch.float32) @ torch.as_tensor(corpus, dtype=torch.float32).T
 
     def similarity_pairwise(self, queries, positives):
+        # [FUNCTION DOC]
+        # HELPER: Returns the row-wise dot products of float32 query and positive embeddings.
         return (torch.as_tensor(queries, dtype=torch.float32) * torch.as_tensor(positives, dtype=torch.float32)).sum(
             dim=1
         )
 
 
 def test_relative_margin_with_negative_positive_score() -> None:
+    # [FUNCTION DOC]
+    # Mines with a relative margin of 0.05 where the positive score is negative and asserts the more-similar negative
+    # is rejected, returning the far negative with a lower score than the positive.
     """`relative_margin` must not keep a negative that is more similar to the anchor than the
     positive pair when the positive-pair score is negative (#3819)."""
     dataset = Dataset.from_dict({"query": ["q"], "positive": ["p"]})
@@ -1712,6 +1904,9 @@ def test_relative_margin_with_negative_positive_score() -> None:
 
 
 def test_range_max_larger_than_corpus_does_not_crash() -> None:
+    # [FUNCTION DOC]
+    # Mines with range_max 10 on a three-document corpus without FAISS and asserts one row whose negative is the more
+    # similar candidate with scores -0.50 and -0.49.
     """Requesting more candidates than the corpus holds must not crash the default (non-FAISS)
     path. `torch.topk` cannot return more columns than the corpus size, so the candidate set is
     capped at the corpus size and padded up, mirroring the FAISS branch."""
@@ -1739,6 +1934,9 @@ def test_range_max_larger_than_corpus_does_not_crash() -> None:
 
 
 def test_missing_negatives_message_names_range_max(capsys: pytest.CaptureFixture) -> None:
+    # [FUNCTION DOC]
+    # Mines five negatives from a tiny corpus with verbose output and asserts the printed message suggests adjusting
+    # range_max.
     """With only range_max to suggest, the "Could not find enough negatives" message must still
     name it instead of printing an empty parameter list."""
     dataset = Dataset.from_dict({"query": ["q"], "positive": ["p"]})

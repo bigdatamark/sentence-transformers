@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training tests for MultiVectorEncoder: the trainer's default loss, one-epoch smoke runs with several multi-vector losses, and the
+# MultiVectorEncoderDataCollator's padding, per-column task assignment and task stamping. Skipped unless the training extra is installed.
+# Uses the tiny BERT checkpoint from the Hub.
 from __future__ import annotations
 
 import tempfile
@@ -27,11 +31,15 @@ TEST_MODEL = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
 @pytest.fixture
 def model() -> MultiVectorEncoder:
+    # [FUNCTION DOC]
+    # HELPER: Fixture returning a fresh MultiVectorEncoder built from the tiny test checkpoint (network on first use).
     return MultiVectorEncoder(TEST_MODEL)
 
 
 @pytest.fixture
 def triplet_dataset() -> Dataset:
+    # [FUNCTION DOC]
+    # HELPER: Fixture returning a 3-row Dataset with anchor, positive and negative text columns.
     return Dataset.from_dict(
         {
             "anchor": ["What is AI?", "Who invented the lightbulb?", "Capital of France?"],
@@ -51,6 +59,9 @@ def triplet_dataset() -> Dataset:
 
 @pytest.fixture
 def kd_dataset() -> Dataset:
+    # [FUNCTION DOC]
+    # HELPER: Fixture returning a 2-row distillation Dataset with a query column, three document columns and a scores column holding three teacher
+    # scores per row.
     # One column per candidate document, matching the (query, document_1, ..., document_N) shape
     # that resolve_ids produces and MultiVectorDistillKLDivLoss expects.
     return Dataset.from_dict(
@@ -65,6 +76,9 @@ def kd_dataset() -> Dataset:
 
 
 def _train(model: MultiVectorEncoder, dataset: Dataset, loss: torch.nn.Module) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Trains the model for one epoch with batch size 2, logging every step, no reporting and no checkpoint saving, writing to a temporary
+    # output dir that is removed afterwards. Returns nothing; mutates the model's weights.
     with tempfile.TemporaryDirectory() as tmpdir:
         args = MultiVectorEncoderTrainingArguments(
             output_dir=tmpdir,
@@ -84,6 +98,8 @@ def _train(model: MultiVectorEncoder, dataset: Dataset, loss: torch.nn.Module) -
 
 
 def test_default_loss_is_mnr(model: MultiVectorEncoder, triplet_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # Asserts a trainer built without an explicit loss uses MultiVectorMultipleNegativesRankingLoss.
     with tempfile.TemporaryDirectory() as tmpdir:
         args = MultiVectorEncoderTrainingArguments(output_dir=tmpdir, report_to=[], save_strategy="no")
         trainer = MultiVectorEncoderTrainer(model=model, args=args, train_dataset=triplet_dataset)
@@ -91,21 +107,29 @@ def test_default_loss_is_mnr(model: MultiVectorEncoder, triplet_dataset: Dataset
 
 
 def test_train_with_mnr(model: MultiVectorEncoder, triplet_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # Smoke test: trains with MultiVectorMultipleNegativesRankingLoss on the triplets without error.
     loss = mve_losses.MultiVectorMultipleNegativesRankingLoss(model)
     _train(model, triplet_dataset, loss)
 
 
 def test_train_with_cached_mnr(model: MultiVectorEncoder, triplet_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # Smoke test: trains with the cached (gradient-cached) multi-vector MNRL with mini-batch size 2.
     loss = mve_losses.CachedMultiVectorMultipleNegativesRankingLoss(model, mini_batch_size=2)
     _train(model, triplet_dataset, loss)
 
 
 def test_train_with_distill_kl(model: MultiVectorEncoder, kd_dataset: Dataset) -> None:
+    # [FUNCTION DOC]
+    # Smoke test: trains with MultiVectorDistillKLDivLoss on the distillation dataset.
     loss = mve_losses.MultiVectorDistillKLDivLoss(model)
     _train(model, kd_dataset, loss)
 
 
 def test_train_with_margin_mse(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Smoke test: trains with MultiVectorMarginMSELoss on (query, positive, negative, label) rows where the label is the teacher margin.
     dataset = Dataset.from_dict(
         {
             "query": ["What is AI?", "Capital of France?"],
@@ -119,6 +143,9 @@ def test_train_with_margin_mse(model: MultiVectorEncoder) -> None:
 
 
 def test_collator_pads_to_batch_longest_not_model_max_length(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Collates two short triplets and asserts each column's input ids are 2-D with one row per feature and narrower than the tokenizer's model
+    # max length (padding to the batch's longest, not the maximum); sanity-checks that max length is at least 128.
     """A fresh MVE has ``document_length=None``. Before the fix the collator forced
     ``padding="max_length"`` which silently padded every batch to ``tokenizer.model_max_length``
     (e.g. 512). The collator now defers to the tokenizer default (``longest``) so a batch of short
@@ -146,6 +173,9 @@ def test_collator_pads_to_batch_longest_not_model_max_length(model: MultiVectorE
 
 
 def test_collator_within_column_rectangular_across_ragged_columns(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts each column's attention mask matches its input ids shape and that columns are padded independently (the long positive column is wider
+    # than the query and negative columns).
     """Within each column every row shares ``T`` (the loss reshapes per-column on ``dim=0``), but
     columns are independently padded to their own batch-longest. Cross-column ragged ``T`` is
     expected and handled downstream by ``stack_padded_token_embeddings``.
@@ -173,6 +203,9 @@ def test_collator_within_column_rectangular_across_ragged_columns(model: MultiVe
 
 
 def test_collator_assigns_task_by_position_regardless_of_name(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Wraps preprocess with a spy recording the task argument, collates features whose columns are named answer, question, negative, and asserts
+    # tasks were assigned by position: query for the first column, document for the rest.
     """The collator assigns ``task`` by column POSITION (column 0 = query, the rest = document) to
     match the losses, which score positionally. Column names are not consulted, so a dataset whose
     first column is named "answer" still gets ``task="query"``, matching the loss. ``router_mapping``
@@ -182,6 +215,8 @@ def test_collator_assigns_task_by_position_regardless_of_name(model: MultiVector
     original_preprocess = model.preprocess
 
     def spy(inputs, prompt=None, task=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the task argument, then calls the real preprocess with the same arguments.
         seen_tasks.append(task)
         return original_preprocess(inputs, prompt=prompt, task=task, **kwargs)
 
@@ -196,11 +231,15 @@ def test_collator_assigns_task_by_position_regardless_of_name(model: MultiVector
 
 
 def test_collator_router_mapping_overrides_positional_default(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # With router_mapping assigning answer to document and question to query, asserts the spy saw tasks document then query.
     """``router_mapping`` overrides the positional default per column."""
     seen_tasks: list[str | None] = []
     original_preprocess = model.preprocess
 
     def spy(inputs, prompt=None, task=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records the task argument, then calls the real preprocess.
         seen_tasks.append(task)
         return original_preprocess(inputs, prompt=prompt, task=task, **kwargs)
 
@@ -215,6 +254,8 @@ def test_collator_router_mapping_overrides_positional_default(model: MultiVector
 
 
 def test_collator_stamps_resolved_task_into_batch(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # With router_mapping, asserts the collated batch contains answer_task "document" and question_task "query".
     """The collator stamps the task each column was tokenized with as ``{column}_task`` so the
     losses re-run the model under the same task (instead of re-deriving it positionally), also when
     ``router_mapping`` overrides the positional default."""

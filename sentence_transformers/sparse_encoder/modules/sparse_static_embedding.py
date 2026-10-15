@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# SparseStaticEmbedding input module: an inference-free sparse encoder that maps text to a
+# vocabulary-sized vector holding a static (optionally trainable) weight, such as IDF, for each
+# token present in the text. Typically used for queries alongside a SPLADE document encoder.
 from __future__ import annotations
 
 import json
@@ -23,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 class SparseStaticEmbedding(InputModule):
+    # [CLASS DOC]
+    # Text-only input module with a Hugging Face tokenizer and a weight parameter of one value per
+    # vocabulary id. Config key: frozen (weights not trainable). Attributes: tokenizer, weight, frozen,
+    # num_dimensions (weight length) and max_seq_length (from the tokenizer).
     """
     SparseStaticEmbedding module for efficient sparse representations.
 
@@ -50,6 +58,9 @@ class SparseStaticEmbedding(InputModule):
         weight: torch.Tensor | None = None,
         frozen: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Stores the tokenizer; wraps the given weight in a parameter, or creates a parameter of ones of
+        # vocabulary size; trainable unless frozen. Sets num_dimensions and max_seq_length.
         super().__init__()
         self.tokenizer = tokenizer
 
@@ -63,6 +74,12 @@ class SparseStaticEmbedding(InputModule):
         self.max_seq_length = self.tokenizer.model_max_length
 
     def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Builds a (batch, num_dimensions) integer presence matrix by scattering each row's attention mask
+        # values at its input_ids (1 for real tokens, padding writes 0), multiplies by the weight vector,
+        # and, if features already contain "sentence_embedding", multiplies element-wise with it. Stores
+        # the result as "sentence_embedding" in the mutated dict and returns it. Token ids beyond the
+        # weight length cause an index error.
         input_ids = features["input_ids"]
         attention_mask = features["attention_mask"]
         sentence_embedding = features.get("sentence_embedding", None)
@@ -90,6 +107,9 @@ class SparseStaticEmbedding(InputModule):
         prompt: str | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
+        # [FUNCTION DOC]
+        # Prepends the prompt if given, then tokenizes the texts with padding, truncation and no special
+        # tokens into PyTorch tensors, returning them as a plain dict.
         if prompt:
             inputs = self._prepend_prompt(inputs, prompt)
         return dict(
@@ -97,6 +117,8 @@ class SparseStaticEmbedding(InputModule):
         )
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves the tokenizer, the torch weights and the config JSON to output_path.
         self.save_tokenizer(output_path)
         self.save_torch_weights(output_path, safe_serialization=safe_serialization)
         self.save_config(output_path)
@@ -112,6 +134,12 @@ class SparseStaticEmbedding(InputModule):
         local_files_only: bool = False,
         **config,
     ):
+        # [FUNCTION DOC]
+        # Class method that builds the module from a JSON file mapping tokens to weights. If json_path does
+        # not exist locally, treats it as a Hub repo or folder and resolves its idf.json (network/cache),
+        # raising ValueError if not found. Converts tokens to ids with the tokenizer, creates a zero weight
+        # vector of length max id plus one and fills in the weights, then constructs the module with any
+        # extra config options.
         """
         Create an SparseStaticEmbedding module from a JSON file containing token to IDF weight mappings.
 
@@ -165,6 +193,12 @@ class SparseStaticEmbedding(InputModule):
         local_files_only: bool = False,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method that loads the module. Loads the config and the tokenizer (AutoTokenizer, from the
+        # same path and subfolder). If the config has a "path" ending in .json, builds via from_json;
+        # otherwise constructs with ones weights and loads the saved torch weights into it. Returns the module.
+        # KNOWN ISSUE: The from_json branch passes cache_dir instead of cache_folder, so cache_dir ends up in
+        # the extra config and is passed to the constructor, which raises TypeError.
         """
         Load the SparseStaticEmbedding module with its tokenizer.
 
@@ -226,8 +260,12 @@ class SparseStaticEmbedding(InputModule):
         return model
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a string with the config dict, dimension and tokenizer class name.
         tokenizer_info = f", tokenizer={self.tokenizer.__class__.__name__}"
         return f"SparseStaticEmbedding({self.get_config_dict()}, dim={self.num_dimensions}{tokenizer_info})"
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns num_dimensions.
         return self.num_dimensions

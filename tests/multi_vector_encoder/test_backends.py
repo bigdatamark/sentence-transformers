@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests the ONNX and OpenVINO inference backends for MultiVectorEncoder (per-token embeddings for late interaction): exporting on load,
+# saving and reloading exported models, ONNX graph optimization and dynamic int8 quantization, and backend name validation. Outputs are
+# compared with a PyTorch reference computed from the same saved checkpoint. Skipped without optimum backends or in CI.
 """
 Test different backends (PyTorch, ONNX, OpenVINO) for MultiVectorEncoder.
 
@@ -29,6 +33,10 @@ if is_ci():
 
 @pytest.fixture(scope="module")
 def model_dir(tmp_path_factory) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture. Loads the tiny BERT checkpoint as a MultiVectorEncoder (which adds a randomly initialized projection),
+    # sets fixed query expansion to 16 tokens, saves it once to a module temp dir and returns the path, so every backend loads identical weights.
+    # Network and disk.
     # The tiny checkpoint gets a randomly initialised projection on conversion, so save it once
     # and reload from disk per backend. Otherwise every load would produce different embeddings.
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -40,6 +48,8 @@ def model_dir(tmp_path_factory) -> str:
 
 @pytest.fixture(scope="module")
 def torch_embeddings(model_dir: str) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture returning the PyTorch backend's numpy per-token embeddings for one query and two documents.
     model = MultiVectorEncoder(model_dir, backend="torch")
     # Arrays, so the torch reference compares against the CPU-only backends without a device hop.
     queries = model.encode_query(["What is the capital of France?"], convert_to_numpy=True)
@@ -50,6 +60,9 @@ def torch_embeddings(model_dir: str) -> tuple[list[np.ndarray], list[np.ndarray]
 
 
 def encode_and_compare(model: MultiVectorEncoder, torch_embeddings, atol: float = 1e-5) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Encodes the same query and documents with the given model as numpy arrays, asserts the query has 16 token vectors (fixed expansion)
+    # of the embedding dimension, and that each output has the reference's shape and matches it within atol.
     reference_queries, reference_documents = torch_embeddings
     queries = model.encode_query(["What is the capital of France?"], convert_to_numpy=True)
     documents = model.encode_document(
@@ -72,6 +85,9 @@ def encode_and_compare(model: MultiVectorEncoder, torch_embeddings, atol: float 
     "model_kwargs", [{}, {"file_name": "wrong_file_name"}]
 )  # <- Using a file_name is fine when exporting
 def test_backend_export(backend, expected_auto_model_class, model_kwargs, model_dir, torch_embeddings) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over onnx/openvino with the expected optimum class and over model_kwargs (none or an ignored wrong file name). Loads with that
+    # backend (exporting), asserts the backend name and optimum model class, and compares outputs to the reference.
     model = MultiVectorEncoder(model_dir, backend=backend, model_kwargs=model_kwargs)
     assert model.get_backend() == backend
     assert isinstance(model[0].auto_model, expected_auto_model_class)
@@ -81,6 +97,9 @@ def test_backend_export(backend, expected_auto_model_class, model_kwargs, model_
 
 @pytest.mark.parametrize("backend", ["onnx", "openvino"])
 def test_backend_save_and_load(backend, model_dir, torch_embeddings, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over onnx/openvino. Loads with export, saves to tmp_path, reloads the exported directory with the same backend, and compares
+    # outputs to the reference.
     export_dir = str(tmp_path / "exported")
     model = MultiVectorEncoder(model_dir, backend=backend)
     model.save_pretrained(export_dir)
@@ -90,6 +109,9 @@ def test_backend_save_and_load(backend, model_dir, torch_embeddings, tmp_path) -
 
 
 def test_onnx_optimize_and_quantize(model_dir, torch_embeddings, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Exports to ONNX and saves; applies O1 optimization and reloads that file, comparing to the reference within 1e-3; applies AVX512-VNNI dynamic
+    # quantization and reloads it, asserting only output shapes match the reference.
     export_dir = str(tmp_path / "exported")
     model = MultiVectorEncoder(model_dir, backend="onnx")
     model.save_pretrained(export_dir)
@@ -113,5 +135,7 @@ def test_onnx_optimize_and_quantize(model_dir, torch_embeddings, tmp_path) -> No
 
 
 def test_incorrect_backend(model_dir) -> None:
+    # [FUNCTION DOC]
+    # Asserts an unknown backend name raises ValueError.
     with pytest.raises(ValueError):
         MultiVectorEncoder(model_dir, backend="incorrect_backend")
