@@ -1,3 +1,18 @@
+# [MODULE DOC]
+# Defines Transformer, the main input module, which wraps a Hugging Face transformers model (or an ONNX/OpenVINO export)
+# together with its processor/tokenizer. It loads the right model class for a "transformer task" (feature extraction,
+# sequence classification, text generation, any-to-any, fill-mask, retrieval), possibly only the encoder of
+# encoder-decoder models, applies PEFT adapters, works out which modalities the model supports and which model method
+# and output field to use per modality (the "modality config"), preprocesses raw inputs of any modality (including chat
+# messages rendered via chat templates, prompts, per-task length caps, ColBERT-style query expansion, padding-free
+# flattened text batches and per-sample media counts), runs the forward pass and stores the chosen output under a
+# configurable feature key, and saves/loads its own config. Module-level content: fallback stub classes for
+# transformers classes missing in older versions, version flags for transformers features, the task-to-auto-class
+# table, default modality configs per task, a registry of encoder-only classes for encoder-decoder configs, hard-coded
+# modality configs for special model types per task, typed dicts for modality params, processing kwargs and query
+# expansion, helpers for lowercase detection, temporary class attribute overrides, query expansion validation and
+# per-sample media counting, and the sets of feature keys never/always forwarded to the model. Uses the transformers
+# logger.
 from __future__ import annotations
 
 import importlib
@@ -69,6 +84,9 @@ try:
 except ImportError:
 
     class BaseVideoProcessor:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the transformers video processor base class when it cannot be imported, so isinstance
+        # checks simply never match.
         pass
 
 
@@ -77,9 +95,13 @@ try:
 except ImportError:
 
     class T5Gemma2Config:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the T5Gemma2 config class on older transformers versions.
         pass
 
     class T5Gemma2TextConfig:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the T5Gemma2 text config class on older transformers versions.
         pass
 
 
@@ -88,6 +110,8 @@ try:
 except ImportError:
 
     class T5GemmaConfig:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the T5Gemma config class on older transformers versions.
         pass
 
 
@@ -96,6 +120,8 @@ try:
 except ImportError:
 
     class MoonshineConfig:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the Moonshine config class on older transformers versions.
         pass
 
 
@@ -104,6 +130,8 @@ try:
 except ImportError:
 
     class TimmWrapperConfig:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the timm wrapper config class on older transformers versions.
         pass
 
 
@@ -112,6 +140,8 @@ try:
 except ImportError:
 
     class PaliGemmaProcessor:
+        # [CLASS DOC]
+        # HELPER: empty stand-in for the PaliGemma processor class on older transformers versions.
         pass
 
 
@@ -137,11 +167,18 @@ TransformerTask = Literal[
 
 
 class _ModalityParamsRequired(TypedDict):
+    # [CLASS DOC]
+    # HELPER: typed dict of the required modality parameter keys: "method" (name of the model method to call, e.g.
+    # "forward" or "get_text_features") and "method_output_name" (field of the method output to use, or None for the
+    # whole output).
     method: str
     method_output_name: str | None
 
 
 class ModalityParams(_ModalityParamsRequired, total=False):
+    # [CLASS DOC]
+    # HELPER: typed dict extending the required keys with the optional "format" key ("structured" or "flat"), used only for
+    # the "message" modality.
     """Parameters for a single modality entry in the modality config.
 
     The ``format`` key is only used for the ``"message"`` modality and controls how
@@ -156,6 +193,12 @@ ModalityConfig = dict[Modality, ModalityParams]
 
 
 def _resolve_retrieval_model_class(config: PretrainedConfig | PeftConfig) -> type[PreTrainedModel]:
+    # [FUNCTION DOC]
+    # HELPER: returns the concrete retrieval model class for a config (used for the "retrieval" task). Tries the
+    # transformers retrieval mapping by config type; for PEFT configs with a base model name, recurses on the base model's
+    # config (downloaded via AutoConfig); then the first class named in the config's "architectures" that exists in
+    # transformers; then AutoModel if the config's auto_map has an "AutoModel" entry (remote code). Raises ValueError if
+    # nothing resolves.
     """Resolve the concrete ``*ForRetrieval`` class (ColPali, ColQwen2, ...) for ``transformer_task="retrieval"``.
 
     transformers (as of v5.13) has no ``AutoModelForRetrieval``, and ``MODEL_FOR_RETRIEVAL_MAPPING`` is
@@ -473,6 +516,9 @@ _EDGE_CASE_MODALITY_CONFIGS: dict[str, dict[str, tuple[ModalityConfig, str, bool
 
 
 def _has_lowercase(normalizer) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if a tokenizers normalizer is a Lowercase normalizer or a normalizer sequence containing one;
+    # False for None or other normalizers.
     """Check whether a tokenizers normalizer (or sequence of normalizers) includes Lowercase."""
     if normalizer is None:
         return False
@@ -485,6 +531,11 @@ def _has_lowercase(normalizer) -> bool:
 
 @contextmanager
 def set_temporary_class_attrs(cls, **overrides):
+    # [FUNCTION DOC]
+    # HELPER: context manager that sets the given attributes on a class for the duration of the block and restores the
+    # previous values afterwards (also on exceptions).
+    # KNOWN ISSUE: attributes that did not exist before are "restored" by setting them to None instead of deleting them, so
+    # the class keeps a new attribute after the block.
     originals = {name: getattr(cls, name, None) for name in overrides}
     try:
         for name, value in overrides.items():
@@ -496,6 +547,10 @@ def set_temporary_class_attrs(cls, **overrides):
 
 
 class ProcessingKwargs(TypedDict, total=False):
+    # [CLASS DOC]
+    # Typed dict (all keys optional) of keyword arguments used when calling the processor: "common", "text", "audio",
+    # "image", "video" (each a dict of kwargs) and "chat_template" (kwargs for chat template rendering, plus the library's
+    # "restore_suffix" flag).
     """Keyword arguments applied when *calling* the processor during preprocessing.
 
     Valid keys: ``"common"``, ``"text"``, ``"audio"``, ``"image"``, ``"video"``, ``"chat_template"``.
@@ -512,6 +567,11 @@ class ProcessingKwargs(TypedDict, total=False):
 
 
 class QueryExpansionConfig(TypedDict):
+    # [CLASS DOC]
+    # Typed dict configuring ColBERT-style query expansion: "strategy" ("fixed": every query has exactly length tokens,
+    # padded with the expansion token or truncated; "min": length is only a floor), "attend" (whether the expansion
+    # positions get attention mask 1; default False), "token" (expansion token, default the tokenizer's mask token) and
+    # "length" (required pad target).
     """ColBERT-style query expansion config. When set, :meth:`Transformer.preprocess` expands every
     ``task="query"`` batch, regardless of the downstream modules: only meaningful with a
     :class:`MultiVectorMask` downstream (which scores the expansion positions), so leave it ``None``
@@ -562,6 +622,10 @@ _VALID_QUERY_EXPANSION_STRATEGIES: tuple[str, ...] = ("fixed", "min")
 def _normalize_query_expansion(
     query_expansion: QueryExpansionConfig | None,
 ) -> QueryExpansionConfig | None:
+    # [FUNCTION DOC]
+    # HELPER: validates a query expansion config and returns a fully populated copy (strategy, attend default False,
+    # token default None, length), or None when given None. Raises ValueError for unknown keys, an invalid strategy, a
+    # non-bool attend, or a length that is not a positive int (bools rejected).
     """Validate the dict, fill defaults, and return a fully-populated config (or ``None`` for the
     no-expansion case).
     """
@@ -594,6 +658,9 @@ def _normalize_query_expansion(
 
 
 def _count_media_per_sample(messages: list[list[dict[str, Any]]]) -> tuple[list[int], list[int]]:
+    # [FUNCTION DOC]
+    # HELPER: for each sample's message list, counts the content items of type "image" and of type "video" (only list
+    # contents with dict items are inspected). Returns the per-sample image counts and video counts.
     """Count images and videos per sample from the message structure.
 
     Some VLM processors flatten per-sample visual tokens into single tensors (e.g.
@@ -642,6 +709,18 @@ _FORWARD_SAFETY_NET_KEYS = frozenset({"input_ids", "attention_mask", "token_type
 
 
 class Transformer(InputModule):
+    # [CLASS DOC]
+    # Input module wrapping a transformers model and its processor. Class attributes: config_file_name
+    # ("sentence_bert_config.json"), config_keys (transformer_task, modality_config, module_output_name, processing_kwargs,
+    # unpad_inputs, query_length, document_length, query_expansion; the last three are omitted from the saved config when
+    # None), save_in_root (True) and the valid processing_kwargs keys. Main instance attributes: transformer_task, model
+    # (the loaded model), processor (AutoProcessor result; tokenizer is derived from it), processing_kwargs, backend,
+    # do_lower_case, track_media_counts (whether preprocess records per-sample image/video counts), input_formatter,
+    # modality_config (modality to method and output field), module_output_name (feature key written by forward),
+    # model_forward_params (allowed forward kwarg names, or None when forward accepts arbitrary kwargs), query_length /
+    # document_length (per-task truncation caps), the unpad_inputs and query_expansion properties, can_flatten_inputs, a
+    # flattening data collator and position offset when flattening is possible, and private caches (prompt lengths, method
+    # signatures, chat template suffixes).
     """Hugging Face AutoModel wrapper that handles loading, preprocessing, and inference.
 
     Loads the appropriate model class (e.g. BERT, RoBERTa, CLIP, Whisper) based on the model configuration
@@ -791,6 +870,23 @@ class Transformer(InputModule):
         do_lower_case: bool = False,
         tokenizer_name_or_path: str | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Builds the module (a decorator first maps legacy argument names). Validates transformer_task (ImportError for
+        # "any-to-any" on transformers without it, ValueError for unknown tasks). Normalises missing kwargs dicts, stores
+        # processing_kwargs (warning about unknown top-level keys), backend, lowercase flag, per-task lengths and empty caches.
+        # Loads the config (detecting PEFT adapters) and warns about unsupported attention settings. For sequence
+        # classification on a non-classification architecture without an explicit num_labels, sets num_labels to 1. Loads the
+        # model. Inspects the (PEFT-unwrapped) model's forward signature: if it has no variadic keyword parameter, the allowed
+        # forward params are the declared ones plus a safety net of common keys. Passes max_seq_length as model_max_length to
+        # the processor unless set, and loads the processor from tokenizer_name_or_path or the model path (suggesting missing
+        # extras on failure). If there is a tokenizer: caps model_max_length at the config's max_position_embeddings (unless
+        # given explicitly or -1) and, when do_lower_case is set, prepends a Lowercase normaliser to fast tokenizers (if not
+        # already lowercasing) or sets the slow tokenizer's lowercase flag. For causal tasks, sets left padding on the processor
+        # and its tokenizer. Creates the input formatter (message format from the "message" modality config entry, default
+        # auto). Uses the given modality config (ValueError if module_output_name is missing or an entry lacks "method" or
+        # "method_output_name") or infers it, and tells the formatter the supported modalities. Warns that
+        # tokenizer_name_or_path is deprecated and records the processor class in the model config. Finally assigns
+        # unpad_inputs and query_expansion through their validating setters.
         super().__init__()
         if transformer_task not in TRANSFORMER_TASK_TO_AUTO_MODEL:
             if transformer_task == "any-to-any":
@@ -957,6 +1053,8 @@ class Transformer(InputModule):
 
     @property
     def unpad_inputs(self) -> bool | None:
+        # [FUNCTION DOC]
+        # Property: the user's unpadding preference (None auto, False off, True requested).
         """Whether text-only inputs are concatenated without padding for faster inference.
 
         Non-text inputs (images, audio, video) are always padded normally.
@@ -970,6 +1068,9 @@ class Transformer(InputModule):
 
     @unpad_inputs.setter
     def unpad_inputs(self, value: bool | None) -> None:
+        # [FUNCTION DOC]
+        # Setter: stores the value; False disables flattening; otherwise re-evaluates whether inputs can be flattened, warning
+        # if True was requested but prerequisites are unmet.
         self._unpad_inputs = value
         if value is False:
             self.can_flatten_inputs = False
@@ -983,6 +1084,8 @@ class Transformer(InputModule):
 
     @property
     def query_expansion(self) -> QueryExpansionConfig | None:
+        # [FUNCTION DOC]
+        # Property: the normalised query expansion config, or None.
         """ColBERT-style query expansion config. See :class:`QueryExpansionConfig`. Validated and
         normalized on assignment, so re-setting after construction is safe::
 
@@ -993,6 +1096,11 @@ class Transformer(InputModule):
 
     @query_expansion.setter
     def query_expansion(self, value: QueryExpansionConfig | None) -> None:
+        # [FUNCTION DOC]
+        # Setter: normalises the config (ValueError on invalid structure). Once the model exists, validates the expansion token
+        # against the tokenizer and raises ValueError when attend is False and flash attention is requested (it would drop
+        # the expansion positions). Raises ValueError if query_length is set and smaller than the expansion length. Stores the
+        # normalised config.
         expansion = _normalize_query_expansion(value)
         # ``model`` may not exist yet during very early init. Skip tokenizer + FA2 checks until it does.
         if expansion is not None and getattr(self, "model", None) is not None:
@@ -1017,6 +1125,10 @@ class Transformer(InputModule):
         self._query_expansion = expansion
 
     def _validate_query_expansion_token(self, expansion: QueryExpansionConfig) -> None:
+        # [FUNCTION DOC]
+        # HELPER: tokenizer-aware validation of an expansion config (skipped without a tokenizer). With no explicit token, raises
+        # ValueError if the tokenizer has neither a mask token nor an EOS token. With an explicit token, raises ValueError if it
+        # maps to no id or to the unknown-token id (unless it is the unknown token itself).
         """Tokenizer-aware checks. The structural ``_normalize_query_expansion`` runs without the
         tokenizer, so this method catches the two silent-wrong-behavior cases that require it:
 
@@ -1050,6 +1162,14 @@ class Transformer(InputModule):
             )
 
     def _can_flatten_inputs(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns whether text-only inputs can be flattened into one padding-free sequence. Requires the
+        # feature-extraction or fill-mask task, text support, the torch backend, a model reporting attention-backend
+        # compatibility, all modality methods being "forward", a transformers version providing the flattening collator and
+        # flash attention helpers, flash attention being requested, and a variable-length flash attention function. When
+        # satisfied, creates the flattening data collator (with sequence indices, flash attention kwargs and position ids),
+        # adds the flash attention keys to the allowed forward params (if restricted), computes the position offset, and
+        # returns True. Logs at debug level.
         """Determine whether text-only inputs can be flattened (concatenated without padding) for more efficient inference.
 
         When enabled, text-only inputs are concatenated into a single sequence and processed using flash
@@ -1123,6 +1243,9 @@ class Transformer(InputModule):
         return True
 
     def _infer_flatten_position_offset(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: returns the position id offset for flattened inputs: padding_idx plus one for the first submodule that has an
+        # integer padding_idx and a learned position embedding table (RoBERTa-style models), otherwise 0.
         # DataCollatorWithFlattening emits 0-based position_ids, but RoBERTa-family embeddings
         # (XLM-R, MPNet, ...) expect positions from padding_idx + 1. No 0-based or rotary module
         # pairs an int padding_idx with a learned position_embeddings table.
@@ -1136,6 +1259,9 @@ class Transformer(InputModule):
 
     @property
     def max_seq_length(self) -> int | None:
+        # [FUNCTION DOC]
+        # Property: the tokenizer's model_max_length if a tokenizer exists, else max_position_embeddings of the (text) model
+        # config, else None.
         """The maximum input sequence length. Reads from the tokenizer if available, otherwise
         falls back to ``max_position_embeddings`` from the model config."""
         if self.tokenizer is not None:
@@ -1153,33 +1279,47 @@ class Transformer(InputModule):
 
     @max_seq_length.setter
     def max_seq_length(self, value: int | None) -> None:
+        # [FUNCTION DOC]
+        # Setter: sets the tokenizer's model_max_length; does nothing without a tokenizer.
         """Set the maximum input sequence length. Only effective when a tokenizer is available."""
         if self.tokenizer is not None:
             self.tokenizer.model_max_length = value
 
     @property
     def auto_model(self) -> PreTrainedModel:
+        # [FUNCTION DOC]
+        # Property: the wrapped model (legacy name).
         """The underlying transformer model."""
         return self.model
 
     @property
     def config(self) -> PretrainedConfig:
+        # [FUNCTION DOC]
+        # Property: the wrapped model's config.
         """The underlying model configuration."""
         return self.model.config
 
     @property
     def modalities(self) -> list[Modality]:
+        # [FUNCTION DOC]
+        # Property: the list of supported modalities (keys of the modality config).
         """The list of supported input modalities (e.g. ``"text"``, ``"image"``, ``("image", "text")``)."""
         return list(self.modality_config.keys())
 
     @property
     def tokenizer(self) -> PreTrainedTokenizerBase | None:
+        # [FUNCTION DOC]
+        # Property: the processor itself if it is a tokenizer, else its "tokenizer" attribute, else None.
         """The tokenizer, extracted from the processor. Returns ``None`` for non-text processors."""
         if isinstance(self.processor, PreTrainedTokenizerBase):
             return self.processor
         return getattr(self.processor, "tokenizer", None)
 
     def _chat_template_declares_task(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns whether the active chat template (processor's, else tokenizer's; any of several named templates)
+        # references a "task" variable, using transformers' template variable introspection. Returns True if that introspection
+        # helper is unavailable (passing the extra kwarg is then harmless).
         """Whether the active chat template (the processor's, else the tokenizer's) uses a ``task``
         variable, e.g. to append query augmentation tokens for ``task == "query"`` renders.
         Reuses the template introspection transformers' own kwarg routing is based on."""
@@ -1200,6 +1340,9 @@ class Transformer(InputModule):
         processor_inputs: dict[str, Any],
         **kwargs: Any,
     ) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns whether this batch should be flattened padding-free: never for query batches with query expansion;
+        # otherwise only if flattening is possible and the batch is text, or messages whose content is text only.
         """Whether to pack variable-length text inputs into a single flat sequence (FA2 unpadding).
 
         Only safe for text-only inputs, since :class:`DataCollatorWithFlattening` only handles
@@ -1215,6 +1358,9 @@ class Transformer(InputModule):
         )
 
     def _is_flash_attention_requested(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns True if the model config's attention implementation is a flash attention variant (via transformers'
+        # helper); False if the helper is missing or no implementation is recorded (e.g. ONNX/OpenVINO).
         """Whether the loaded model was configured for FlashAttention-2 (via ``attn_implementation``)."""
         try:
             from transformers.utils.generic import is_flash_attention_requested
@@ -1233,6 +1379,29 @@ class Transformer(InputModule):
         processing_kwargs: ProcessingKwargs | None = None,
         **kwargs,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts a batch of raw inputs into model features. Empty input returns an empty dict. Starts from defaults: tensors
+        # returned as PyTorch, text padded to the batch longest and truncated, audio padded (to max length for Whisper). The
+        # text max length comes from a caller max_length kwarg, else query_length / document_length for task "query" /
+        # "document"; for query expansion batches lengths are handled separately (warning when a fixed expansion ignores a
+        # max_length override). Instance and per-call processing kwargs are merged and applied on top ("common" into the shared
+        # kwargs, modality keys into each modality). For expansion queries: "fixed" forces max-length padding to the expansion
+        # length (warning if overrides tried to change it); "min" raises any task max length to at least the expansion length.
+        # Chat template kwargs come from processing kwargs, plus the task when the template declares it. Inputs are parsed and
+        # grouped by modality (collecting audio sampling rate / video metadata kwargs); retrieval models warn when text is
+        # encoded with a non-query task. When flattening applies, tensor conversion, padding and attention masks are disabled.
+        # If the model supports messages, non-message batches are converted to messages (ValueError for text query expansion
+        # with a chat template backbone); otherwise an unsupported modality raises ValueError via the shared helper. Message
+        # batches with query/document pairs are checked for a template that renders both roles. A prompt becomes a system
+        # message for messages, or is prepended to texts (recording the prompt token length). With media counting enabled,
+        # per-sample image/video counts are taken from the messages. The processor is called (suggesting missing extras on
+        # failure); counts are attached as tensors when the output has image/video grids. Flattened outputs are passed through
+        # the flattening collator (labels dropped, position ids shifted by the offset). Adds "modality" and "prompt_length".
+        # For causal tasks verifies left padding and sets logits_to_keep to 1. For expansion queries: pads ids, mask (and token
+        # type ids) up to the floor if needed, marks expansion positions (masked positions before the floor), warns when a fixed
+        # query had no room left (truncated), replaces those ids with the expansion token (explicit, else mask token, else EOS),
+        # stores the positions as "query_expansion_positions", and sets their attention mask to 1 when attend is set. Returns the
+        # feature dict.
         """Preprocess inputs into model-ready features.
 
         Args:
@@ -1484,6 +1653,10 @@ class Transformer(InputModule):
     def _verify_pair_roles_supported(
         self, messages_batch: list[list[dict[str, Any]]], chat_template_kwargs: dict[str, Any]
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: if any conversation carries both query and document roles, probes (with the chat template kwargs minus size
+        # kwargs and the restore_suffix flag) whether the template renders both; raises ValueError with an example template
+        # snippet (structured or flat form) and remedies if it does not.
         """Raise if the chat template cannot carry the ``query``/``document`` roles a pair is mapped to.
 
         A template that only branches on ``system``/``user``/``assistant`` renders a pair to an empty
@@ -1528,6 +1701,10 @@ class Transformer(InputModule):
         modality_kwargs: dict[str, dict[str, Any]],
         common_kwargs: dict[str, Any],
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: for 2-D attention masks, raises ValueError if any sample's last position is padding (causal models need left
+        # padding). The message blames a non-left padding_side in the text or common processing kwargs if present, otherwise
+        # says the processor's (or its tokenizer's) padding side was changed after loading.
         """Verify that causal inputs are left-padded, i.e. that every sample ends in a real token.
 
         Checks the produced ``attention_mask`` rather than ``padding_side``, because the side that
@@ -1566,6 +1743,10 @@ class Transformer(InputModule):
         )
 
     def _merge_processing_kwargs(self, per_call: ProcessingKwargs | None) -> ProcessingKwargs:
+        # [FUNCTION DOC]
+        # HELPER: returns the instance processing kwargs if no per-call kwargs are given; otherwise warns once about unknown
+        # top-level keys and returns, for each valid key present in either, a shallow merge of the instance dict with the
+        # per-call dict (per-call wins).
         """Merge per-call ``processing_kwargs`` on top of the instance-level ``self.processing_kwargs``.
 
         The merge is shallow per top-level key: for each modality (or ``"common"`` /
@@ -1592,6 +1773,18 @@ class Transformer(InputModule):
         return merged
 
     def forward(self, features: dict[str, Any], **kwargs) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Runs the model for the batch's modality (the "modality" feature, default "text") and stores the output. Looks up the
+        # modality's method and output field path (a string or a sequence of keys). Builds the call kwargs from the features,
+        # overridden by the given kwargs, with return_dict set; raises ValueError if the model lacks the method. For "forward":
+        # when forward accepts arbitrary kwargs, drops the library's bookkeeping keys unless forward declares them; otherwise
+        # keeps only allowed forward params. For other methods, keeps only that method's parameters (signature cached). Enables
+        # output_hidden_states when the output path goes through "hidden_states". Calls the method and walks the output path by
+        # key indexing, falling back to attribute access (AttributeError if neither works). A 4-D output (batch, channels,
+        # height, width) is flattened to (batch, height times width, channels). Stores it under module_output_name. For PEFT
+        # prompt-learning models, prepends ones for the virtual tokens to the attention mask. If the model config has
+        # output_hidden_states enabled and the output has hidden states, stores them as "all_layer_embeddings". Mutates and
+        # returns the features.
         """Forward pass through the transformer model.
 
         Dispatches to the appropriate model method based on the ``modality`` key in ``features``
@@ -1696,6 +1889,11 @@ class Transformer(InputModule):
         return features
 
     def get_embedding_dimension(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the output embedding dimension: num_features for timm wrapper configs; embedding_dim for retrieval models that
+        # define it; otherwise the first size found on the model config, then its text config, then each sub-config. Per config
+        # the order is projection_dim (only when outputting sentence embeddings), hidden_size, the last element (or the value)
+        # of neck_hidden_sizes / hidden_sizes / embed_dims, then hidden_dim. Raises ValueError if none is found.
         """Get the output embedding dimension from the transformer model.
 
         Returns:
@@ -1713,6 +1911,8 @@ class Transformer(InputModule):
             return self.model.config.embedding_dim
 
         def get_hidden_size_from_config(config):
+            # [FUNCTION DOC]
+            # HELPER: returns the hidden size of one config by the attribute order described above, or None.
             # If we're directly outputting sentence embeddings from the transformer (e.g., using the pooler output),
             # then we should check for projection_dim first, as that's likely the dimension of the sentence embeddings
             # after a projection layer
@@ -1760,6 +1960,9 @@ class Transformer(InputModule):
         common_kwargs: dict[str, Any],
         chat_template_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: calls the processor for a batch: message batches go through chat-template processing, multimodal processors
+        # through the multimodal call, everything else through the single-modality call. Returns the processor output.
         """Call the appropriate processor with the correct arguments.
 
         Dispatches based on the processor type and modality:
@@ -1805,6 +2008,12 @@ class Transformer(InputModule):
         modality_kwargs: dict[str, dict[str, Any]],
         common_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: calls a multimodal (ProcessorMixin) processor. For retrieval models, string images are loaded into images
+        # first. Renames modality keys to processor argument names (e.g. image to images). For a few model types with outdated
+        # processors (clipseg, whisper, sam3) or older transformers, passes flat kwargs: the modality's kwargs (for audio plus
+        # text, the text kwargs overridden by the audio kwargs) and the common kwargs. Otherwise passes per-modality kwargs
+        # dicts and common kwargs in the newer convention. Returns the processor output.
         """Call a :class:`ProcessorMixin` processor, handling both legacy and v5 calling conventions."""
         # `*ForRetrieval` processors reject raw image strings, and the retrieval path skips the chat
         # template that resolves them elsewhere: load URLs / paths / base64 here (also converts to RGB).
@@ -1851,6 +2060,11 @@ class Transformer(InputModule):
         modality_kwargs: dict[str, dict[str, Any]],
         common_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: calls a single-modality processor, matched in the order tokenizer (text), feature extractor (audio), video
+        # processor, image processor. Passes that modality's kwargs merged with the common kwargs; the primary input of the
+        # matched modality (if present) is passed positionally and removed from the inputs dict, other inputs by keyword.
+        # Raises RuntimeError if the processor type matches none.
         """Call a single-modality processor (tokenizer, feature extractor, image/video processor)."""
         # Check in order: text, audio, video, image (video before image due to inheritance)
         processor_type_checks = [
@@ -1884,6 +2098,13 @@ class Transformer(InputModule):
         common_kwargs: dict[str, Any],
         chat_template_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: renders and tokenizes chat message batches. Raises ValueError if the model does not support messages. Copies
+        # the chat template kwargs and removes the library's restore_suffix flag (default True). Determines the effective
+        # truncation and max length (chat template kwargs, then text kwargs, then common kwargs); truncation counts as active
+        # when explicitly truthy, or unset with a max length. Applies the chat template, and if suffix restoration is enabled and
+        # truncation is active (not "do_not_truncate"), restores the template suffix on truncated rows using the max length
+        # (default max_seq_length). Returns the features.
         """Process chat messages using the processor's chat template.
 
         ``chat_template_kwargs`` is forwarded to ``apply_chat_template``, except the Sentence Transformers
@@ -1930,6 +2151,17 @@ class Transformer(InputModule):
         common_kwargs: dict[str, Any],
         chat_template_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: calls apply_chat_template with tokenization and dict output, routing kwargs as the processor type expects.
+        # Size kwargs (padding, truncation, max length, return tensors) in the chat template kwargs are folded into copies of
+        # the text kwargs. For a PaliGemma processor with text-only messages, uses the tokenizer's template with the size kwargs
+        # from common and text kwargs passed at top level. For other multimodal processors, adds "load_audio_from_video" (popped
+        # from a copy of the video kwargs, default False) and passes the per-modality kwargs either bundled in a processor
+        # kwargs dict (newer transformers, with return_tensors at top level) or as separate keyword dicts. For a bare tokenizer,
+        # hoists the size kwargs out of copies of the common and text kwargs to the top level and passes the rest as tokenizer
+        # and common kwargs. Returns the tokenized features.
+        # KNOWN ISSUE: the docstring promises the given kwargs dicts are never mutated, but the PaliGemma text-only branch pops
+        # the size kwargs directly from the caller's common kwargs and (when nothing was folded) the caller's text kwargs.
         """Call ``apply_chat_template`` with the kwarg routing the processor type expects: nested kwargs for
         a ProcessorMixin, flat with the size kwargs hoisted to the top level for a bare tokenizer. Both the
         real batch and the suffix skeleton renders go through this (the given dicts are never mutated).
@@ -2026,6 +2258,12 @@ class Transformer(InputModule):
         common_kwargs: dict[str, Any] | None = None,
         max_length: int | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: writes the chat template's fixed trailing tokens back over the end of every row that truncation may have cut
+        # (in place). Only handles torch tensor ids (needs a non-empty attention mask; 1-D inputs treated as one row; skipped
+        # entirely when the padded width is below max_length) or lists of token lists from the flattening path. A missing max
+        # length counts as 0 so no row is skipped. For each row whose real length reached max_length, derives the suffix for its
+        # conversation and overwrites the last real tokens (respecting left padding) with as much of the suffix as fits.
         """Restore the trailing chat-template suffix that truncation may have removed (in place).
 
         Chat templates append fixed tokens after the content (e.g. an assistant prefill or EOS) that
@@ -2092,6 +2330,13 @@ class Transformer(InputModule):
         tokenizer_kwargs: dict[str, Any],
         common_kwargs: dict[str, Any] | None = None,
     ) -> list[int]:
+        # [FUNCTION DOC]
+        # HELPER: returns (and caches) the token ids of the fixed suffix a chat template appends after a conversation's content.
+        # Returns an empty list for empty or non-text conversations (or if inspection fails). Removes size kwargs from all kwarg
+        # buckets, builds a cache key from the remaining kwargs and the conversation skeleton, renders the skeleton twice with
+        # different filler content and takes the longest common token suffix (only if the renders diverge somewhere). Errors are
+        # logged at debug level and yield an empty suffix. Caches the result with a bounded size (oldest entry evicted, best
+        # effort).
         """Derive one conversation's trailing chat-template suffix (cached).
 
         The conversation is rendered twice with different fillers: the longest common token suffix of the
@@ -2155,6 +2400,9 @@ class Transformer(InputModule):
         return suffix
 
     def _message_skeleton(self, conversation: list[MessageInput], filler: str) -> list[MessageInput]:
+        # [FUNCTION DOC]
+        # HELPER: returns a copy of the conversation where every non-system dict message's content is replaced by the filler
+        # (as a single text item when the content was a list); system messages and non-dicts are kept unchanged.
         """Replace each non-system message content with ``filler``, keeping everything else verbatim.
 
         Keeping system messages whole lets the derivation capture a prompt rendered in the tail. Fillering
@@ -2177,6 +2425,9 @@ class Transformer(InputModule):
         tokenizer_kwargs: dict[str, Any],
         common_kwargs: dict[str, Any],
     ) -> list[int]:
+        # [FUNCTION DOC]
+        # HELPER: renders and tokenizes one conversation skeleton through the same chat template path as real batches, but
+        # without padding or truncation, and returns its token ids as a flat list.
         """Tokenize one conversation's skeleton (non-system content replaced by ``filler``), untruncated.
 
         The render shares ``_apply_chat_template`` with the real batch, so the suffix tokenizes exactly like
@@ -2203,6 +2454,10 @@ class Transformer(InputModule):
         return ids
 
     def _get_prompt_length(self, prompt: str, **kwargs) -> int | None:
+        # [FUNCTION DOC]
+        # HELPER: returns the number of tokens of a prompt (excluding a trailing special token such as EOS/SEP), cached by prompt
+        # and the non-task kwargs; the prompt is tokenized via preprocess without the task. Returns (and caches) None if the
+        # output has no input_ids.
         """Return the length of the prompt in tokens, excluding any trailing special token.
 
         Returns None if the processor does not produce ``input_ids``.
@@ -2232,6 +2487,10 @@ class Transformer(InputModule):
     def _load_config(
         self, model_name_or_path: str, backend: str, config_kwargs: dict[str, Any]
     ) -> tuple[PeftConfig | PretrainedConfig, bool]:
+        # [FUNCTION DOC]
+        # HELPER: loads the model config. If a PEFT adapter config exists for the path (lookup using cache dir, token, revision,
+        # subfolder and offline options from config_kwargs), raises ValueError for non-torch backends and ImportError without
+        # peft, otherwise returns the PEFT config and True. Otherwise returns the AutoConfig and False.
         """Loads the transformers or PEFT configuration
 
         Args:
@@ -2271,6 +2530,9 @@ class Transformer(InputModule):
 
     @staticmethod
     def _warn_on_unsupported_attention_config(config: PeftConfig | PretrainedConfig) -> None:
+        # [FUNCTION DOC]
+        # HELPER: static. For transformers configs (and their sub-configs), logs a warning when use_bidirectional_attention is
+        # True or is_causal is False but the installed transformers version is too old to honour that setting.
         """Warn if the config requests bidirectional attention settings not supported by the installed transformers version."""
         if not isinstance(config, PretrainedConfig):
             return
@@ -2283,6 +2545,8 @@ class Transformer(InputModule):
                     configs_to_check.append(sub_config)
 
         def warn_if_unsupported(param: str, expected_value: bool, is_supported: bool, min_version: str) -> None:
+            # [FUNCTION DOC]
+            # HELPER: logs the version warning for one parameter if it is unsupported and any checked config holds the given value.
             if is_supported or not any(getattr(cfg, param, None) is expected_value for cfg in configs_to_check):
                 return
             logger.warning(
@@ -2307,6 +2571,11 @@ class Transformer(InputModule):
         is_peft_model: bool,
         **model_kwargs,
     ) -> PreTrainedModel:
+        # [FUNCTION DOC]
+        # HELPER: loads the model for the backend. Torch: for PEFT adapters drops "revision" from the kwargs (it refers to the
+        # adapter); for feature extraction first tries an encoder-only model; otherwise uses the retrieval class resolution or
+        # the task's auto class and its from_pretrained with the config and kwargs. ONNX and OpenVINO delegate to the backend
+        # loaders with the task name. Unknown backends raise ValueError.
         """Loads the transformers or PEFT model into the `auto_model` attribute
 
         Args:
@@ -2358,6 +2627,11 @@ class Transformer(InputModule):
         config: PretrainedConfig,
         **model_kwargs,
     ) -> PreTrainedModel | None:
+        # [FUNCTION DOC]
+        # HELPER: returns an encoder-only model for encoder-decoder configs, or None if the config matches none. T5Gemma: marks
+        # the config as not encoder-decoder and loads the T5Gemma encoder model; T5Gemma2: loads the encoder from the encoder
+        # sub-config with a class base prefix override; registry configs: imports and loads the mapped encoder class. Loading
+        # temporarily tells the class to ignore unexpected decoder weights.
         """Load encoder-only variants for encoder-decoder architectures.
 
         Checks :data:`_ENCODER_ONLY_MODELS` for standard mappings and handles a few special cases
@@ -2367,6 +2641,9 @@ class Transformer(InputModule):
         """
 
         def _load_encoder(model_cls, load_config=None, **extra_class_attrs):
+            # [FUNCTION DOC]
+            # HELPER: loads the given encoder class from the model path with the config (or a given one) and kwargs, under
+            # temporary class attribute overrides that ignore unexpected decoder weights.
             with set_temporary_class_attrs(
                 model_cls, _keys_to_ignore_on_load_unexpected=["decoder.*"], **extra_class_attrs
             ):
@@ -2402,6 +2679,17 @@ class Transformer(InputModule):
         | BaseVideoProcessor
         | ImageProcessingMixin,
     ) -> tuple[ModalityConfig, str]:
+        # [FUNCTION DOC]
+        # Returns the modality config and module output name for a model and processor. Edge-case table entries are used first,
+        # with a "message" entry (copying the text entry or a default forward entry, plus the message format) added when the
+        # processor has a chat template. Otherwise the modalities come from the processor (plus "message" with a chat template);
+        # if the forward output type is unknown or includes the task's default output field, every modality uses forward with
+        # that field and the task's default output name. Else, for feature extraction, each non-message modality uses a
+        # "get_<modality>_features" method when the model has one (output "pooler_output" if available, otherwise the whole
+        # output) and the output name is "sentence_embedding". Otherwise all modalities use forward with the default field.
+        # KNOWN ISSUE: for edge-case entries without output name validation, the module-level table dict itself is returned and
+        # then gets a "message" entry added, mutating the shared table so later models of that type (even without a chat
+        # template) also report message support.
         """Infer the modality configuration and module output name from the model and processor.
 
         First checks :meth:`infer_modalities_edge_cases` for hard-coded overrides, then falls back
@@ -2467,6 +2755,11 @@ class Transformer(InputModule):
         model: PreTrainedModel,
         processor: ProcessorMixin | PreTrainedTokenizerBase | FeatureExtractionMixin | ImageProcessingMixin,
     ) -> tuple[ModalityConfig, str] | None:
+        # [FUNCTION DOC]
+        # Looks up the model type in the hard-coded table for this task; returns None if absent. Entries without validation are
+        # returned as is. Otherwise builds a new config, skipping (with a one-time warning) modalities whose method the model
+        # lacks, and replacing each output field with the validated one (or None if the method's return type lacks it). Returns
+        # the config and module output name.
         """Return a ``(modality_config, module_output_name)`` for model types that cannot be handled
         by the general :meth:`infer_modalities` inference path, or ``None`` to fall through.
 
@@ -2505,6 +2798,11 @@ class Transformer(InputModule):
         self,
         processor: ProcessorMixin | PreTrainedTokenizerBase | FeatureExtractionMixin | ImageProcessingMixin,
     ) -> list[Modality]:
+        # [FUNCTION DOC]
+        # Returns the modalities a processor supports: for multimodal processors, by which of the attributes tokenizer (text),
+        # image_processor (image), feature_extractor (audio) and video_processor (video) it declares; for single processors, the
+        # first matching type among tokenizer, feature extractor, video processor, image processor; otherwise an empty list
+        # with a warning.
         """Determine which modalities the processor supports by inspecting its attributes or type."""
         processor_attribute_mapping: dict[str, Modality] = {
             "tokenizer": "text",
@@ -2537,6 +2835,9 @@ class Transformer(InputModule):
         return []
 
     def _get_processor_attributes(self) -> list[str] | None:
+        # [FUNCTION DOC]
+        # HELPER: returns the processor's attribute names via the newer get-attributes method or the older attributes list, or
+        # None if neither exists.
         """Get the attributes of the processor if available. Will be removed in the future as transformers v5
         becomes the minimum requirement.
 
@@ -2551,6 +2852,10 @@ class Transformer(InputModule):
 
     @staticmethod
     def _get_method_output_fields(method: Callable) -> list[str] | None:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns the field names of the transformers ModelOutput dataclass found (recursively through generic
+        # arguments such as unions) in the method's return type hints, or None if hints cannot be resolved or no such class is
+        # found.
         """Extract the output field names from a method's return type annotation.
 
         Args:
@@ -2561,6 +2866,8 @@ class Transformer(InputModule):
         """
 
         def find_model_output_class(type_annotation):
+            # [FUNCTION DOC]
+            # HELPER: recursively searches a type annotation for a ModelOutput subclass and returns it, or None.
             if isinstance(type_annotation, type) and issubclass(type_annotation, ModelOutput):
                 return type_annotation
             for sub_annotation in get_args(type_annotation):
@@ -2579,6 +2886,8 @@ class Transformer(InputModule):
 
     @staticmethod
     def _infer_method_output_name(method_output_name: str, method: Callable) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns the output name if it is a field of the method's annotated output class, else None.
         """Validate that ``method_output_name`` is present in the method's return type annotation.
 
         Returns the name if found, or ``None`` if the method's output type does not include it.
@@ -2591,6 +2900,8 @@ class Transformer(InputModule):
         return None
 
     def save(self, output_path: str, *args, safe_serialization: bool = True, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Saves the model weights (with the safetensors choice), the processor and the module config into output_path.
         """Save the model, processor, and module config to ``output_path``."""
         self.model.save_pretrained(output_path, safe_serialization=safe_serialization)
         self.processor.save_pretrained(output_path)
@@ -2615,6 +2926,9 @@ class Transformer(InputModule):
         init_defaults: dict[str, Any] | None = None,
         **kwargs,
     ) -> Self:
+        # [FUNCTION DOC]
+        # Class method: builds the init kwargs from the saved config, hub options and caller kwargs, fills missing keys from
+        # init_defaults, and constructs the module for the model path. Extra kwargs are ignored.
         """Load a Transformer module from a pretrained model directory or Hugging Face model name."""
         init_kwargs = cls._load_init_kwargs(
             model_name_or_path=model_name_or_path,
@@ -2652,6 +2966,11 @@ class Transformer(InputModule):
         backend: str = "torch",
         **kwargs,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Class method returning init kwargs: loads the saved module config, renames old kwarg names (model_args, tokenizer_args,
+        # config_args) to the new ones (ensuring each dict exists), updates the model/processor/config kwargs with the hub
+        # options (subfolder, token, cache_dir, revision, offline flag, trust_remote_code) and then with the caller's kwargs, and
+        # adds the backend. Priority: caller over hub options over saved config.
         """Build the kwargs dict for ``__init__`` by merging config file, hub kwargs, and caller overrides.
 
         Priority (highest to lowest): caller kwargs > hub kwargs > config file values.
@@ -2714,6 +3033,13 @@ class Transformer(InputModule):
         revision: str | None = None,
         local_files_only: bool = False,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Class method: loads the module config, trying the given filename or a list of legacy config filenames until one
+        # exists (empty dict if none). Removes "trust_remote_code" from all saved kwarg dicts (security). Deserialises
+        # modality_config keys: plus-joined names become tuples; unknown modality names are skipped with a warning. Without a
+        # saved modality_config (older text-only saves), fills in the task's default modality config and output name.
+        # KNOWN ISSUE: the docstring says tuple modality keys are stored comma-separated, but the code (and the saving side)
+        # uses "+" as the separator.
         """Load the module config, trying several legacy config filenames for backward compatibility.
 
         Handles deserialization of ``modality_config`` tuple keys (stored as comma-separated strings
@@ -2790,6 +3116,9 @@ class Transformer(InputModule):
 
     @staticmethod
     def _get_default_modality_config(config: dict[str, Any]) -> tuple[ModalityConfig, str]:
+        # [FUNCTION DOC]
+        # HELPER: static. Returns the default (modality config, output name) pair for the config's transformer_task (default
+        # feature extraction).
         """Get the default modality configuration for the current transformer task.
 
         Returns:
@@ -2800,6 +3129,9 @@ class Transformer(InputModule):
         return TRANSFORMER_TASK_DEFAULTS[config.get("transformer_task", "feature-extraction")]
 
     def get_config_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the base config dict with modality_config keys rendered as strings (tuples plus-joined), dropping empty
+        # processing_kwargs, a None unpad_inputs, and the multi-vector keys when they hold their None defaults.
         """Return the config dict for serialization, with tuple modality keys joined as plus-separated strings."""
         config_dict = super().get_config_dict()
         config_dict["modality_config"] = {
@@ -2817,4 +3149,6 @@ class Transformer(InputModule):
         return config_dict
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "Transformer(...)" showing the config dict plus the model's architecture class name.
         return f"Transformer({dict(self.get_config_dict(), architecture=self.model.__class__.__name__)})"
