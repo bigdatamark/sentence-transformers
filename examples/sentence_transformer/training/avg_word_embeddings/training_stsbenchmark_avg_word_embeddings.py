@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level training script: builds a Deep Averaging Network from GloVe 300d word embeddings (loaded or downloaded via
+# WordEmbeddings), mean pooling and two square Dense layers, trains it on STS-B with CosineSimilarityLoss (batch 32, 1 epoch,
+# fp16, eval/save/log every 100 steps) using a validation similarity evaluator, evaluates on the test split, saves to a
+# timestamped output/ folder and tries to push "glove-mean-pooling-sts" to the Hub, logging an error on failure.
+# Side effects: downloads, training, logging, file writes, network.
 """
 This example uses average word embeddings (for example from GloVe). It adds two fully-connected feed-forward layers (dense layers) to create a Deep Averaging Network (DAN).
 

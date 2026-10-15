@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Recommended quantized search pipeline: binary FAISS search for candidates followed by int8 rescoring from a usearch index
+# memory-mapped from disk. Loads mxbai-embed-large-v1 with a "query" retrieval prompt set as the default prompt, and builds a
+# 100,000-question Quora corpus. If "quora_faiss_ubinary.index" exists, loads it and a view of "quora_usearch_int8.index";
+# otherwise encodes the corpus (normalized), stores a binary flat FAISS index of the ubinary embeddings (1024 bits) and an
+# inner-product int8 usearch index, saves both and opens the int8 index as a view. Then loops forever: searches the current
+# query, prints timing details as JSON and the top hits, and reads the next query from stdin.
+# Side effects: downloads, file reads and writes of index files, compute, printing, reading stdin.
+# KNOWN ISSUE: because "query" is the default prompt, the corpus documents are also encoded with the query retrieval prompt.
 """
 This script showcases a recommended approach to perform semantic search using quantized embeddings with FAISS and usearch.
 In particular, it uses binary search with int8 rescoring. The binary search is highly efficient, and its index can be kept
@@ -66,6 +75,12 @@ else:
 
 
 def search(query, top_k: int = 10, rescore_multiplier: int = 4):
+    # [FUNCTION DOC]
+    # Inputs: a query string, top_k (default 10) and rescore_multiplier (default 4). Encodes the query (float, not normalized),
+    # quantizes it to ubinary, retrieves top_k times rescore_multiplier candidate ids from the binary index by Hamming distance,
+    # loads their int8 embeddings from the usearch view as integers, scores them by dot product with the float query embedding,
+    # and sorts descending to keep the top_k. Times each stage. Returns the top scores list, the corresponding corpus ids list,
+    # and a dict of formatted stage timings plus total retrieval time (excluding embedding time).
     # 1. Embed the query as float32
     start_time = time.time()
     query_embedding = model.encode(query)

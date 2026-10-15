@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Top-level training script (no main function): trains a MiniLM-L12 cross-encoder reranker on GooAQ question-answer
+# pairs with CachedMultipleNegativesRankingLoss, which samples 5 random in-batch negatives per pair (mini batch 16 for
+# memory). Configures INFO logging, creates a fp32 CrossEncoder with English/Apache-2.0 model card data, takes 100,000
+# GooAQ rows and splits 1,000 for eval (seed 12). A NanoBEIR evaluator (msmarco, nfcorpus, nq) runs before and after
+# training. Training: batch 64, 1 epoch, lr 2e-5, 10% warmup, bf16, eval/save every 250 steps, logging every 100,
+# seed 12. Saves to models/<run_name>/final and tries a Hub push, logging an error with manual steps on failure.
+# Side effects: downloads, logging, printing, file writes, network.
 import logging
 import traceback
 

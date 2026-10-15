@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: distills a cross-encoder reranker from a BERT-ensemble teacher using pointwise MSELoss
+# on MS MARCO (query, passage, teacher score) pairs.
+# Side effects: dataset downloads, on-disk dataset caching, logging, model checkpoints, Hub push attempt.
 import logging
 import traceback
 
@@ -11,6 +15,14 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline. Same structure as the margin-MSE script: INFO logging, fp32 CrossEncoder from
+    # MiniLM-L12-H384-uncased, then tries to load "ms-marco-mse-train"/"-eval" from disk; if absent, builds
+    # id-to-text dicts for MS MARCO corpus and queries, takes 2,000,000 rows of the "bert-ensemble-mse" subset,
+    # maps ids to text, splits off 10,000 eval rows, saves both and exits so the user restarts. Uses MSELoss,
+    # a NanoBEIR evaluator on msmarco/nfcorpus/nq (run once before training), 1 epoch, batch 16, lr 8e-6,
+    # bf16, eval/save every 20,000 steps, best model by NanoBEIR mean NDCG@10. Trains, evaluates, saves to
+    # models/<run_name>/final and tries a Hub push, logging an error with manual steps on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -42,6 +54,9 @@ def main():
         dataset = dataset.select(range(dataset_size))
 
         def id_to_text_map(batch):
+            # [FUNCTION DOC]
+            # HELPER: batched map function converting query_id and passage_id columns into query and passage texts
+            # using the enclosing dicts, keeping the score column. Raises KeyError for unknown ids.
             return {
                 "query": [queries[qid] for qid in batch["query_id"]],
                 "passage": [corpus[pid] for pid in batch["passage_id"]],

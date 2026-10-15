@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Training script: distills a cross-encoder reranker from a BERT-ensemble teacher using MarginMSELoss
+# on MS MARCO (query, positive, negative, teacher margin score) triplets.
+# Side effects: dataset downloads, on-disk dataset caching, logging, model checkpoints under models/,
+# and an attempted push to the Hugging Face Hub.
 import logging
 import traceback
 
@@ -11,6 +16,17 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the whole pipeline. Configures INFO logging (httpx at WARNING). Creates a fp32 CrossEncoder from
+    # MiniLM-L12-H384-uncased and prints its max length and label count. Tries to load cached train/eval
+    # splits from "ms-marco-margin-mse-train"/"-eval"; if missing, loads the MS MARCO corpus and queries
+    # into id-to-text dicts, takes the first 2,000,000 rows of the "bert-ensemble-margin-mse" subset, maps ids
+    # to texts, splits off 10,000 eval rows, saves both splits to disk and exits the process so memory is freed
+    # (the user must rerun). Then builds MarginMSELoss, a NanoBEIR evaluator (msmarco, nfcorpus, nq) that is run
+    # once as a baseline, and training arguments (1 epoch, batch 16, lr 8e-6, 10% warmup, bf16, eval/save every
+    # 20,000 steps, best model by NanoBEIR mean NDCG@10, seed 12, 2 persistent dataloader workers). Trains,
+    # re-evaluates, saves to models/<run_name>/final, and tries to push to the Hub, logging an error with manual
+    # instructions on failure. Returns nothing.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -42,6 +58,10 @@ def main():
         dataset = dataset.select(range(dataset_size))
 
         def id_to_text_map(batch):
+            # [FUNCTION DOC]
+            # HELPER: batched dataset map function. Replaces query, positive and negative ids in the batch with their
+            # texts from the enclosing queries and corpus dicts and passes the teacher score through. Returns a dict of
+            # columns query, positive, negative, score. Raises KeyError for unknown ids.
             return {
                 "query": [queries[qid] for qid in batch["query_id"]],
                 "positive": [corpus[pid] for pid in batch["positive_id"]],

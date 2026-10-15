@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Clustering demo: encodes a fixed list of 11 sentences with all-MiniLM-L6-v2, fits agglomerative clustering with no fixed
+# cluster count and a Euclidean distance threshold of 1.5, groups the sentences by assigned label in first-seen order,
+# and prints each cluster (label plus one) with its sentences. Side effects: model download, printing.
 """
 This is a simple application for sentence embeddings: clustering
 

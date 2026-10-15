@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a ColBERT-style multi-vector model on MIRIAD medical question-to-passage retrieval with
+# CachedMultiVectorMultipleNegativesRankingLoss. Configures INFO logging at import.
+# Side effects: downloads, GPU training, logging, printing, checkpoints, Hub push attempt.
 """
 This script demonstrates how to train a domain-specific ColBERT-style multi-vector model with contrastive
 learning, using medical question -> passage retrieval on MIRIAD as the example domain.
@@ -49,6 +53,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def build_ir_evaluator(split, name: str, max_queries: int | None = None):
+    # [FUNCTION DOC]
+    # HELPER: builds an information-retrieval evaluator from a dataset split with question and passage_text columns.
+    # Passages are de-duplicated and given ids p0, p1, ...; each row becomes query q<index> whose single relevant document is
+    # its passage. If max_queries is given and smaller than the number of queries, only the first max_queries queries and
+    # their relevance entries are kept (the corpus stays complete). Returns a multi-vector IR evaluator with batch size 8 and
+    # the given name.
     """Corpus = deduplicated passages of the split, queries = questions, 1:1 qrels."""
     passage_to_id = {}
     corpus = {}
@@ -74,6 +84,14 @@ def build_ir_evaluator(split, name: str, max_queries: int | None = None):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Builds the model explicitly: a fp32 gte-modernbert-base Transformer with query expansion (min strategy, length 32), a
+    # bias-free linear projection of token embeddings to 128 dimensions, a mask that drops punctuation tokens, and token
+    # normalization, plus English/Apache-2.0 model card data; prints the model. Loads the MIRIAD split dataset and takes the
+    # first 640,000 train rows. Uses the cached multi-vector MNRL loss with mini batch 8, an eval evaluator limited to 1,000
+    # queries (run as baseline). Training: batch 128, 1 epoch, lr 3e-5, max length 1024, 5% warmup, bf16, no-duplicates
+    # sampler, eval/save every 10% of training, best model by eval MaxSim NDCG@10, seed 42. After training, evaluates on the
+    # full eval and test splits, saves to models/<run_name>/final and tries a Hub push, logging an error on failure.
     model_name = "Alibaba-NLP/gte-modernbert-base"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

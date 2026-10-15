@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Minimal CrossEncoder usage example for semantic textual similarity. Loads an STS-B DistilRoBERTa
+# cross-encoder, ranks a small fixed corpus against a fixed query with the rank API and prints each
+# score and sentence, then shows the manual alternative: predicts scores for all query-sentence pairs
+# and prints the scores and the indices sorted by decreasing score. Side effects: model download, printing.
 """
 This example computes the score between a query and all possible
 sentences in a corpus using a Cross-Encoder for semantic textual similarity (STS).

@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# Script that mines translated sentence pairs from two monolingual text files (default xz-compressed Somali and Yiddish)
+# with LaBSE and margin-based scoring. Optionally (enabled by default) fits PCA to 128 dimensions on up to 20,000 sentences
+# of length 10-200 characters from both files and appends a bias-free identity-activation Dense layer whose weights are the
+# PCA components. Reads each file into a de-duplicated set of stripped sentences within the length bounds, encodes and
+# L2-normalizes both sides, finds 4 nearest neighbours in both directions (approximate IVF search by default), computes
+# ratio-margin scores of each candidate against the average of the two neighbourhood means, and takes the best candidate
+# in each direction. All forward and backward pairs are sorted by score; pairs are written greedily, skipping any source or
+# target index already used, until the score drops below 1, as tab-separated score/source/target lines to
+# "parallel-sentences-out.tsv.gz". Prints progress and the number written.
+# Side effects: reads input files, heavy compute, writes a gzip file, printing.
+# KNOWN ISSUE: the PCA projection is applied without subtracting the PCA mean, so it is only an uncentered approximation of the fitted PCA.
 """
 This scripts show how to mine parallel (translated) sentences from two list of monolingual sentences.
 

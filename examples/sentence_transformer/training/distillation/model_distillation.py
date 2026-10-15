@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Top-level distillation script: trains a TinyBERT student to imitate the embeddings of an stsb-roberta-base-v2 teacher with
+# EmbedDistillLoss (cosine distance; a learnable projection to the teacher dimension is added on the loss when the dimensions
+# differ). Builds a training corpus of de-duplicated AllNLI sentences plus Wikipedia sentences (5,000 held out) and an eval set of
+# 5,000 NLI dev plus 5,000 Wikipedia sentences. Teacher embeddings are stored as a "label" column: for training, the first 200,000
+# sentences are labeled and cached under datasets/distillation_train_dataset (or loaded from that cache); the eval set is labeled
+# every run. Trains (batch 64, 1 epoch, lr 1e-4, eval/save every 500 steps, best model by STS-B dev Spearman cosine), evaluates on
+# STS-B test, saves to a timestamped folder and tries a Hub push named after student and teacher, logging an error on failure.
+# Side effects: downloads, heavy compute, file caching, training, logging, network.
 """
 Distill a slow but high-quality teacher SentenceTransformer into a smaller, faster student
 by training the student to imitate the teacher's sentence embeddings.
@@ -69,6 +78,8 @@ nli_eval_dataset = load_dataset("sentence-transformers/all-nli", "pair-score", s
 
 
 def combine_sentences(batch):
+    # [FUNCTION DOC]
+    # HELPER: batched map function that concatenates the sentence1 list and the sentence2 list into one "sentence" column.
     return {"sentence": batch["sentence1"] + batch["sentence2"]}
 
 
@@ -79,6 +90,8 @@ nli_eval_dataset = nli_eval_dataset.map(combine_sentences, batched=True, remove_
 
 
 def deduplicate(dataset):
+    # [FUNCTION DOC]
+    # HELPER: converts a dataset to a pandas DataFrame, drops duplicate rows, and returns a new Dataset without the pandas index.
     df = pd.DataFrame(dataset)
     df = df.drop_duplicates()
     return Dataset.from_pandas(df, preserve_index=False)
@@ -127,6 +140,9 @@ dev_evaluator(teacher_model)
 
 # Use the teacher model to get the gold embeddings for each sentence
 def map_embeddings(batch):
+    # [FUNCTION DOC]
+    # HELPER: batched map function that encodes the batch's sentences with the teacher (inference batch 64, no progress bar) and
+    # returns them as list-valued "label" entries.
     return {
         "label": teacher_model.encode(
             batch["sentence"], batch_size=inference_batch_size, show_progress_bar=False

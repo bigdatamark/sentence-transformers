@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# In-document search demo with a cross-encoder. Splits a hard-coded article about Europe into paragraphs on blank lines,
+# sentence-tokenizes each paragraph with NLTK, and forms passages from non-overlapping windows of 3 consecutive sentences.
+# Prints paragraph, sentence and passage counts. Loads the MS MARCO TinyBERT-L2 cross-encoder and, for each of five fixed
+# queries, scores every query-passage pair, sorts by score descending, and prints the elapsed time and the top 5 passages
+# with scores. Side effects: model download, printing (requires NLTK punkt data).
 """
 This example show how in-document search can be used with a CrossEncoder.
 

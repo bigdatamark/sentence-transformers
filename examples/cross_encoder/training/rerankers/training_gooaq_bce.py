@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a ModernBERT-base cross-encoder reranker on GooAQ question-answer pairs with mined hard
+# negatives and BinaryCrossEntropyLoss. Configures INFO logging at import.
+# Side effects: downloads, CPU/FAISS embedding work, logging, checkpoints, Hub push attempt.
 import logging
 import traceback
 
@@ -22,6 +26,15 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline. Creates a fp32 CrossEncoder with English/Apache-2.0 model card data. Takes 100,000 GooAQ rows and
+    # splits off 1,000 for eval (seed 12). Mines 5 hard negatives per training pair with a static retrieval embedding model on
+    # CPU (top-ranked within the 100 most similar, zero margin, labeled-pair output, FAISS). Loss: BCE with positive weight
+    # equal to the number of negatives to balance classes. Evaluators: NanoBEIR (msmarco, nfcorpus, nq) and a GooAQ reranking
+    # evaluator whose 30 candidates per eval question are mined from all answers, including the positive, without forcing the
+    # positive into the ranking; both combined sequentially and run as baseline. Training: batch 64, 1 epoch, lr 2e-5, bf16,
+    # 2 persistent workers, eval/save every 1,000 steps, best model by gooaq-dev NDCG@10. Then evaluates, saves to
+    # models/<run_name>/final, and tries a Hub push, logging an error on failure.
     model_name = "answerdotai/ModernBERT-base"
 
     train_batch_size = 64

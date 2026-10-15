@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# Evaluation script: scores a CrossEncoder (model name from the first command-line argument, max length
+# 512) on the TREC 2019 Deep Learning passage reranking track.
+# Loads the graded relevance judgments from the test split of mteb/msmarco (keeping only positive grades)
+# into a nested query-to-passage-to-grade mapping. Downloads the official top-1000 candidate TSV into
+# "trec2019-data" if missing, then parses it into a query-id-to-text map and per-query candidate lists.
+# For every query with at least one relevant passage, scores all candidates with the cross-encoder (using
+# the softmaxed second column when the model has more than one label), builds a run mapping, evaluates
+# NDCG@10 with pytrec_eval, and prints the query count and mean NDCG@10 times 100.
+# Side effects: creates a directory, downloads files, network access, printing. Raises IndexError if no
+# command-line argument is given.
+# KNOWN ISSUE: logging is never configured, so the logging.info messages are not shown by default.
 """
 This file evaluates CrossEncoder on the TREC 2019 Deep Learning (DL) Track: https://huggingface.co/papers/2003.07820
 

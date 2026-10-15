@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Exact semantic search demo in PyTorch over up to 100,000 unique Quora questions encoded with quora-distilbert-multilingual
+# as tensors. Embeddings and sentences are pickled to a cache file or loaded (and truncated to the corpus size) from it, then
+# moved to the model's device. Loops forever: reads a question from stdin, encodes it, runs semantic search (top 10 by cosine),
+# and prints the elapsed time and the top 5 hits with scores.
+# Side effects: downloads, cache file read/write, printing, reading stdin.
+# KNOWN ISSUE: the cache file name is identical to the one written by the Annoy, FAISS and hnswlib examples, which store numpy arrays; if such a cache exists, moving the embeddings to the device fails because numpy arrays have no device-move method.
 """
 This script contains an example how to perform semantic search with PyTorch. It performs exact nearest neighborh search.
 

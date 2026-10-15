@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a listwise MiniLM cross-encoder reranker with LambdaLoss (NDCG-Loss2++ weighting) on
+# MS MARCO v1.1 queries with all their candidate passages and binary labels.
+# Side effects: dataset downloads, logging, timestamped checkpoints, Hub push attempt.
 import logging
 import traceback
 from datetime import datetime
@@ -13,6 +17,13 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline: INFO logging, batch sizes 16 (train, eval, loss mini-batch), 1 epoch, no document limit,
+    # timestamp for output dirs, seed 12, single-label fp32 CrossEncoder from MiniLM-L12-H384-uncased. Converts MS
+    # MARCO v1.1 into listwise rows with listwise_mapper and splits 1,000 eval rows (seed 12). Uses LambdaLoss with
+    # NDCGLoss2PPScheme and a NanoBEIR evaluator run as baseline. Training: lr 2e-5, 10% warmup, bf16, eval/save every
+    # 500 steps, logging every 250, best model by NanoBEIR mean NDCG@10. Trains, evaluates, saves to
+    # models/<run_name>_<timestamp>/final, and tries a Hub push, logging an error on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -42,6 +53,12 @@ def main():
     dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")
 
     def listwise_mapper(batch, max_docs: int | None = 10):
+        # [FUNCTION DOC]
+        # HELPER: batched map function. Inputs: a batch of MS MARCO rows and max_docs (default 10, None for no limit).
+        # For each query, sorts its passages by label descending (positives first), skips queries with no positive
+        # label, truncates to max_docs if set, and collects the query, passage list and label list.
+        # Returns columns query, docs, labels.
+        # KNOWN ISSUE: a query with an empty passage list would make max() over the empty label sequence raise a ValueError.
         processed_queries = []
         processed_docs = []
         processed_labels = []

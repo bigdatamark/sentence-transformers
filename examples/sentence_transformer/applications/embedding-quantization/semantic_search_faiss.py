@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Interactive quantized-embedding search demo with FAISS. Flattens the Quora duplicates pairs into a single text column and
+# keeps the first 100,000 questions as corpus. Encodes the corpus with mxbai-embed-large-v1 (normalized) and quantizes it to
+# unsigned binary. Then loops forever: encodes the current queries (two fixed questions first, later one question read from
+# stdin), prints the encoding time, runs exact FAISS search for the top 10 with int8-calibrated rescoring (4x oversampling)
+# using the full-precision embeddings for calibration, reuses the returned index on later iterations, and prints the
+# precision, search time and each hit's score and text.
+# Side effects: downloads, compute, printing, reading stdin.
 import time
 
 from datasets import load_dataset

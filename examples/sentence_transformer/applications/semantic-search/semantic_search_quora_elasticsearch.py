@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Semantic plus BM25 search demo with a local Elasticsearch 8 server (password from the ELASTIC_PASSWORD environment
+# variable, KeyError if missing). Downloads the Quora duplicate questions TSV if needed and collects up to 100,000 questions
+# keyed by question id. If the "quora" index does not exist, creates it with a text field and a 768-dimension cosine dense
+# vector field, then encodes and bulk indexes questions in chunks of 500 with a progress bar; any exception during indexing
+# is caught and a message printed so the script continues. Then loops forever: reads a question from stdin, encodes it, runs a
+# BM25 match search and a k-NN search (k 10, 100 candidates), and prints the timings and the top 5 results of each.
+# Side effects: network (download and Elasticsearch), file write, printing, reading stdin.
+# KNOWN ISSUE: the progress bar is advanced by the full chunk size even for the final partial chunk, so it can overshoot the total.
 """
 This script contains an example how to perform semantic search with Elasticsearch.
 

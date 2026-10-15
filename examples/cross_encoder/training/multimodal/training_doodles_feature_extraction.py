@@ -1,3 +1,14 @@
+# [MODULE DOC]
+# Top-level training script (no main function): trains a multimodal CrossEncoder reranker on doodles-captions-manual
+# using a Qwen model in feature-extraction mode, last-token pooling and a bias-free single-output Dense layer, instead of
+# the full LM head. The Dense weight is initialized to the difference between the input embeddings of the "1" and "0"
+# tokens to mimic a logit comparison at start.
+# The rest mirrors the LogitScore variant: chat template patched to accept "query"/"document" roles, image_to_text and
+# text_to_image prompts, images resized to 128x128, 10% eval split (seed 42), pair datasets with 4 in-batch negatives per
+# positive, reranking evaluators with up to 100 random negatives, evaluation before and after training with
+# BinaryCrossEntropyLoss (batch 8, grad accumulation 4, lr 5e-6, bf16), saving to models/<run_name>/final and a Hub push
+# attempt that logs an error on failure.
+# Side effects: model/dataset downloads, GPU use, logging, printing, file writes, network.
 """
 This example trains a multimodal CrossEncoder reranker on the doodles-captions-manual dataset
 using feature extraction with Pooling + Dense instead of LogitScore. This avoids the
@@ -116,6 +127,10 @@ rng = random.Random(seed)
 
 
 def expand_with_negatives(batch, col_a, col_b):
+    # [FUNCTION DOC]
+    # HELPER: batched map function. For every row emits the positive pair (label 1) plus up to 4 negatives (label 0) built by
+    # pairing the row's first column with the second column of other random rows in the same batch, using the module-level
+    # seeded random generator (mutates its state). Returns a dict with the two columns and "label".
     batch_size = len(batch[col_a])
     expanded_a, expanded_b, labels = [], [], []
     for i in range(batch_size):
@@ -131,6 +146,9 @@ def expand_with_negatives(batch, col_a, col_b):
 
 
 def build_pair_dataset(split, col_a_name, col_b_name):
+    # [FUNCTION DOC]
+    # HELPER: selects the two given columns of a split and maps them in batches through expand_with_negatives; returns the
+    # labeled pair dataset.
     """Build a dataset of (col_a, col_b, label) pairs with negatives."""
     return split.select_columns([col_a_name, col_b_name]).map(
         expand_with_negatives,

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Approximate nearest neighbour search demo with hnswlib (cosine space, 768 dimensions) over up to 100,000 unique Quora
+# questions encoded with quora-distilbert-multilingual. Embeddings are cached in a pickle file; the HNSW index (ef construction
+# 400, M 64) is built and saved to "./hnswlib.index" or loaded from it, and the query-time ef is set to 50. Then loops forever:
+# reads a question, encodes it, retrieves 10 neighbours, converts cosine distance to similarity as one minus distance, prints
+# hits with timing, compares against exact semantic search and prints recall@10 and missed hits.
+# Side effects: downloads, file reads/writes, printing, reading stdin.
 """
 This example uses Approximate Nearest Neighbor Search (ANN) with Hnswlib  (https://github.com/nmslib/hnswlib/).
 

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Basic embedding demo: sets numpy's print threshold to 100 elements, configures INFO logging, loads all-MiniLM-L6-v2,
+# encodes three sentences and prints each sentence with its embedding. Side effects: model download, logging, printing.
 """
 This basic example loads a pre-trained model from the web and uses it to
 generate sentence embeddings for a given list of sentences.

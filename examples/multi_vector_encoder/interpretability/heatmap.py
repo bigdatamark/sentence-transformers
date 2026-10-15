@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Interpretability demo: renders query-token similarity heatmaps over the image patches of a document image for a
+# ColPali model. Side effects: downloads a model and an image, writes PNG files to the working directory, printing.
 """Render a per-query-token MaxSim heatmap onto an image-document for a ColPali-style model.
 
 This is the standard ColPali interpretability viz: for a given query and an image-document,
@@ -36,6 +39,13 @@ from sentence_transformers.multi_vector_encoder.modules import MultiVectorMask
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Loads ColPali v1.3, finds its MultiVectorMask module and restricts document embeddings to image tokens only. Loads a
+    # fixed chart image, infers the patch grid from the image size, encodes the query (keeping full outputs) and the image
+    # document. Selects only the real (non-special) query token embeddings, builds a summed similarity heatmap overlay,
+    # saves it as heatmap_reranker.png and prints its size; then builds one overlay per query token, prints how many there
+    # are and saves each as heatmap_token<index>_<token>.png. Raises StopIteration if the model has no MultiVectorMask.
+    # Returns None.
     # Any PaliGemma-based ColPali checkpoint.
     model = MultiVectorEncoder("vidore/colpali-v1.3")
 

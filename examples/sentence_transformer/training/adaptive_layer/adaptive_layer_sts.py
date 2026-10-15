@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level training script: trains a SentenceTransformer (model from the first command-line argument, default
+# distilbert-base-uncased) on STS-B with AdaptiveLayerLoss wrapping CoSENTLoss. Validation similarity evaluator during training
+# (batch 16, 4 epochs, fp16, eval/save/log every 100 steps), test evaluator afterwards; saves to a timestamped output/ folder and
+# tries to push "<model>-sts-adaptive-layer" to the Hub, logging an error on failure.
+# Side effects: downloads, GPU training, logging, file writes, network.
 """
 This examples trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) for the STSbenchmark from scratch.
 It uses AdaptiveLayerLoss with the powerful CoSENTLoss to train models that perform well even when removing some layers.

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Exhaustive MaxSim semantic search demo with a small multi-vector model (mxbai-edge-colbert) over a few thousand
+# documents. Side effects: downloads, compute, printing, reading stdin.
 """Semantic search over a small corpus with a multi-vector (ColBERT-style) model alone.
 
 The corpus is embedded once into per-token embeddings, and each query is then scored against every
@@ -18,6 +21,10 @@ from sentence_transformers import MultiVectorEncoder
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Loads the first 3,000 Natural Questions rows, builds an order-preserving de-duplicated answer corpus, encodes it into
+    # per-token embeddings (printing the time), then runs the nested search on the first two dataset queries and on questions
+    # read from stdin until an empty line or end-of-file. Returns None.
     # 1. Load a small corpus: the (deduplicated) answer passages of 3,000 Natural Questions rows.
     dataset = load_dataset("sentence-transformers/natural-questions", split="train[:3000]")
     corpus = list(dict.fromkeys(dataset["answer"]))
@@ -29,6 +36,9 @@ def main() -> None:
     print(f"Encoded {len(corpus)} documents in {time.perf_counter() - start:.2f}s (one-time indexing cost)")
 
     def search(query: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: encodes one query, computes MaxSim scores against every corpus document, takes the top 3 and prints them (score
+        # and first 100 characters) with the search time in milliseconds. Returns None.
         start = time.perf_counter()
         query_embeddings = model.encode_query([query])
         scores = model.similarity(query_embeddings, corpus_embeddings)[0]

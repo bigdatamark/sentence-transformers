@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Interactive quantized-embedding search demo with usearch. Builds a 100,000-question Quora corpus, encodes it with
+# mxbai-embed-large-v1 (normalized) and quantizes it to signed binary. Loops forever: encodes the current queries (two fixed
+# ones, then one from stdin), prints encoding time, runs exact usearch top-10 search with rescoring (4x oversampling,
+# full-precision calibration embeddings), reuses the returned index after the first iteration and prints search time and
+# each hit's score and text. Side effects: downloads, compute, printing, reading stdin.
 import time
 
 from datasets import load_dataset

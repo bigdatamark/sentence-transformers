@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Top-level seed search script for STS-B. Arguments: model name (default bert-base-uncased), seed count (default 10) and the
+# fraction of the first epoch after which to stop (default 0.3). For each seed: seeds Python, numpy and torch, builds a mean-pooled
+# Transformer bi-encoder, trains it with CosineSimilarityLoss (batch 16) and a callback that stops training once the global step
+# reaches the fraction of one epoch's steps, evaluates on STS-B validation, records the primary metric per seed, logs all seeds
+# sorted best first, and saves the model under output/bi-encoder/.../seed-<n>.
+# Side effects: downloads, repeated training, logging, file writes.
 """
 This script is identical to examples/sentence_transformer/training/sts/training_stsbenchmark.py with seed optimization.
 We apply early stopping and evaluate the models over the dev set, to find out the best performing seeds.
@@ -106,12 +113,19 @@ for seed in range(seed_count):
 
     # 5. Create a Training Callback that stops training after a certain number of steps
     class SeedTestingEarlyStoppingCallback(TrainerCallback):
+        # [CLASS DOC]
+        # HELPER: trainer callback that requests the training loop to stop once a given number of optimizer steps is reached.
         def __init__(self, num_steps_until_stop: int):
+            # [FUNCTION DOC]
+            # HELPER: stores the step count after which to stop.
             self.num_steps_until_stop = num_steps_until_stop
 
         def on_step_end(
             self, args: SentenceTransformerTrainingArguments, state: TrainerState, control: TrainerControl, **kwargs
         ):
+            # [FUNCTION DOC]
+            # HELPER: called after each training step; sets the control flag that stops training when the global step is at or above the
+            # stored count. Mutates the control object; returns None.
             if state.global_step >= self.num_steps_until_stop:
                 control.should_training_stop = True
 

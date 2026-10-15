@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Multi-process encoding demo. When run as a script: builds 100,000 synthetic sentences, loads all-MiniLM-L6-v2, starts a
+# multi-process pool (one worker per available device), encodes the sentences through the pool, prints the embedding
+# matrix shape and stops the pool. Side effects: model download, spawns processes, logging, printing.
 """
 This example starts multiple processes (1 per GPU), which encode
 sentences in parallel. This gives a near linear speed-up

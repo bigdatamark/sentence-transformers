@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Extractive summarization demo with LexRank: splits a hard-coded New York City text into sentences with NLTK, encodes them
+# with all-MiniLM-L6-v2, computes the pairwise similarity matrix with the model's similarity function, scores sentences by
+# continuous LexRank centrality, and prints the sentence count and the 5 most central sentences in descending order.
+# Side effects: model download, printing (requires NLTK punkt data and the local lex_rank module).
 """
 This example uses LexRank (https://jair.org/index.php/jair/article/view/10396/24901)
 to create an extractive summarization of a long document.

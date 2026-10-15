@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: distills a ColBERT-style multi-vector model from bge-reranker-v2-gemma teacher scores on MS MARCO
+# candidate lists using MultiVectorDistillKLDivLoss with temperature 0.25. Configures INFO logging at import.
+# Side effects: downloads, GPU training, logging, printing, checkpoints, Hub push attempt.
 """
 This script demonstrates how to train a strong ColBERT-style multi-vector model with knowledge distillation
 on MS MARCO.
@@ -55,6 +59,15 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Builds the model: fp32 gte-modernbert-base Transformer with query expansion (min, length 32), a bias-free 128-dimension
+    # token projection, a mask that skips punctuation tokens, and token normalization, with model card data; prints it.
+    # Loads the first 20,000 rows of the ms-marco-en-bge-gemma train subset plus its queries and documents datasets, and
+    # attaches an on-the-fly transform that resolves query and document ids to text (at most 32 documents per row). Uses the
+    # KL-divergence distillation loss and a NanoBEIR evaluator on msmarco, nq and fiqa2018 (batch 16) run as baseline.
+    # Training: batch 4, no gradient accumulation, 1 epoch, lr 3e-5, max length 180, 5% warmup, bf16, eval/save every 10%,
+    # best model by NanoBEIR mean MaxSim NDCG@10, seed 42, no eval dataset. Then runs the full NanoBEIR suite, saves to
+    # models/<run_name>/final and tries a Hub push, logging an error on failure.
     model_name = "Alibaba-NLP/gte-modernbert-base"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

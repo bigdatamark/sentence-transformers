@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Training script: finetunes the pretrained ColQwen2 visual document retriever on energy-domain page images with synthetic
+# queries, training only the top language-model layers and the multi-vector projection. Configures INFO logging at import
+# and silences httpx, httpcore, huggingface_hub and urllib3 below WARNING.
+# Side effects: downloads, GPU training, logging, checkpoints, Hub push attempt.
 """
 This script demonstrates how to finetune a pretrained ColPali-style multi-vector (late-interaction) model for
 visual document retrieval: text queries are matched directly against document page images, skipping OCR entirely.
@@ -47,6 +52,14 @@ for logger_name in ("httpx", "httpcore", "huggingface_hub", "urllib3"):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Loads the model in bf16 with model card data. Freezes all parameters of the underlying retrieval model, then unfreezes
+    # the last 8 language-model layers and the embedding projection layer, and logs trainable versus total parameter counts.
+    # Loads the syntheticDocQA energy train split, keeps the first row per unique image filename, keeps the query and image
+    # columns, and splits 400 rows for eval (seed 12). Uses multi-vector MNRL. Builds an IR evaluator where each eval query's
+    # only relevant document is its own page image, run as baseline. Training: batch 8, 1 epoch, lr 2e-5, 5% warmup, bf16,
+    # eval/save every 10% (model weights only), best model by energy-dev MaxSim NDCG@10, seed 42. Evaluates, saves to
+    # models/<run_name>/final and tries a Hub push, logging an error on failure.
     model_name = "vidore/colqwen2-v1.0-hf"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

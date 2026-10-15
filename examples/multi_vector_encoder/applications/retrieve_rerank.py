@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Two-stage search demo: a MiniLM bi-encoder retrieves candidates, and a ColBERT-style multi-vector model (LFM2-ColBERT)
+# reranks them with MaxSim. Side effects: downloads, GPU/CPU compute, printing, reading stdin.
 """Retrieve with a fast bi-encoder, rerank with a multi-vector (ColBERT-style) model.
 
 Late-interaction models score every query token against every document token, which is more
@@ -17,6 +20,11 @@ from sentence_transformers.util import semantic_search
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Loads the first 50,000 Natural Questions rows, builds an order-preserving de-duplicated answer corpus, encodes it once
+    # with the bi-encoder as a tensor (printing the indexing time), loads the multi-vector reranker and runs a warmup query
+    # encoding. Runs the nested search on the first two dataset queries, then loops reading questions from stdin until an
+    # empty line or end-of-file. Returns None.
     # 1. Load a corpus: the (deduplicated) answer passages of 50,000 Natural Questions rows.
     dataset = load_dataset("sentence-transformers/natural-questions", split="train[:50000]")
     corpus = list(dict.fromkeys(dataset["answer"]))
@@ -35,6 +43,11 @@ def main() -> None:
     reranker.encode_query(["warmup"])  # the first CUDA call pays one-time initialization costs
 
     def search(query: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: for one query string, retrieves the top 50 corpus documents by bi-encoder cosine similarity, then encodes the
+        # query and those candidates with the multi-vector model, computes MaxSim scores and sorts them descending. Prints the
+        # query, the top 3 first-stage hits and the top 3 reranked hits (score and first 100 characters) with each stage's time
+        # in milliseconds. Returns None.
         start = time.perf_counter()
         query_embedding = retriever.encode_query([query], convert_to_tensor=True)
         hits = semantic_search(query_embedding, corpus_embeddings, top_k=50)[0]

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Question-answer retrieval demo over Simple English Wikipedia with the nq-distilbert-base-v1 bi-encoder. Downloads the
+# simplewiki 2020-11-01 JSONL dump into data/ if missing and builds a list of [title, paragraph] passages. For the default model
+# it downloads (if needed) and loads precomputed corpus embeddings, converts them to float and moves them to the best device;
+# for other models it encodes the passages itself. Then loops forever: reads a question, encodes it, runs semantic search for
+# the top 5 passages and prints them with scores and the elapsed time.
+# Side effects: network downloads, file writes, loading a torch file, printing, reading stdin.
 """
 This examples demonstrates the setup for Question-Answer-Retrieval.
 

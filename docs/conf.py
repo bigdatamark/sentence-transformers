@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# Sphinx configuration for the Sentence Transformers documentation site.
+# Sets project metadata (copyright year taken from the current date at build time), the
+# extension list (napoleon, autodoc, myst, markdown tables, copy button, intersphinx,
+# linkcode, inline tabs, mermaid, collapse), include patterns, intersphinx targets for
+# Hugging Face libraries and PyTorch, and the Read-the-Docs HTML theme with custom
+# static CSS/JS, logo and favicon.
+# It also defines hooks: a linkcode resolver that maps documented objects to GitHub source
+# line ranges, a monkey-patched HTML download-link visitor that points downloads at GitHub,
+# and autodoc docstring preprocessors registered in setup.
+# Side effects at import time: replaces the HTML5 translator's download reference visitor globally.
+# KNOWN ISSUE: the include pattern "sentence_transformers/**/.py" matches only files literally named ".py"; "*.py" was probably intended.
 # Configuration file for the Sphinx documentation builder.
 #
 # This file only contains a selection of the most common options. For a full
@@ -127,6 +139,16 @@ myst_heading_anchors = 3
 
 # https://github.com/readthedocs/sphinx-autoapi/issues/202#issuecomment-907582382
 def linkcode_resolve(domain, info):
+    # [FUNCTION DOC]
+    # Sphinx linkcode callback. Inputs: the domain name and an info mapping with "module" and
+    # "fullname". Returns None for JavaScript objects or the "connect4" tutorial module; asserts the
+    # domain is Python. Imports the module, resolves the object (for a dotted fullname, the attribute
+    # of a top-level object; returns None if that attribute is missing, i.e. a plain class attribute),
+    # unwraps decorators, and finds its source file and line range. Returns None if source lookup raises
+    # a type error or the file path, made relative to the parent of the working directory, is not under
+    # sentence_transformers. Otherwise returns a GitHub URL on the main branch with a start-end line anchor.
+    # Side effects: imports arbitrary modules.
+    # KNOWN ISSUE: a fullname with more than one dot (e.g. a nested class method) makes the two-way split raise a ValueError instead of being handled.
     # Non-linkable objects from the starter kit in the tutorial.
     if domain == "js" or info["module"] == "connect4":
         return
@@ -163,6 +185,13 @@ def linkcode_resolve(domain, info):
 
 
 def visit_download_reference(self, node):
+    # [FUNCTION DOC]
+    # Replacement for the HTML5 translator's download-reference visitor (self is the translator, node
+    # the docutils node). If the builder has no download support, pushes an empty closing tag. If the node
+    # has an external URI, emits an anchor to it; if it has a target and source document, emits an anchor
+    # to the file under the GitHub tree URL (document directory joined with target). Otherwise pushes an
+    # empty closer. Anchors get class "reference download external" and a download attribute; the matching
+    # closing tag is pushed onto the translator context. Mutates the translator body and context.
     root = "https://github.com/huggingface/sentence-transformers/tree/main"
     atts = {"class": "reference download", "download": ""}
 
@@ -186,6 +215,19 @@ HTML5Translator.visit_download_reference = visit_download_reference
 
 
 def preprocess_docstring(app, obj_type: str, name: str, obj, options: sphinx.ext.autodoc.Options, lines: list[str]):
+    # [FUNCTION DOC]
+    # autodoc-process-docstring handler that rewrites the docstring lines list in place.
+    # Inputs: the app, the object type, the full dotted name, the object, autodoc options and the lines.
+    # Steps: (1) for functions, decorators, methods, properties and attributes documented under
+    # sentence_transformers whose real module is in transformers, prepends a note directive saying the
+    # docstring is inherited from the transformers object of the same qualified name, plus a blank line.
+    # (2) Converts Markdown triple-backtick fences to rST code-block directives (language defaults to
+    # python, "py" mapped to python), keeping the fence indentation, adding a blank indented line, and
+    # re-indenting each inner line to four spaces past the directive (original inner indentation is lost);
+    # the closing fence is dropped. (3) Converts <Tip>...</Tip> sections to a tip admonition with the body
+    # indented three spaces. (4) Fixes a misplaced backtick typo in TrainerCallback references, then
+    # rewrites bracketed transformers references to Python object roles. Returns nothing.
+    # KNOWN ISSUE: inner code lines are stripped of their own leading whitespace, so nested indentation inside fenced code blocks is flattened.
     # If we are documenting something under `sentence_transformers` but the
     # underlying object actually lives in `transformers`, we treat the
     # docstring as inherited from transformers and prepend a note that
@@ -308,6 +350,10 @@ def preprocess_docstring(app, obj_type: str, name: str, obj, options: sphinx.ext
 
 
 def inherit_class_docstrings(app, what, name, obj, options, lines):
+    # [FUNCTION DOC]
+    # autodoc-process-docstring handler. When documenting a class whose docstring lines are empty, fetches
+    # the docstring via inspect (which walks the MRO) and, if found, appends it to lines after autodoc's
+    # docstring preparation using the configured tab width (default 8). Mutates lines in place.
     """Inherit parent class docstrings for classes that don't define their own.
 
     ``autodoc_inherit_docstrings`` only applies to methods, not classes.
@@ -321,6 +367,9 @@ def inherit_class_docstrings(app, what, name, obj, options, lines):
 
 
 def setup(app: Sphinx):
+    # [FUNCTION DOC]
+    # Sphinx extension entry point. Registers inherit_class_docstrings on autodoc-process-docstring with
+    # priority 100 (so it runs before Napoleon) and preprocess_docstring with the default priority.
     # Register with low priority (before Napoleon at 500) so inherited docstrings
     # get processed by Napoleon (Args -> :param:) and preprocess_docstring too.
     app.connect("autodoc-process-docstring", inherit_class_docstrings, priority=100)

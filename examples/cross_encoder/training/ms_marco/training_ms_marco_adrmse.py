@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a listwise cross-encoder reranker with ADRMSELoss on MS MARCO, using the
+# RankZephyr reordering of ColBERT top-k results as LLM-distilled ranking targets.
+# Side effects: dataset downloads, logging, checkpoints in timestamped models/ directories, Hub push attempt.
 import logging
 import traceback
 from datetime import datetime
@@ -13,6 +17,15 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline. Configures logging; batch sizes 16 (train, eval and loss mini-batch), 1 epoch, at most
+    # 20 documents per query; takes a timestamp for output dirs. Seeds torch with 12 and creates a single-label
+    # fp32 CrossEncoder from MiniLM-L12-H384-uncased. Loads MS MARCO corpus and queries into id-to-text dicts and
+    # the "rankzephyr-colbert" subset, attaches an on-the-fly transform mapping ids to text with descending
+    # synthetic scores, and splits 1,000 eval rows (seed 12). Builds ADRMSELoss with the mini batch size and a
+    # NanoBEIR evaluator (msmarco, nfcorpus, nq) run as a baseline. Trains with lr 2e-5, 10% warmup, bf16,
+    # eval/save every 20% of training, logging every 5%, best model by NanoBEIR mean NDCG@10. Then evaluates,
+    # saves to models/<run_name>_<timestamp>/final, and tries a Hub push, logging an error on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -47,6 +60,10 @@ def main():
     dataset = load_dataset("sentence-transformers/msmarco", "rankzephyr-colbert", split="train")
 
     def ids_to_text_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: dataset transform. For each row takes the first max_docs document ids and resolves them to texts,
+        # resolves the query id to its text, and assigns integer scores counting down from the number of documents
+        # to 1 so the LLM's first-ranked document gets the highest score. Returns columns query, docs, scores.
         docs_per_query = [[corpus[pid] for pid in doc_ids[:max_docs]] for doc_ids in batch["doc_ids"]]
         return {
             "query": [queries[qid] for qid in batch["query_id"]],

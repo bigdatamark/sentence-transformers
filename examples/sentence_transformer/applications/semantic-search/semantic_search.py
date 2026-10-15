@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Simple semantic search demo: encodes a 9-sentence corpus as documents with all-MiniLM-L6-v2, and for three fixed queries
+# encodes each as a query, computes model similarity to all documents, takes the top 5 (or fewer if the corpus is smaller)
+# and prints scores and sentences. A string literal shows an alternative using the semantic_search utility.
+# Side effects: model download, printing.
 """
 This is a simple application for sentence embeddings: semantic search
 

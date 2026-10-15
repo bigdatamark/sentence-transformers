@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Top-level Augmented SBERT (cross-domain) script: STS-B is the labeled source and Quora duplicates the unlabeled target. Splits
+# QQP pair-class data into train and 10,000 held-out rows (5,000 dev, 5,000 test, seed 12). Step 1: trains a single-output
+# cross-encoder with BCE on STS-B train pairs in both orders, evaluated by correlation on STS-B validation. Step 2: scores every QQP
+# train pair with it (asserting scores in [0, 1]). Step 3: trains a mean-pooled bi-encoder (max length 128) with
+# CosineSimilarityLoss on the cross-encoder-labeled QQP pairs, evaluated with a binary classification evaluator on QQP dev, saves
+# it, and evaluates on QQP test.
+# Side effects: downloads, training, logging, file writes.
 """
 The script shows how to train Augmented SBERT (Domain-Transfer/Cross-Domain) strategy for STSb-QQP dataset.
 For our example below we consider STSb (source) and QQP (target) datasets respectively.

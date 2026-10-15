@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Top-level training script: trains a three-class (contradiction 0, entailment 1, neutral 2) DistilRoBERTa CrossEncoder on
+# AllNLI pair-class data with CrossEntropyLoss. Uses the first 100,000 train rows and first 1,000 dev rows; evaluates with
+# a classification evaluator on dev before and during training (batch 64, 1 epoch, bf16, eval/save every 500 steps),
+# then on the full test split. Saves to a timestamped output/ directory's final subfolder and tries a Hub push, logging an
+# error on failure.
+# Side effects: downloads, logging, file writes, network.
 """
 This examples trains a CrossEncoder for the NLI task. A CrossEncoder takes a sentence pair
 as input and outputs a label. Here, it learns to predict the labels: "contradiction": 0, "entailment": 1, "neutral": 2.

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Approximate nearest neighbour search demo with a FAISS IVF flat inner-product index (1,024 clusters, 3 probes) over up to
+# 100,000 unique Quora questions encoded with quora-distilbert-multilingual. Embeddings are computed and pickled to a cache
+# file, or loaded from it. Corpus embeddings are L2-normalized, and the index is trained and filled on every run. Then loops
+# forever: reads a question from stdin, encodes and normalizes it, gets the 10 approximate neighbours (inner product equals
+# cosine), prints them with timing, computes the exact top 10 with semantic search, and prints recall@10 and missed hits.
+# Side effects: downloads, cache file read/write, printing, reading stdin.
 """
 This example uses Approximate Nearest Neighbor Search (ANN) with FAISS (https://github.com/facebookresearch/faiss).
 

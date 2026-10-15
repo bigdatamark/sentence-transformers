@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Clustering demo: encodes a fixed list of 11 sentences with all-MiniLM-L6-v2, fits k-means with 5 clusters (no fixed
+# random seed), groups sentences by cluster label and prints each cluster (label plus one) with its sentences.
+# Side effects: model download, printing.
 """
 This is a simple application for sentence embeddings: clustering
 

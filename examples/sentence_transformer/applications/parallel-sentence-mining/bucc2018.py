@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# Evaluation script for the BUCC 2018 parallel sentence mining task (German-English training data by default) with LaBSE.
+# Optionally fits PCA (disabled by default) like bitext_mining.py. Reads id-tab-sentence source and target files and the gold
+# pairs file (kept only when both ids exist, recorded symmetrically). Encodes source and target sentences, caching each set of
+# embeddings in a pickle file named after the model, the input file and the embedding size. Normalizes, runs 4-nearest-neighbour
+# search both ways (approximate, 5 probes), applies ratio-margin scoring, collects the best candidate per sentence in each
+# direction, and greedily keeps non-overlapping pairs scoring at least 1. Sorting the kept pairs by score, it walks down the
+# list computing precision, recall and F1 at each correct pair, tracking the best F1 and the threshold midway between that
+# pair's score and the next one, and prints the best threshold, recall, precision and F1.
+# Side effects: reads input files, reads/writes pickle caches, heavy compute, printing.
+# KNOWN ISSUE: the cache file name includes the model name with its slash, so writing it fails unless a "sentence-transformers" directory already exists.
+# KNOWN ISSUE: average_precision is accumulated but never used or printed.
 """
 This script tests the approach on the BUCC 2018 shared task on finding parallel sentences:
 https://comparable.limsi.fr/bucc2018/bucc2018-task.html

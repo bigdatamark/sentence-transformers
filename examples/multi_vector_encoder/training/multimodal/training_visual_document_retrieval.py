@@ -1,3 +1,14 @@
+# [MODULE DOC]
+# Top-level training script (no main function): turns the single-vector Qwen3-VL-Embedding-2B model into a ColQwen-style
+# multi-vector retriever (a fresh 128-dimension token projection is appended) and trains it on query/document-screenshot
+# pairs with one hard negative using CachedMultiVectorMultipleNegativesRankingLoss (mini batch 1).
+# Steps: configures logging; loads the model in bf16 with a flash-attention kernel and image pixel bounds; loads the
+# preprocessed VDR train subset (query, image, negative_0) and eval subset. Training arguments: batch 64, 1 epoch, lr 2e-5
+# with a 10x higher rate (2e-4) for parameters matching the projection layer pattern, max gradient norm 30, 10% warmup,
+# bf16, eval/save every 10% (model only). Builds a hard IR evaluator whose corpus holds every eval image plus the four
+# negative columns of every row under distinct ids, each query relevant only to its own image; runs it before training,
+# trains, runs it again, saves to models/<run_name>/final and tries a Hub push, logging an error on failure.
+# Side effects: downloads, heavy GPU use, logging, file writes, network.
 """
 This example shows how to train a multi-vector (late-interaction) model for document screenshot retrieval
 without starting from an existing Col* checkpoint. It mirrors the single-vector recipe from the

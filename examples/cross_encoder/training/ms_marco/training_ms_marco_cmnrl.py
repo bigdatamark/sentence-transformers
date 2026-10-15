@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a ModernBERT-base cross-encoder reranker with CachedMultipleNegativesRankingLoss on
+# MS MARCO v1.1 rows of one query, one positive and five hard negatives.
+# Side effects: dataset downloads, logging, checkpoints, Hub push attempt.
 import logging
 import traceback
 from collections import defaultdict
@@ -15,6 +19,13 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline: INFO logging, batch 32, 1 epoch, seed 12, fp32 CrossEncoder from ModernBERT-base. Loads
+    # MS MARCO v1.1, maps it with mnrl_mapper, splits 10,000 eval rows. Loss: cached MNRL with 5 negatives, mini
+    # batch 32, scale 10 and a sigmoid activation. NanoBEIR evaluator (msmarco, nfcorpus, nq) run first as baseline.
+    # Training arguments: lr 2e-5, 10% warmup, bf16, no-duplicates batch sampler, eval/save every 400 steps, logging
+    # every 100, best model by NanoBEIR mean NDCG@10. Trains, evaluates, saves to models/<run_name>/final and tries
+    # a Hub push, logging an error on failure.
     model_name = "answerdotai/ModernBERT-base"
 
     # Set the log level to INFO to get more information
@@ -37,6 +48,10 @@ def main():
     dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")
 
     def mnrl_mapper(batch):
+        # [FUNCTION DOC]
+        # HELPER: batched map function. Skips queries with fewer than 5 unselected passages or no selected passage.
+        # For the rest, emits the query, the first selected passage as positive and the first five unselected
+        # passages as columns negative_1 through negative_5. Returns a dict of lists.
         outputs = defaultdict(list)
         num_negatives = 5
         for query, passages_info in zip(batch["query"], batch["passages"]):

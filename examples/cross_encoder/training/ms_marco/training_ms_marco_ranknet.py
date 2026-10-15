@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a MiniLM cross-encoder reranker with the pairwise RankNetLoss applied to listwise MS MARCO v1.1
+# rows (query, candidate passages, binary labels).
+# Side effects: dataset downloads, logging, timestamped checkpoints, Hub push attempt.
 from __future__ import annotations
 
 import logging
@@ -15,6 +19,12 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline: INFO logging, batch sizes 16 (train, eval, loss mini-batch), 1 epoch, no document limit, timestamp,
+    # seed 12, single-label fp32 MiniLM-L12 CrossEncoder. Builds listwise rows with listwise_mapper, splits 1,000 eval rows
+    # (seed 12), uses RankNetLoss and a NanoBEIR evaluator run as baseline. Training: lr 2e-5, 10% warmup, bf16, eval/save
+    # every 500 steps, logging every 250, best model by NanoBEIR mean NDCG@10. Trains, evaluates, saves to
+    # models/<run_name>_<timestamp>/final and tries a Hub push, logging an error on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -44,6 +54,10 @@ def main():
     dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")
 
     def listwise_mapper(batch, max_docs: int | None = 10):
+        # [FUNCTION DOC]
+        # HELPER: batched map function. For each query, sorts passages by label descending, skips queries without a positive,
+        # truncates to max_docs (default 10, None keeps all) and returns columns query, docs and labels.
+        # KNOWN ISSUE: an empty passage list makes max() over the labels raise a ValueError.
         processed_queries = []
         processed_docs = []
         processed_labels = []

@@ -1,3 +1,14 @@
+# [MODULE DOC]
+# Top-level Augmented SBERT (in-domain, BM25 sampling) script for STS-B. Command-line arguments: model name (default
+# bert-base-uncased) and top_k (default 3). Step 1: trains a single-output cross-encoder with BCE on the gold STS-B train set plus a
+# copy with sentence order swapped, evaluated by correlation on validation, and saves it. Step 2: indexes every unique train
+# sentence into a local Elasticsearch "stsb" index (creation ignores "already exists" errors), queries each sentence for its top_k
+# BM25 matches, and collects new pairs that are not the sentence itself and not already a gold or collected pair; scores them with
+# the cross-encoder (asserting all scores are in [0, 1]). Step 3: trains a bi-encoder (max length 128) with CosineSimilarityLoss on
+# gold plus silver pairs with a validation evaluator, evaluates on test, saves to a timestamped folder and tries a Hub push,
+# logging an error on failure.
+# Side effects: network calls to Elasticsearch, downloads, training, logging, file writes.
+# KNOWN ISSUE: the duplicate check converts the whole duplicates set into a new set for every hit, which is needlessly quadratic.
 """
 The script shows how to train Augmented SBERT (In-Domain) strategy for STSb dataset with BM25 sampling.
 We utilise easy and practical elasticsearch (https://www.elastic.co/) for BM25 sampling.

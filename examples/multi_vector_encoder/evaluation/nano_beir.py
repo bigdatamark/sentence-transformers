@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Evaluation script: runs the multi-vector NanoBEIR evaluator (all 13 datasets, batch 16) on the LateOn model.
 """Evaluate a pretrained multi-vector model on NanoBEIR.
 
 NanoBEIR is a fast benchmarking suite of 13 small BEIR subsets, useful for quickly comparing models
@@ -14,6 +16,9 @@ from sentence_transformers.multi_vector_encoder.evaluation import MultiVectorNan
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Loads the model, runs the evaluator, prints the primary metric value and pretty-prints every result key containing
+    # "ndcg@10". Side effects: downloads, compute, printing. Returns None.
     model = MultiVectorEncoder("lightonai/LateOn")
     evaluator = MultiVectorNanoBEIREvaluator(batch_size=16)
     results = evaluator(model)

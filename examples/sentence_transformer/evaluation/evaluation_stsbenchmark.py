@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Evaluation script: loads the model named by the first command-line argument (default stsb-distilroberta-base-v2), limits torch
+# to 4 threads, and evaluates cosine-similarity Spearman correlation on the STS-B validation and test splits with
+# EmbeddingSimilarityEvaluator through model.evaluate. Side effects: downloads, logging, printing via evaluators.
 """
 This examples loads a pre-trained model and evaluates it on the STSbenchmark dataset
 

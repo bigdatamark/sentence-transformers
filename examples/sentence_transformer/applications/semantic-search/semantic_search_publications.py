@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Scientific paper similarity demo with SPECTER. Downloads the EMNLP 2016-2018 papers JSON if not present, loads it, encodes
+# each paper as title plus "[SEP]" plus abstract, and runs search_papers for five example papers.
+# Side effects: network download, file write, model download, printing.
 """
 This example demonstrates how we can perform semantic search for scientific publications.
 
@@ -38,6 +42,10 @@ corpus_embeddings = model.encode(paper_texts, convert_to_tensor=True)
 
 # We define a function, given title & abstract, searches our corpus for relevant (similar) papers
 def search_papers(title, abstract):
+    # [FUNCTION DOC]
+    # Inputs: a title and an abstract. Encodes them in the same title-[SEP]-abstract form, runs semantic search against all
+    # paper embeddings (default top 10), and prints the query title followed by each hit's score, title, venue and year.
+    # Returns None.
     query_embedding = model.encode(title + "[SEP]" + abstract, convert_to_tensor=True)
 
     search_hits = semantic_search(query_embedding, corpus_embeddings)

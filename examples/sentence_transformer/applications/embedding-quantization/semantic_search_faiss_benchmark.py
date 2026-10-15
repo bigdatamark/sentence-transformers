@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Benchmark script for FAISS search over quantized embeddings. Builds a 100,000-question Quora corpus, uses its first 1,000
+# entries as queries, encodes both with mxbai-embed-large-v1 (normalized), and for exact and approximate search and each
+# corpus precision (float32, uint8, ubinary) quantizes the corpus, runs a top-10 search (rescoring with 4x oversampling for
+# non-float32 precisions) and prints the search time. Side effects: downloads, compute, printing.
 from datasets import load_dataset
 
 from sentence_transformers import SentenceTransformer

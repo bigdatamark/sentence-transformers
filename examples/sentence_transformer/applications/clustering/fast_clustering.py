@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Large-scale clustering demo: collects unique Quora duplicate-question sentences until there are at least 50,000, encodes
+# them with all-MiniLM-L6-v2 (batch 64, tensors), runs community detection with cosine threshold 0.75 and minimum community
+# size 25, prints the elapsed time, and for each community prints its size, its first three and last three sentences.
+# Side effects: downloads, compute, printing. The corpus order comes from a set, so it varies between runs.
 """
 This is a more complex example on performing clustering on large scale dataset.
 

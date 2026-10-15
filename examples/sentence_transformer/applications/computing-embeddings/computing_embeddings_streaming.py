@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Streaming multi-process encoding demo. When run as a script: streams the yahoo_answers_topics train split, wraps it in a
+# torch DataLoader yielding 16,384 rows at a time, starts a multi-process pool for all-MiniLM-L6-v2, and for each loaded
+# batch encodes its best_answer texts through the pool (model batch 128, chunks of 1,024 per worker) and prints the
+# embedding shape. Stops the pool at the end. Side effects: network streaming, spawns processes, logging, progress bar, printing.
 """
 This example starts multiple processes (1 per GPU), which encode
 sentences in parallel. This gives a near linear speed-up

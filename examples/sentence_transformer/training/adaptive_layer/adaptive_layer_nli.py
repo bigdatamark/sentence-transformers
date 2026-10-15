@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Top-level training script: trains a SentenceTransformer (model from the first command-line argument, default
+# distilroberta-base) on AllNLI triplets with AdaptiveLayerLoss wrapping MultipleNegativesRankingLoss, so that truncated layer
+# stacks also produce good embeddings. Uses an STS-B validation similarity evaluator during training (batch 128, 1 epoch, fp16,
+# no-duplicates sampler, eval/save/log every 100 steps) and the STS-B test evaluator afterwards. Saves to a timestamped output/
+# directory's final folder and tries to push "<model>-nli-adaptive-layer" to the Hub, logging an error on failure.
+# Side effects: downloads, GPU training, logging, file writes, network.
 """
 The system trains BERT (or any other transformer model like RoBERTa, DistilBERT etc.) on the SNLI + MultiNLI (AllNLI) dataset
 with AdaptiveLayerLoss using MultipleNegativesRankingLoss. Entailing texts are used as positive pairs and contradictory

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level training script: builds a Transformer (model from the first command-line argument, default bert-base-uncased)
+# followed by a CNN (256 output channels per kernel, kernel sizes 1, 3 and 5) and mean pooling, trains it on STS-B with
+# CosineSimilarityLoss (batch 32, 1 epoch, fp16, eval/save/log every 100 steps) with a validation evaluator, evaluates on the test
+# split, saves to a timestamped output/ folder and tries to push "<model>-cnn" to the Hub, logging an error on failure.
+# Side effects: downloads, training, logging, file writes, network.
 """
 This example runs a CNN after the word embedding lookup. The output of the CNN is than pooled,
 for example with mean-pooling.

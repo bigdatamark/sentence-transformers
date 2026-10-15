@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level training script: GloVe 300d word embeddings weighted by Wikipedia IDF values (WordWeights module; unknown words get
+# the maximum weight log of the document count), mean pooling and two square Dense layers, trained on STS-B with
+# CosineSimilarityLoss (batch 32, 1 epoch, fp16, eval/save/log every 100 steps) using a validation evaluator; evaluates on the test
+# split, saves to a timestamped output/ folder and tries to push "glove-wikipedia-tf-idf" to the Hub, logging an error on failure.
+# Side effects: downloads, file reads/writes, training, logging.
 """
 This example weights word embeddings (like GloVe) with IDF weights. The IDF weights can for example be computed on Wikipedia.
 

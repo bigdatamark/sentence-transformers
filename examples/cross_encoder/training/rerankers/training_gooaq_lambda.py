@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a ModernBERT-base cross-encoder reranker on GooAQ with mined hard negatives and the listwise
+# LambdaLoss. Configures INFO logging at import.
+# Side effects: downloads, CPU/FAISS embedding work, logging, checkpoints, Hub push attempt.
 import logging
 import traceback
 
@@ -21,6 +25,15 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline. Creates a fp32 CrossEncoder with English/Apache-2.0 model card data; takes 100,000 GooAQ rows and
+    # splits 1,000 for eval (seed 12). Mines 5 hard negatives per training pair with a CPU static embedding model (top
+    # negatives among the 100 most similar, zero margin, FAISS) in labeled-list format (query, list of documents, list of
+    # labels). Uses LambdaLoss with mini batch 16. Evaluators: NanoBEIR (msmarco, nfcorpus, nq) and a GooAQ reranking
+    # evaluator over 30 mined candidates per eval question (positives included, not forced), combined sequentially and run
+    # as baseline. Training: batch 64, 1 epoch, lr 2e-5, bf16, 2 persistent workers, eval/save every 250 steps, best model by
+    # gooaq-dev NDCG@10. Evaluates, saves to models/<run_name>/final and tries a Hub push, logging an error on failure.
+    # KNOWN ISSUE: the inline comment on the mining output format still describes the (query, passage, label) format for BinaryCrossEntropyLoss, while the code requests labeled-list output for LambdaLoss.
     model_name = "answerdotai/ModernBERT-base"
 
     train_batch_size = 64

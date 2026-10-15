@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a ColBERT-style ModernBERT-base multi-vector model on MS MARCO BM25 triplets with in-batch
+# negatives MaxSim MultiVectorMultipleNegativesRankingLoss. Configures INFO logging at import.
+# Side effects: downloads, GPU training, logging, checkpoints, Hub push attempt.
 """
 This script demonstrates how to train a ColBERT-style multi-vector (late-interaction) model for Information Retrieval.
 
@@ -39,6 +43,14 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Builds the model from modules: fp32 ModernBERT-base Transformer with query expansion (min strategy, length 32), a
+    # bias-free projection of token embeddings to 128 dimensions, a default MultiVectorMask and token normalization, with
+    # English/Apache-2.0 model card data. Loads 51,000 msmarco-bm25 triplets and splits 1,000 for eval (seed 12). Uses the
+    # multi-vector MNRL loss and a NanoBEIR evaluator on msmarco, nq and fiqa2018 run as baseline. Training: batch 32,
+    # 1 epoch, lr 3e-5, 5% warmup, bf16, no-duplicates sampler, eval/save every 10%, logging every 1%, best model by NanoBEIR
+    # mean MaxSim NDCG@10, seed 42. Afterwards runs the full NanoBEIR suite, saves to models/<run_name>/final and tries a Hub
+    # push, logging an error on failure.
     model_name = "answerdotai/ModernBERT-base"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

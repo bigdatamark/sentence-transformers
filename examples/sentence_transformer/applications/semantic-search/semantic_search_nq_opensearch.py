@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Semantic plus BM25 search demo with a local OpenSearch server. Loads the first 10,000 Natural Questions answers as the
+# corpus and the first two questions as initial queries, encodes the corpus with nq-distilbert-base-v1 (printing time), and
+# connects to OpenSearch on localhost:9200. Loops forever: encodes the queries, creates and fills the "nq" index on the first
+# iteration, then for each query runs a BM25 match query and a k-NN vector query (5 hits each), prints timings and both
+# result lists with scores and ids, and reads the next query from stdin.
+# Side effects: downloads, network calls to OpenSearch (deletes and recreates the index), printing, reading stdin.
 """
 This script contains an example how to perform semantic search with OpenSearch.
 
@@ -49,6 +56,11 @@ print(f"Corpus encoding time: {time.time() - start_time:.6f} seconds")
 
 # Function to create index and ingest documents
 def create_and_ingest_index(os_client, index_name, corpus, embeddings):
+    # [FUNCTION DOC]
+    # Inputs: an OpenSearch client, an index name, the corpus texts and their embeddings. Deletes the index if it exists, creates
+    # it with k-NN enabled, a text "answer" field and a 768-dimension cosine HNSW (lucene) "answer_vector" field, then bulk
+    # indexes documents in batches of 500 with string ids equal to their corpus position, and refreshes the index. Returns the
+    # client and the index name. Network errors from the client propagate.
     if os_client.indices.exists(index=index_name):
         os_client.indices.delete(index=index_name)
 

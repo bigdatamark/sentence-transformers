@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Interpretability demo for text: runs exhaustive MaxSim search with the LateOn model over Natural Questions answers and,
+# for the top hit, prints a table attributing the MaxSim score to individual query tokens and their best-matching
+# document tokens, plus a wrapped view of the document tokens with matched ones highlighted.
+# Side effects: downloads, compute, printing with terminal escape codes, reading stdin.
 """Trace a text MaxSim ranking back to the tokens that produced it: semantic search, with similarity maps.
 
 The image counterpart is heatmap.py, which overlays a heatmap on a page image. Text documents have no
@@ -24,12 +29,17 @@ from sentence_transformers.multi_vector_encoder.interpretability import real_que
 
 
 def highlight(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: wraps text in the terminal reverse-video escape sequence and reset sequence; returns the new string.
     """Invert the terminal's own foreground and background. Inverting rather than picking a colour
     keeps the highlight legible on light and dark themes alike."""
     return f"\033[7m{text}\033[0m"
 
 
 def token_labels(model: MultiVectorEncoder, input_ids: Tensor) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: converts a tensor of token ids into readable labels: each token is decoded to a string and stripped, a leading
+    # "##" word-piece marker is removed, and empty results become "_". Returns a list of strings.
     """Readable labels for token ids: byte-level pieces decoded back to text, and the markers that
     tokenizers use to encode word boundaries (a leading space, ``##``) dropped."""
     tokens = model.tokenizer.convert_ids_to_tokens(input_ids.tolist())
@@ -38,6 +48,14 @@ def token_labels(model: MultiVectorEncoder, input_ids: Tensor) -> list[str]:
 
 
 def print_similarity_map(model: MultiVectorEncoder, query: str, document: str, score: float) -> None:
+    # [FUNCTION DOC]
+    # Inputs: the model, a query, a document and the document's MaxSim score. Encodes both with full outputs, keeps document
+    # tokens with attention mask set and the real query tokens, computes the query-by-document token similarity matrix in
+    # float on CPU, and takes each query token's best document token. Prints a table with each query token, its best match,
+    # the similarity and its share of the score, then a separator, a row for the special-token remainder (score minus the sum
+    # of real-token maxima) and the total. Then prints the document tokens wrapped at about 96 characters, highlighting tokens
+    # that won at least one query token and appending the win count when it is 2 or more. Returns None.
+    # KNOWN ISSUE: shares are computed by dividing by the score, which raises ZeroDivisionError if the score is exactly zero.
     # output_value=None returns the raw per-input features instead of just the embeddings: the token
     # ids that produced each embedding come along, so every row can be labelled with its token.
     query_features = model.encode_query([query], output_value=None)[0]
@@ -65,6 +83,8 @@ def print_similarity_map(model: MultiVectorEncoder, query: str, document: str, s
     match_width = max(len(text) for text in [*matches, "best document token"])
 
     def row(name: str, match: str, value: float) -> None:
+        # [FUNCTION DOC]
+        # HELPER: prints one aligned table row with a label, a match label, a value and the value's percentage of the total score.
         print(f"  {name:<{token_width}}  {match:<{match_width}}  {value:7.4f}  {value / score:6.1%}")
 
     print(f"\n  {'query token':<{token_width}}  {'best document token':<{match_width}}      sim   share")
@@ -93,6 +113,9 @@ def print_similarity_map(model: MultiVectorEncoder, query: str, document: str, s
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Loads 5,000 Natural Questions rows, de-duplicates answers in order, encodes them with LateOn, runs the nested search on
+    # the first dataset query, then on stdin questions until empty line or end-of-file. Returns None.
     # A small corpus: the (deduplicated) answer passages of 5000 Natural Questions rows.
     dataset = load_dataset("sentence-transformers/natural-questions", split="train[:5000]")
     corpus = list(dict.fromkeys(dataset["answer"]))
@@ -101,6 +124,9 @@ def main() -> None:
     corpus_embeddings = model.encode_document(corpus, show_progress_bar=True)
 
     def search(query: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: scores a query against all corpus embeddings with MaxSim, prints the top 3 (with timing), then prints the
+        # similarity map for the top hit.
         start = time.perf_counter()
         query_embeddings = model.encode_query([query])
         scores = model.similarity(query_embeddings, corpus_embeddings)[0]

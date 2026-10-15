@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Benchmark script for usearch search over quantized embeddings: 100,000-question Quora corpus, first 1,000 as queries,
+# mxbai-embed-large-v1 normalized embeddings; for exact and approximate search and precisions float32, int8 and binary,
+# quantizes the corpus, runs a top-10 search (rescoring with 4x oversampling except for float32) and prints the search time.
+# Side effects: downloads, compute, printing.
 from datasets import load_dataset
 
 from sentence_transformers import SentenceTransformer

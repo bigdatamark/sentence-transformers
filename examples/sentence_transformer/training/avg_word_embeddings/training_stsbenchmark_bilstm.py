@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level training script: builds GloVe 300d word embeddings followed by a BiLSTM (hidden size 1024) and mean pooling,
+# trains it on STS-B with CosineSimilarityLoss (batch 32, 1 epoch, fp16, eval/save/log every 100 steps) using a validation
+# similarity evaluator, saves to a timestamped output/ folder and tries to push "glove-bilstm-sts" to the Hub, logging an
+# error on failure. Side effects: downloads, training, logging, file writes, network.
+# KNOWN ISSUE: the test split is loaded but never evaluated, unlike the sibling scripts.
 """
 This example runs a BiLSTM after the word embedding lookup. The output of the BiLSTM is than pooled,
 for example with max-pooling (which gives a system like InferSent) or with mean-pooling.

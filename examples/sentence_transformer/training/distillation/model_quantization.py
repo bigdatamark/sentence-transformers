@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Top-level benchmark script comparing all-mpnet-base-v2 on CPU across backends: the plain PyTorch model, an ONNX model, an ONNX
+# model exported with dynamic int8 quantization (AVX-512 VNNI config, saved under a local folder and reloaded from its quantized
+# file), an OpenVINO model, and an OpenVINO model with static int8 quantization (default config, saved and reloaded). Commented
+# alternatives show loading pre-exported files from the Hub. Each model is timed encoding 10,000 STS-B train sentences and
+# evaluated on the STS-B test split. A trailing string records reference results.
+# Side effects: downloads, model export and file writes, heavy CPU compute, logging.
 """
 A quantized model executes some or all of the operations with integers rather than floating point values. This allows for a more compact models and the use of high performance vectorized operations on many hardware platforms.
 
@@ -105,6 +112,9 @@ openvino_model = SentenceTransformer(model_name, backend="openvino", device="cpu
 
 # Create a function to evaluate the models
 def evaluate(model: SentenceTransformer, name: str) -> None:
+    # [FUNCTION DOC]
+    # Inputs: a model and a display name. Logs the name, times encoding of the module-level sentences and logs sentences per second,
+    # then runs an STS-B test similarity evaluator and logs its primary metric. Returns None.
     logging.info(f"Evaluating {name}")
     start_time = time.time()
     model.encode(sentences)

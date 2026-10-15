@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level script that reduces all-MiniLM-L6-v2 embeddings to 128 dimensions with PCA. Evaluates the original model on the STS-B
+# test split, shuffles (unseeded) the AllNLI pair-score sentences, encodes 20,000 of them, fits a 128-component PCA, appends a
+# bias-free identity-activation Dense layer whose weight is the PCA component matrix, re-evaluates on STS-B test, and saves the
+# model locally as "<model>-128dim". Side effects: downloads, compute, logging, file writes.
+# KNOWN ISSUE: the PCA mean is not subtracted before projection, so the added layer is only an uncentered approximation of the fitted PCA.
 """
 The pre-trained models produce embeddings of size 512 - 1024. However, when storing a large
 number of embeddings, this requires quite a lot of memory / storage.

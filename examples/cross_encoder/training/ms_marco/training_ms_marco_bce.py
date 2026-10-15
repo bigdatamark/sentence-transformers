@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a ModernBERT-base cross-encoder reranker with binary cross-entropy on pointwise
+# (query, passage, is_selected label) pairs flattened from MS MARCO v1.1.
+# Side effects: dataset downloads, logging, checkpoints under models/, Hub push attempt.
 import logging
 import traceback
 
@@ -13,6 +17,13 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline: INFO logging, batch size 32, 1 epoch, torch seed 12, fp32 CrossEncoder from
+    # ModernBERT-base. Loads the MS MARCO v1.1 train split, flattens it with bce_mapper, splits 10,000 eval rows.
+    # Uses BinaryCrossEntropyLoss and a NanoBEIR evaluator (msmarco, nfcorpus, nq) run first as a baseline.
+    # Training arguments: lr 2e-5, 10% warmup, bf16, the default batch sampler, eval/save every 4,000 steps,
+    # logging every 1,000, best model by NanoBEIR mean NDCG@10, seed 12. Trains, evaluates, saves to
+    # models/<run_name>/final and tries a Hub push, logging an error with manual instructions on failure.
     model_name = "answerdotai/ModernBERT-base"
 
     # Set the log level to INFO to get more information
@@ -35,6 +46,9 @@ def main():
     dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")
 
     def bce_mapper(batch):
+        # [FUNCTION DOC]
+        # HELPER: batched map function. For each query and each of its candidate passages, emits one row with the
+        # query, the passage text and the is_selected flag as label. Returns columns query, passage, label.
         queries = []
         passages = []
         labels = []

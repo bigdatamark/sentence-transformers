@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Top-level training script: builds a tf-idf weighted bag-of-words model and trains it on STS-B. Downloads Wikipedia document
+# frequencies if missing, reads them (first line is the document count), skips English stop words and keeps the first 25,000
+# words as vocabulary with IDF weights (log of document count over frequency). The model is a BoW module with cumulative term
+# frequency (25,000-dimensional output) followed by Dense layers to 768 and then 512 dimensions. Trains with CosineSimilarityLoss
+# (batch 32, 1 epoch, fp16, eval/save/log every 100 steps) using an STS-B validation evaluator, evaluates on the test split, saves
+# to a timestamped output/ folder and tries to push "wikipedia-tf-idf-bow" to the Hub, logging an error on failure.
+# Side effects: network download, file reads/writes, training, logging.
 """
 This example uses a simple bag-of-words (BoW) approach. A sentence is mapped
 to a sparse vector with e.g. 25,000 dimensions. Optionally, you can also use tf-idf.

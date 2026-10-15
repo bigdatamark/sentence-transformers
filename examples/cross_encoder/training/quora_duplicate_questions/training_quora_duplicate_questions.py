@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Top-level training script: trains a single-output DistilRoBERTa CrossEncoder for Quora duplicate question detection with
+# BinaryCrossEntropyLoss. The quora-duplicates pair-class train split is cut into rows 0-10,000 for eval, 10,000-20,000
+# for test, and the rest for training. A classification evaluator runs on eval before and during training (batch 64,
+# 1 epoch, bf16, eval/save every 500 steps). The model is saved under a timestamped output/ directory and a Hub push is
+# attempted, logging an error on failure.
+# Side effects: downloads, logging, file writes, network.
+# KNOWN ISSUE: the "test" evaluator is built from eval_dataset instead of test_dataset, so the reported test score is just the dev score again.
 """
 This examples trains a CrossEncoder for the Quora Duplicate Questions Detection task. A CrossEncoder takes a sentence pair
 as input and outputs a label. Here, it output a continuous labels 0...1 to indicate the similarity between the input pair.

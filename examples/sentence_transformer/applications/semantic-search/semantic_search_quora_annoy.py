@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Approximate nearest neighbour search demo with Annoy over up to 100,000 unique Quora questions encoded with
+# quora-distilbert-multilingual. Embeddings are computed and pickled to a cache file (sentences and embeddings) or loaded from
+# it; an angular Annoy index with 256 trees over 768-dimension vectors is built and saved, or loaded if the file exists.
+# Then loops forever: reads a question from stdin, encodes it, gets the 10 approximate neighbours, converts angular distance
+# d to cosine similarity as one minus half of d squared, prints the hits with timing, computes the exact top 10 with
+# semantic search, and prints the ANN recall@10 and any exact hits the ANN missed.
+# Side effects: downloads, file reads/writes of the cache and index, printing, reading stdin.
 """
 This example uses Approximate Nearest Neighbor Search (ANN) with Annoy (https://github.com/spotify/annoy).
 

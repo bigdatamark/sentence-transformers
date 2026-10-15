@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Top-level training script: trains a single-output DistilRoBERTa CrossEncoder on STS-Benchmark with BinaryCrossEntropyLoss
+# on similarity scores normalized to 0..1. A correlation evaluator on the validation split runs before and during training
+# (batch 64, 4 epochs, bf16, eval/save every 80 steps, logging every 20); a correlation evaluator on the test split runs
+# after training. Saves to a timestamped output/ directory's final subfolder and tries a Hub push, logging an error on failure.
+# Side effects: downloads, logging, file writes, network.
 """
 This examples trains a CrossEncoder for the STSbenchmark task. A CrossEncoder takes a sentence pair
 as input and outputs a label. Here, it output a continuous labels 0...1 to indicate the similarity between the input pair.

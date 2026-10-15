@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Interactive retrieve-and-rerank demo script. Loads a MiniLM bi-encoder and an MS MARCO MiniLM
+# cross-encoder, and the first 20,000 rows of the Natural Questions dataset. Answer embeddings are
+# computed (unique answers only) and pickled to a local cache file named after the model and corpus
+# size, or loaded from that cache if present. Then loops forever: reads a question from stdin,
+# retrieves the top 500 answers by cosine similarity, prints the top 5 with timing, re-ranks the
+# candidates with the cross-encoder, and prints the top 5 reranked hits with timing.
+# Side effects: network downloads, file writes/reads of the pickle cache, console I/O.
+# KNOWN ISSUE: on first run the embeddings are computed for the de-duplicated answer list but the cache stores the full, non-deduplicated answer column, so on later runs answer indices no longer match their embeddings (and the first run itself also reads answers from the deduplicated list, so only the reload path is wrong).
+# KNOWN ISSUE: the sentence_pairs list is built but never used.
 """
 This script contains an example how to perform re-ranking with a Cross-Encoder for semantic search.
 

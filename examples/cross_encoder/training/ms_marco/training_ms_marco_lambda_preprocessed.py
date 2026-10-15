@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a listwise MiniLM cross-encoder reranker with LambdaLoss (NDCG-Loss2++ weighting) on the
+# preprocessed "labeled-list" subset of sentence-transformers/msmarco, resolving ids to text on the fly.
+# Side effects: dataset downloads, logging, timestamped checkpoints, Hub push attempt.
 import logging
 import traceback
 from datetime import datetime
@@ -13,6 +17,14 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline: INFO logging, batch sizes 16 (train, eval, loss mini-batch), 1 epoch, at most 20 docs per query,
+    # timestamp, seed 12, single-label fp32 CrossEncoder from MiniLM-L12-H384-uncased. Loads MS MARCO corpus and queries
+    # into id-to-text dicts and the labeled-list subset, attaches the id-to-text transform, splits 1,000 eval rows (seed 12)
+    # and logs the first train row. Uses LambdaLoss with NDCGLoss2PPScheme and a NanoBEIR evaluator (msmarco, nfcorpus, nq)
+    # run as baseline. Training: lr 2e-5, 10% warmup, bf16, eval/save every 1,000 steps, logging every 200, best model by
+    # NanoBEIR mean NDCG@10. Trains, evaluates, saves to models/<run_name>_<timestamp>/final and tries a Hub push, logging
+    # an error on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -46,6 +58,10 @@ def main():
     dataset = load_dataset("sentence-transformers/msmarco", "labeled-list", split="train")
 
     def it_to_text_transform(batch):
+        # [FUNCTION DOC]
+        # HELPER: dataset transform. Replaces each query id with its text, each document id list (first max_docs) with the
+        # passage texts, and truncates label lists to max_docs. Returns columns query_id, doc_ids and labels, which now hold text.
+        # KNOWN ISSUE: the output columns keep the names query_id and doc_ids although they contain texts; it works only because the loss reads columns by position.
         return {
             "query_id": [queries[qid] for qid in batch["query_id"]],
             "doc_ids": [[corpus[pid] for pid in doc_ids[:max_docs]] for doc_ids in batch["doc_ids"]],

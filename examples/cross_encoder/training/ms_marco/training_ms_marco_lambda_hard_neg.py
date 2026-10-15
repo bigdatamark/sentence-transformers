@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a listwise MiniLM cross-encoder with LambdaLoss on MS MARCO v1.1 listwise rows combined
+# with extra rows whose negatives are mined with a MiniLM bi-encoder.
+# Side effects: dataset and model downloads, heavy embedding computation (FAISS), logging, checkpoints, Hub push attempt.
 import logging
 import traceback
 from datetime import datetime
@@ -14,6 +18,14 @@ from sentence_transformers.util import mine_hard_negatives
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline. Setup as in the plain LambdaLoss script (batch 16, mini-batch 16, 1 epoch, seed 12, single-label
+    # fp32 MiniLM-L12 CrossEncoder). Builds the listwise dataset with listwise_mapper. Then collects every
+    # (query, selected passage) pair into a pairs dataset, builds a de-duplicated corpus of all passages, and mines 9
+    # hard negatives per pair with all-MiniLM-L6-v2 (skipping the 3 most similar, searching up to rank 30, batch 1024,
+    # FAISS, labeled-list output). Concatenates both datasets, splits 1,000 eval rows (seed 12), and trains with LambdaLoss
+    # (NDCGLoss2PPScheme), a NanoBEIR evaluator, lr 2e-5, bf16, eval/save every 500 steps. Evaluates, saves to
+    # models/<run_name>_<timestamp>/final and tries a Hub push, logging an error on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -44,6 +56,10 @@ def main():
 
     # 2a. Prepare the normal MS MARCO dataset for training
     def listwise_mapper(batch, max_docs: int | None = 10):
+        # [FUNCTION DOC]
+        # HELPER: batched map function. For each query, sorts passages by label descending, skips queries with no positive
+        # label, truncates to max_docs (default 10, None for all) and returns columns query, docs and labels.
+        # KNOWN ISSUE: an empty passage list makes max() over the labels raise a ValueError.
         processed_queries = []
         processed_docs = []
         processed_labels = []

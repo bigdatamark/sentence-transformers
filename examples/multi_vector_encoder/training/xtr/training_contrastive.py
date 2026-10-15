@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains an XTR-style multi-vector retriever (global top-k token scoring instead of MaxSim) on MS MARCO
+# BM25 triplets with multi-vector MNRL. Configures INFO logging at import.
+# Side effects: downloads, GPU training, logging, checkpoints, Hub push attempt.
 """
 This script demonstrates how to train an XTR-style multi-vector retriever on MS MARCO triplets.
 
@@ -33,6 +37,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Creates a fp32 MultiVectorEncoder directly from ModernBERT-base with default multi-vector modules and model card data.
+    # Loads 51,000 msmarco-bm25 triplets and splits 1,000 for eval (seed 12). Loss: multi-vector MNRL with XTR scores using top
+    # 256 tokens. A NanoBEIR evaluator on msmarco, nq and fiqa2018 runs as baseline. Training: batch 32, 1 epoch, lr 3e-5,
+    # 5% warmup, bf16, no-duplicates sampler, eval/save every 10%, best model by NanoBEIR mean MaxSim NDCG@10, seed 42.
+    # Then runs the full NanoBEIR suite, saves to models/<run_name>/final and tries a Hub push, logging an error on failure.
     model_name = "answerdotai/ModernBERT-base"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

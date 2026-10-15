@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Training script: trains a MiniLM cross-encoder reranker with binary cross-entropy on MS MARCO triplets that
+# are converted into positive (score 1) and negative (score 0) query-passage pairs and cached on disk.
+# Side effects: dataset downloads, on-disk caching, logging, checkpoints, Hub push attempt.
 import logging
 import traceback
 
@@ -12,6 +16,14 @@ from sentence_transformers.cross_encoder.training_args import CrossEncoderTraini
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the pipeline: INFO logging, batch 16, 1 epoch, 2,000,000 target pairs, seed 12, fp32 CrossEncoder from
+    # MiniLM-L12-H384-uncased. Tries to load "ms-marco-train"/"ms-marco-eval" from disk; if missing, builds
+    # id-to-text dicts, takes the first 1,000,000 triplets, maps each into a positive and a negative pair,
+    # splits 10,000 eval rows, saves both and exits the process so the user restarts. Uses BinaryCrossEntropyLoss,
+    # a NanoBEIR evaluator run as a baseline, lr 2e-5, bf16, eval/save every 10,000 steps, 2 persistent dataloader
+    # workers, best model by NanoBEIR mean NDCG@10. Trains, evaluates, saves to models/<run_name>/final and tries a
+    # Hub push, logging an error on failure.
     model_name = "microsoft/MiniLM-L12-H384-uncased"
 
     # Set the log level to INFO to get more information
@@ -45,6 +57,10 @@ def main():
         dataset = dataset.select(range(dataset_size // 2))
 
         def id_to_text_map(batch):
+            # [FUNCTION DOC]
+            # HELPER: batched map function. Produces the batch's query texts twice (once for positives, once for
+            # negatives), the positive passage texts followed by the negative passage texts, and scores of 1.0 for the
+            # positives followed by 0.0 for the negatives. Returns columns query, passage, score.
             return {
                 "query": [queries[qid] for qid in batch["query_id"]] * 2,
                 "passage": [corpus[pid] for pid in batch["positive_id"]]

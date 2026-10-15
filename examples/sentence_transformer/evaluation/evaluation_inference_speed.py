@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Benchmark script for encoding speed. Limits torch to 4 CPU threads, loads the model named by the first command-line argument
+# (default bert-base-nli-mean-tokens), takes up to 100,000 unique AllNLI anchor sentences (in set order), and three times
+# encodes them all with batch size 32, printing elapsed time and sentences per second.
+# Side effects: downloads, compute, printing.
 """
 This examples measures the inference speed of a certain model
 

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Demo of compressing multi-vector document embeddings with hierarchical token pooling and measuring the effect on token
+# counts and MaxSim scores. Side effects: model download (remote code trusted), compute, printing.
 """Compress a multi-vector document index with :class:`HierarchicalTokenPooling`.
 
 Multi-vector (ColBERT-style) retrieval stores one vector per token, so a corpus of N documents at
@@ -20,6 +23,12 @@ from sentence_transformers.multi_vector_encoder.modules import HierarchicalToken
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Loads a late-interaction model, encodes a fixed query and three documents, and prints the baseline total token count and
+    # scores. Then, for pool factors 2, 3 and 6, re-encodes the documents with pooling applied at encode time and prints the
+    # pooled token count, the reduction ratio (guarded against division by zero), the scores and their deltas from baseline.
+    # Finally pools the already-encoded baseline embeddings with factor 3 and prints the resulting token count and scores.
+    # A commented-out block shows adding the pooling as a pipeline module. Returns None.
     model = MultiVectorEncoder("perplexity-ai/pplx-embed-v1-late-0.6b", trust_remote_code=True)
     query = "What is the capital of France?"
     documents = [

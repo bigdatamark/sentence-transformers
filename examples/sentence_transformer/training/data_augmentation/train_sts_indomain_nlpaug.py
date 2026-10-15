@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Top-level Augmented SBERT (in-domain, nlpaug) script for STS-B. Loads a bi-encoder (model from the first argument, default
+# bert-base-uncased), and augments every gold train pair with a contextual word-embedding augmenter (word insertion using the same
+# model), keeping the gold score for the augmented pair. Trains on gold plus silver pairs with CosineSimilarityLoss (batch 16,
+# 1 epoch, eval/save every 100 steps) with a validation evaluator, evaluates on test, saves to a timestamped folder and tries a Hub
+# push, logging an error on failure.
+# Side effects: downloads, heavy augmentation compute, training, logging, file writes, network.
+# KNOWN ISSUE: the progress bar total is the test split size while the loop runs over the train split.
+# KNOWN ISSUE: the logged "number of silver pairs" is the number of keys in the dict (3), not the number of pairs.
 """
 The script shows how to train Augmented SBERT (In-Domain) strategy for STSb dataset with nlp textual augmentation.
 We utilise nlpaug (https://github.com/makcedward/nlpaug) for data augmentation strategies over a single sentence.

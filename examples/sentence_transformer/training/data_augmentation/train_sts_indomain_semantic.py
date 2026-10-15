@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Top-level Augmented SBERT (in-domain, semantic search sampling) script for STS-B. Arguments: model name (default
+# bert-base-uncased) and top_k (default 3). Builds a cross-encoder and a mean-pooled bi-encoder (max length 128). Step 1: trains
+# the cross-encoder with BCE on gold pairs in both orders. Step 2: encodes all unique train sentences with paraphrase-MiniLM-L6-v2,
+# and for each takes the top_k plus one most cosine-similar sentences, adding unseen pairs other than itself as silver pairs, then
+# scores them with the cross-encoder (asserting scores in [0, 1]). Step 3: trains the bi-encoder with CosineSimilarityLoss on gold
+# (both orders) plus silver pairs with a validation evaluator, saves it, and evaluates on test writing results to the output path.
+# Side effects: downloads, training, logging, file writes.
+# KNOWN ISSUE: the candidate index from topk is a tensor, so the membership test against the duplicates set of integer tuples never matches (tensors hash by identity) and the check also uses the reversed order; duplicate filtering therefore does not work.
 """
 The script shows how to train Augmented SBERT (In-Domain) strategy for STSb dataset with Semantic Search Sampling.
 

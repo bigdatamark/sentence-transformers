@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Benchmark CLI for NoDuplicatesBatchSampler on a Hugging Face dataset, comparing the default sampler with the variant that
+# precomputes text hashes. Optionally reports duplicate statistics and memory used while building hashes (tracemalloc, RSS or
+# USS including child processes via psutil). Optional dependencies tqdm and psutil are imported if available. Disables the
+# datasets cache globally at import. Defaults: msmarco co-condenser triplet-hard train split, batch size 8192, drop_last
+# enabled, seed 42.
+# KNOWN ISSUE: the descriptive string is placed after the future import, so it is not the module's docstring.
 from __future__ import annotations
 
 """Benchmark NoDuplicates batch samplers on Hugging Face datasets.
@@ -69,6 +76,15 @@ def run_sampler(
     measure_hash_uss: bool,
     sampler_kwargs: dict[str, object] | None = None,
 ) -> tuple[float, int]:
+    # [FUNCTION DOC]
+    # Benchmarks one sampler configuration. Inputs: a display name, the sampler class, the dataset, batch size, drop_last, seed,
+    # warmup flag, progress flag, three memory-measurement flags and extra sampler keyword arguments. Creates a seeded torch
+    # generator and the sampler. If any memory measurement is requested and the sampler precomputes hashes, it garbage-collects,
+    # starts the requested measurements, calls the sampler's private hash-building step while timing it, stops the measurements
+    # and prints current and peak memory deltas with build time (printing "n/a" if psutil is missing); if hashing is not
+    # precomputed it prints "n/a" lines instead. Optionally iterates the sampler once as warmup. Then times a full iteration,
+    # counting batches, compares with the ideal batch count (floor or ceiling of rows over batch size depending on drop_last),
+    # prints the result and returns the elapsed seconds and batch count.
     """Run one sampler and print timing + batch count."""
     generator = torch.Generator()
     generator.manual_seed(seed)
@@ -166,6 +182,10 @@ def run_sampler(
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Defines and parses the command-line options: dataset name, subset and split, batch size, seed, warmup, progress-bar disable,
+    # uniqueness statistics and their worker count (default 8), the three memory measurements, hashing process count and map batch
+    # size, and a repeatable target option (default or hashed). Returns the parsed namespace; exits on invalid arguments.
     parser = argparse.ArgumentParser(description="Benchmark NoDuplicates batch samplers on Hugging Face datasets.")
     parser.add_argument("--dataset-name", type=str, default=DEFAULT_DATASET_NAME, help="Hugging Face dataset ID.")
     parser.add_argument(
@@ -205,6 +225,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def _iter_texts(value: object) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns a list of string conversions of the items if the value is a list, otherwise a one-element list with the
+    # value converted to string.
     """Normalize a value into a list of strings for counting."""
     if isinstance(value, list):
         return [str(item) for item in value]
@@ -212,6 +235,9 @@ def _iter_texts(value: object) -> list[str]:
 
 
 def _format_bytes(value: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: formats a byte count as a string with two decimals in the largest unit (B, KiB, MiB, GiB, TiB) that keeps the absolute
+    # value below 1024, capping at TiB.
     """Human-readable byte formatting."""
     units = ["B", "KiB", "MiB", "GiB", "TiB"]
     size = float(value)
@@ -223,7 +249,12 @@ def _format_bytes(value: int) -> str:
 
 
 class _RssReport:
+    # [CLASS DOC]
+    # HELPER: plain record of RSS measurements: start, end and peak values plus derived current delta (end minus start) and peak
+    # delta (peak minus start).
     def __init__(self, start_rss: int, end_rss: int, peak_rss: int) -> None:
+        # [FUNCTION DOC]
+        # HELPER: stores the three values and computes both deltas.
         self.start_rss = start_rss
         self.end_rss = end_rss
         self.peak_rss = peak_rss
@@ -232,9 +263,15 @@ class _RssReport:
 
 
 class _RssSampler:
+    # [CLASS DOC]
+    # HELPER: background-thread sampler of the resident set size of this process and all its child processes, polling at a fixed
+    # interval and tracking the start, end and peak totals.
     """Sample RSS (including child processes) during hashing."""
 
     def __init__(self, interval: float = 0.1) -> None:
+        # [FUNCTION DOC]
+        # HELPER: stores the polling interval (default 0.1 seconds), creates a stop event, and initializes the thread to None and the
+        # start, end and peak values to 0.
         self.interval = interval
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -243,6 +280,9 @@ class _RssSampler:
         self._peak_rss = 0
 
     def _total_rss(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: returns the summed RSS in bytes of the current process and its recursive children, skipping children that vanished;
+        # returns 0 if psutil is missing or the current process cannot be found.
         if psutil is None:
             return 0
         proc = psutil.Process(os.getpid())
@@ -259,6 +299,8 @@ class _RssSampler:
         return total
 
     def _run(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: thread loop that samples total RSS, updates the peak, and sleeps for the interval until the stop event is set.
         while not self._stop_event.is_set():
             rss = self._total_rss()
             if rss > self._peak_rss:
@@ -266,12 +308,16 @@ class _RssSampler:
             time.sleep(self.interval)
 
     def start(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: records the start RSS (also as initial peak) and starts the sampling loop on a daemon thread.
         self._start_rss = self._total_rss()
         self._peak_rss = self._start_rss
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: signals the loop to stop, joins the thread, records the end RSS and raises the peak to it if larger.
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
@@ -280,11 +326,17 @@ class _RssSampler:
             self._peak_rss = self._end_rss
 
     def report(self) -> _RssReport:
+        # [FUNCTION DOC]
+        # HELPER: returns an _RssReport built from the recorded start, end and peak values.
         return _RssReport(self._start_rss, self._end_rss, self._peak_rss)
 
 
 class _UssReport:
+    # [CLASS DOC]
+    # HELPER: plain record of USS (unique set size) measurements: start, end and peak plus current and peak deltas relative to start.
     def __init__(self, start_uss: int, end_uss: int, peak_uss: int) -> None:
+        # [FUNCTION DOC]
+        # HELPER: stores the three values and computes both deltas.
         self.start_uss = start_uss
         self.end_uss = end_uss
         self.peak_uss = peak_uss
@@ -293,9 +345,13 @@ class _UssReport:
 
 
 class _UssSampler:
+    # [CLASS DOC]
+    # HELPER: background-thread sampler of the unique set size of this process and its children, same structure as _RssSampler.
     """Sample USS (including child processes) during hashing."""
 
     def __init__(self, interval: float = 0.1) -> None:
+        # [FUNCTION DOC]
+        # HELPER: stores the interval (default 0.1 seconds), a stop event, no thread yet, and zeroed start, end and peak values.
         self.interval = interval
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -304,6 +360,9 @@ class _UssSampler:
         self._peak_uss = 0
 
     def _total_uss(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: returns the summed USS of the current process and its recursive children from full memory info, skipping children
+        # that vanished or lack USS support; returns 0 if psutil is missing or the current process cannot be inspected.
         if psutil is None:
             return 0
         proc = psutil.Process(os.getpid())
@@ -320,6 +379,8 @@ class _UssSampler:
         return total
 
     def _run(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: thread loop that samples total USS, updates the peak and sleeps for the interval until stopped.
         while not self._stop_event.is_set():
             uss = self._total_uss()
             if uss > self._peak_uss:
@@ -327,12 +388,16 @@ class _UssSampler:
             time.sleep(self.interval)
 
     def start(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: records the start USS as start and peak, then starts the daemon sampling thread.
         self._start_uss = self._total_uss()
         self._peak_uss = self._start_uss
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: stops and joins the thread, records the end USS and updates the peak if needed.
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
@@ -341,10 +406,17 @@ class _UssSampler:
             self._peak_uss = self._end_uss
 
     def report(self) -> _UssReport:
+        # [FUNCTION DOC]
+        # HELPER: returns a _UssReport of the recorded values.
         return _UssReport(self._start_uss, self._end_uss, self._peak_uss)
 
 
 def _dup_stats(dataset: Dataset, show_progress: bool, desc: str) -> tuple[int, int, int]:
+    # [FUNCTION DOC]
+    # HELPER: counts text occurrences in a dataset. Picks the query column ("query", else "anchor"), document columns from a fixed
+    # list of common names plus any column starting with "neg_" or "negative_", and if none were found but there are at least two
+    # columns, uses the first as query and second as document. Iterates over all rows (with an optional progress bar), counting
+    # each text (list values contribute each item). Returns the total count, the number of unique texts and the duplicates count.
     """Compute total/unique/dup counts across query/doc columns."""
     column_names = list(dataset.column_names)
 
@@ -388,11 +460,18 @@ def _dup_stats(dataset: Dataset, show_progress: bool, desc: str) -> tuple[int, i
 async def compute_uniqueness(
     datasets_map: dict[str, Dataset], workers: int, show_progress: bool
 ) -> dict[str, tuple[int, int, int] | None]:
+    # [FUNCTION DOC]
+    # Asynchronously computes duplicate statistics for several named datasets, running each _dup_stats call in a worker thread,
+    # with at most the given number running concurrently via a semaphore. Returns a dict from name to the stats tuple, or None
+    # for datasets whose computation raised an exception.
     """Run uniqueness checks concurrently with a bounded thread pool."""
     semaphore = asyncio.Semaphore(workers)
     results: dict[str, tuple[int, int, int] | None] = {}
 
     async def run_one(name: str, dataset: Dataset) -> tuple[str, tuple[int, int, int] | None]:
+        # [FUNCTION DOC]
+        # HELPER: under the semaphore, runs _dup_stats in a thread for one dataset and returns the name with its stats, or with None if
+        # it raised.
         async with semaphore:
             try:
                 stats = await asyncio.to_thread(_dup_stats, dataset, show_progress, name)
@@ -408,6 +487,9 @@ async def compute_uniqueness(
 
 
 def _load_hf_dataset(name: str, subset: str | None, split: str) -> Dataset:
+    # [FUNCTION DOC]
+    # HELPER: loads the given split of a Hugging Face dataset, passing the subset as configuration name only when it is non-empty.
+    # Returns the Dataset.
     """Load a HF dataset split with an optional subset/config."""
     if subset:
         return load_dataset(name, subset, split=split)
@@ -415,6 +497,11 @@ def _load_hf_dataset(name: str, subset: str | None, split: str) -> Dataset:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses arguments, loads the dataset (an empty subset means none) and prints the benchmark settings and row count. If
+    # uniqueness stats are requested, computes them via asyncio and prints totals and duplicate rate, or "failed". Then, for each
+    # requested target (default both), runs run_sampler with the plain sampler or the hash-precomputing sampler configured with the
+    # optional hashing process count and batch size. Returns None.
     args = parse_args()
     dataset_subset = args.dataset_subset or None
     dataset = _load_hf_dataset(args.dataset_name, dataset_subset, args.dataset_split)

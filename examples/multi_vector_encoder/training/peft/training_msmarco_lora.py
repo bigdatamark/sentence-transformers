@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Training script: trains a ColBERT-style ModernBERT-base multi-vector model on MS MARCO BM25 triplets with a LoRA adapter
+# on the backbone (only the adapter matrices and the fresh projection are trained) using multi-vector MNRL. Configures INFO
+# logging at import and quiets several HTTP loggers.
+# Side effects: downloads, GPU training, logging, checkpoints, Hub push attempt.
 """
 This script demonstrates how to train a ColBERT-style multi-vector (late-interaction) model for Information Retrieval
 with a LoRA adapter from PEFT, i.e. without finetuning all of the model parameters.
@@ -43,6 +48,14 @@ for logger_name in ("httpx", "httpcore", "huggingface_hub", "urllib3"):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Builds the model from a fp32 ModernBERT-base Transformer with query expansion (min, length 32), a bias-free 128-dimension
+    # token projection, a default mask and normalization; adds a LoRA adapter (feature extraction, rank 64, alpha 128, dropout
+    # 0.1, on the Wqkv, Wo and Wi modules) and logs trainable versus total parameters. Loads 51,000 msmarco-bm25 triplets, splits
+    # 1,000 for eval (seed 12), and trains with a NanoBEIR evaluator on msmarco, nq and fiqa2018 run as baseline: batch 16,
+    # 1 epoch, lr 3e-5, 5% warmup, bf16, no-duplicates sampler, eval/save every 10%, best model by NanoBEIR mean MaxSim
+    # NDCG@10, seed 42. Then runs the full NanoBEIR suite, saves to models/<run_name>/final and tries a Hub push, logging an
+    # error on failure.
     model_name = "answerdotai/ModernBERT-base"
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 

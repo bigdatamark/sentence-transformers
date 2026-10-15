@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Evaluation script for translation matching. Command-line arguments: model name, dataset name and one or more subset names.
+# For every subset, loads the dataset and, intending to use up to 5,000 train rows when train is the only split, or otherwise all
+# non-train splits, runs a TranslationEvaluator (english vs non_english columns, batch 32) per split and logs the split sizes.
+# Side effects: downloads, logging. Raises IndexError when fewer than two arguments are given.
+# KNOWN ISSUE: the train-only check compares the DatasetDict's column_names (a dict) to a list, so it is never true and train-only datasets are silently skipped; and if it were true, the branch appends to a missing dictionary key and would raise KeyError.
 """
 Given a dataset with parallel sentences, one "english" column and one "non_english" column, this script evaluates a model on the translation task.
 Given a sentence in the "english" column, the model should find the correct translation in the "non_english" column, based on just the embeddings.

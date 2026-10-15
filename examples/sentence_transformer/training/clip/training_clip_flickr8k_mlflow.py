@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Top-level training script: fine-tunes a CLIP ViT-B/32 SentenceTransformer on 1,000 Flickr8k image-caption pairs with
+# MultipleNegativesRankingLoss and reports metrics to MLflow. The dataset is converted to (image, positive caption, negative
+# caption) rows. A binary classification evaluator on 400 validation rows pairs each image with its positive (label 1) and its
+# negative (label 0) caption; it runs before and after training (batch 16, 1 epoch, lr 2e-5, 10% warmup, eval every 10%, save every
+# 50%). The model is saved to models/clip-flickr8k/final.
+# Side effects: downloads, training, logging, MLflow tracking, file writes.
 import logging
 from datetime import datetime
 
@@ -25,6 +32,9 @@ output_dir = f"models/{train_model_name}"
 
 
 def to_binary_flickr8k(batch: dict) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: batched map function. For every row, emits the image, its first caption as positive, and the first caption of the next
+    # row in the batch (wrapping to the start) as negative. Returns a dict with image, positive and negative lists.
     """Converts the Flickr8k dataset format to a binary classification format"""
     output = {"image": [], "positive": [], "negative": []}
     for idx in range(len(batch["image"])):
