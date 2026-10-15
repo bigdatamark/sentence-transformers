@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests general behaviour of MultiVectorEncoder (ColBERT-style late-interaction model producing one L2-normalized vector per token, scored with
+# MaxSim): default module pipeline (Transformer, token-level Dense projection, MultiVectorMask, Normalize), query expansion configuration and
+# validation, chat-template task forwarding, PEFT and gradient checkpointing, prompts/prefix tokens, encode outputs and options, skiplist masking,
+# similarity functions and scoring backends, save/load and conversions, multimodal inputs and various regressions. Many tests download tiny
+# models from the Hugging Face Hub; a module-scoped model fixture is shared by read-only tests.
 from __future__ import annotations
 
 import gc
@@ -22,10 +28,15 @@ from tests.utils import skip_bfloat16_cpu_crash
 
 @pytest.fixture(scope="module")
 def model() -> MultiVectorEncoder:
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture returning a MultiVectorEncoder built from the tiny BERT test checkpoint (network on first use).
     return MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
 
 
 def test_loads_with_default_modules(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a fresh model has four modules: a Transformer without query expansion, a Dense layer reading token_embeddings, a MultiVectorMask and a
+    # Normalize reading token_embeddings, and that the embedding dimension equals the Dense output size.
     # Four modules: Transformer + Dense projection (token-level) + MultiVectorMask + Normalize.
     # Fresh MVE constructions carry no query expansion: the classic ColBERT tricks are explicit
     # recipe choices. Legacy PyLate / Stanford saves keep their own expansion configs.
@@ -41,6 +52,9 @@ def test_loads_with_default_modules(model: MultiVectorEncoder) -> None:
 
 
 def test_default_colbert_attributes(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts default query/document lengths and query expansion are None, similarity is "maxsim", and the mask module has an empty skiplist with no
+    # resolved ids.
     transformer = model[0]
     assert transformer.query_length is None
     assert transformer.document_length is None
@@ -55,6 +69,8 @@ def test_default_colbert_attributes(model: MultiVectorEncoder) -> None:
 
 
 def test_bare_checkpoint_gets_no_expansion() -> None:
+    # [FUNCTION DOC]
+    # Asserts a bare HF checkpoint without sentence-transformers or ColBERT metadata builds without query expansion. Network.
     # A config-only HF checkpoint (no modules.json, no PyLate/Stanford markers) builds without
     # query expansion: the classic ColBERT tricks are explicit recipe choices, not defaults.
     model = MultiVectorEncoder("hf-internal-testing/tiny-random-bert")
@@ -62,6 +78,8 @@ def test_bare_checkpoint_gets_no_expansion() -> None:
 
 
 def test_encode_query_pads_to_expansion_length() -> None:
+    # [FUNCTION DOC]
+    # With fixed query expansion to 16 tokens, asserts a short query encodes to exactly 16 token vectors of the embedding dimension. Network.
     # Opt into query expansion at construction time. Queries pad to expansion["length"].
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
     model = MultiVectorEncoder(base)
@@ -73,6 +91,9 @@ def test_encode_query_pads_to_expansion_length() -> None:
 
 
 def test_chat_template_receives_task_kwarg() -> None:
+    # [FUNCTION DOC]
+    # Installs a chat template that appends five " ." tokens only when task is "query", registers the message modality, and asserts the query render
+    # of the same input is five tokens longer than the document render. Network.
     """Chat-template backbones own their query augmentation in the template (the colpali-engine
     suffix pattern): preprocess forwards ``task`` into ``apply_chat_template`` so the template can
     branch, appending suffix tokens only for query renders."""
@@ -93,6 +114,9 @@ def test_chat_template_receives_task_kwarg() -> None:
 
 
 def test_task_not_forwarded_to_templates_that_ignore_it() -> None:
+    # [FUNCTION DOC]
+    # Installs a stock chat template that does not reference task and asserts query and document renders of a ragged two-text batch have identical,
+    # padded input ids (task is not forwarded to such templates). Network.
     """transformers >= 5.4 treats apply_chat_template kwargs that are not template variables as
     processor kwargs and REPLACES the ones we pass (dropping padding / truncation), so ``task`` is
     only forwarded when the template declares it. A stock template must render identically for
@@ -112,6 +136,8 @@ def test_task_not_forwarded_to_templates_that_ignore_it() -> None:
 
 @pytest.mark.slow
 def test_task_kwarg_does_not_break_stock_template_processor() -> None:
+    # [FUNCTION DOC]
+    # Slow. Loads a tiny Qwen2-VL Transformer with its stock template and asserts batched ragged text preprocessing with a task returns two rows. Network.
     """End-to-end guard on a real ProcessorMixin backbone with a stock (non-task-aware) chat
     template: batched ragged text preprocessing with a task must neither crash nor lose padding."""
     transformer = Transformer("hf-internal-testing/tiny-random-Qwen2VLForConditionalGeneration")
@@ -120,6 +146,8 @@ def test_task_kwarg_does_not_break_stock_template_processor() -> None:
 
 
 def test_query_expansion_strategy_invalid_value_raises() -> None:
+    # [FUNCTION DOC]
+    # Asserts an unknown query expansion strategy raises ValueError mentioning strategy.
     with pytest.raises(ValueError, match="strategy"):
         Transformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
@@ -128,6 +156,8 @@ def test_query_expansion_strategy_invalid_value_raises() -> None:
 
 
 def test_query_expansion_unknown_key_raises() -> None:
+    # [FUNCTION DOC]
+    # Asserts an unknown key in the query expansion dict raises ValueError mentioning unknown keys.
     with pytest.raises(ValueError, match="unknown keys"):
         Transformer(
             "sentence-transformers-testing/stsb-bert-tiny-safetensors",
@@ -136,6 +166,8 @@ def test_query_expansion_unknown_key_raises() -> None:
 
 
 def test_query_expansion_requires_length() -> None:
+    # [FUNCTION DOC]
+    # For attend False and True, asserts fixed expansion without a length raises ValueError requiring 'length'.
     # Expansion needs an explicit pad target. Without it, silent 16× compute blowup
     # would follow (audit #1). Catch at construction with a helpful error.
     for attend in (False, True):
@@ -147,6 +179,8 @@ def test_query_expansion_requires_length() -> None:
 
 
 def test_query_expansion_rejects_count_key() -> None:
+    # [FUNCTION DOC]
+    # Asserts a leftover "count" key is rejected as an unknown key.
     # The suffix-count knob belonged to the removed append_suffix strategy (chat templates own that
     # pattern now): a leftover 'count' is an unknown key, raised loudly rather than silently ignored.
     with pytest.raises(ValueError, match="unknown keys"):
@@ -157,6 +191,11 @@ def test_query_expansion_rejects_count_key() -> None:
 
 
 def test_query_expansion_requires_mask_or_eos_token() -> None:
+    # [FUNCTION DOC]
+    # Removes the tokenizer's mask token and asserts setting fixed expansion (attending or not) raises ValueError because there is neither a mask nor an
+    # EOS token; then sets an EOS token and asserts expansion is accepted. Restores tokenizer attributes in a finally block.
+    # KNOWN ISSUE: The original eos_token is not saved; the finally block unconditionally resets it to None, which is only correct if the tokenizer had
+    # no EOS token to begin with.
     # ``token=None`` falls back to tokenizer.mask_token, then eos_token (PyLate's chain: [MASK]
     # for encoders, EOS for decoder-only models such as LFM2-ColBERT). If the tokenizer has
     # neither, the silent-no-op swap would send pads through the encoder. Caught at construction
@@ -180,6 +219,8 @@ def test_query_expansion_requires_mask_or_eos_token() -> None:
 
 
 def test_query_expansion_token_not_in_vocab_raises() -> None:
+    # [FUNCTION DOC]
+    # Asserts an explicit expansion token missing from the vocabulary raises ValueError mentioning vocabulary.
     # An explicit token that isn't in the tokenizer's vocabulary resolves to unk_token_id. The
     # swap would silently insert unk tokens at expansion positions. Catch at construction.
     with pytest.raises(ValueError, match="vocabulary"):
@@ -190,6 +231,9 @@ def test_query_expansion_token_not_in_vocab_raises() -> None:
 
 
 def test_resolve_retrieval_model_class_from_peft_config() -> None:
+    # [FUNCTION DOC]
+    # Skipped without peft. Asserts the retrieval model class resolved from a LoraConfig whose base model is a ColQwen2 HF checkpoint is
+    # ColQwen2ForRetrieval (resolved via the base model config; may download that config).
     # A PEFT adapter checkpoint carries a LoraConfig without `architectures`. The retrieval class
     # must resolve via the adapter's base model config instead of raising.
     peft = pytest.importorskip("peft")
@@ -201,6 +245,9 @@ def test_resolve_retrieval_model_class_from_peft_config() -> None:
 
 @pytest.mark.skip("Released peft reloads injected-adapter saves with reset weights, fixed on peft main")
 def test_peft_adapter_save_load_round_trip(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Unconditionally skipped (released peft bug). Adds a LoRA adapter with randomized B matrices, encodes a query, saves and reloads twice, and asserts
+    # the reloaded embeddings match within 1e-6 after each round trip.
     # transformers 5.x with released peft reloads injected-adapter saves with freshly initialized
     # adapter weights, silently resetting LoRA to identity. Round trips twice to cover both save
     # formats. Un-skip when a peft release carries the upstream fix.
@@ -233,6 +280,9 @@ def test_peft_adapter_save_load_round_trip(tmp_path) -> None:
 
 
 def test_gradient_checkpointing_skips_unsupporting_wrapper() -> None:
+    # [FUNCTION DOC]
+    # Marks the underlying transformers model as not supporting gradient checkpointing and asserts enabling it on the MultiVectorEncoder does not raise.
+    # KNOWN ISSUE: The comment says the wrapper is skipped "with a warning", but the test never checks that a warning is emitted.
     # transformers wrappers that don't declare gradient checkpointing support (e.g.
     # ColQwen2ForRetrieval in transformers 5.13) must be skipped with a warning instead of the
     # ValueError from PreTrainedModel.gradient_checkpointing_enable crashing training.
@@ -242,6 +292,9 @@ def test_gradient_checkpointing_skips_unsupporting_wrapper() -> None:
 
 
 def test_prefix_added_token_repaired_to_single_piece() -> None:
+    # [FUNCTION DOC]
+    # Adds "[Q] " as a normalized added token (which then does not match as one piece), asserts it tokenizes into multiple pieces, calls the prefix-token
+    # registration for the query prefix, and asserts it now tokenizes as a single leading piece without growing the vocabulary. Mutates the tokenizer.
     # PyLate checkpoints (e.g. mxbai-edge-colbert) store "[Q] " as an added token with
     # normalized=True, which never matches input text on a lowercasing tokenizer: text-prepended
     # prompts shatter into pieces and diverge from the training-time token insertion. Registration
@@ -260,6 +313,8 @@ def test_prefix_added_token_repaired_to_single_piece() -> None:
 
 
 def test_query_expansion_setter_validates_post_init() -> None:
+    # [FUNCTION DOC]
+    # Asserts assigning an invalid strategy or an unknown key via the query_expansion property raises ValueError and leaves the original value (None) intact.
     # Mid-life mutation must go through the same validation as __init__, not skip it. Without the
     # property setter, model[0].query_expansion = {...} would store an unvalidated dict and break
     # downstream at the next encode_query.
@@ -273,12 +328,16 @@ def test_query_expansion_setter_validates_post_init() -> None:
 
 
 def test_encode_document_varies_with_length(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts encoding a short and a long document yields per-document token matrices whose lengths follow the inputs (longer has more tokens).
     embs = model.encode_document(["one short doc", "a much longer document with more tokens to embed"])
     assert len(embs) == 2
     assert embs[1].shape[0] > embs[0].shape[0]
 
 
 def test_encode_routes_through_module_call(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Registers a forward hook counting calls, encodes a document, removes the hook, and asserts the hook fired (encode goes through the module call).
     """encode() must run the forward pass via __call__ so that model.compile() applies to inference."""
     calls = []
     handle = model.register_forward_hook(lambda module, args, output: calls.append(True))
@@ -290,6 +349,9 @@ def test_encode_routes_through_module_call(model: MultiVectorEncoder) -> None:
 
 
 def test_encode_document_skiplist_removes_punctuation() -> None:
+    # [FUNCTION DOC]
+    # Builds a fresh model, sets the mask module's skiplist to ASCII punctuation and resolves it with the tokenizer, and asserts a punctuated document
+    # yields the same number of token vectors as its unpunctuated twin (punctuation tokens masked out). Network.
     # The bare-HF default is now an empty skiplist, so opt punctuation back in to exercise the
     # masking logic: the (token-count) embedding of a heavily-punctuated doc should match its
     # punctuation-free twin once punctuation tokens are masked out.
@@ -311,6 +373,8 @@ def test_encode_document_skiplist_removes_punctuation() -> None:
 
 
 def test_mask_keep_only_token_ids_restricts_document_mask() -> None:
+    # [FUNCTION DOC]
+    # Sets keep_only_token_ids to the period's id on a fresh model and asserts a document with five periods yields exactly five token vectors. Network.
     """``keep_only_token_ids`` (P1.2 / colpali-engine ``mask_non_image_embeddings``) restricts the
     document attention_mask to the allowlisted IDs only. The rest of the doc tokens drop out of
     MaxSim scoring. Combined with the skiplist, both filters apply.
@@ -329,6 +393,8 @@ def test_mask_keep_only_token_ids_restricts_document_mask() -> None:
 
 
 def test_mask_keep_only_token_ids_none_is_noop(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts keep_only_token_ids defaults to None.
     """Default ``keep_only_token_ids=None`` means no allowlist: matches pre-P1.2 behavior exactly."""
     mask_module = model[2]
     assert isinstance(mask_module, MultiVectorMask)
@@ -336,6 +402,9 @@ def test_mask_keep_only_token_ids_none_is_noop(model: MultiVectorEncoder) -> Non
 
 
 def test_mask_skiplist_tasks_gate(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # With a standalone mask skiplisting ".", asserts the period is masked for task document and for no task, but not for query or a custom task; and that
+    # listing query in skiplist_tasks masks it for queries too. Uses hand-built input ids with BERT CLS/SEP ids.
     """``skiplist_tasks`` is an allowlist (default documents only, no task counts as document):
     a custom task is no longer skiplisted unless listed, and listing "query" unlocks the
     query-side skiplist some ColBERT variants use."""
@@ -357,6 +426,9 @@ def test_mask_skiplist_tasks_gate(model: MultiVectorEncoder) -> None:
 
 
 def test_mask_repads_flash_attention_flattened_features(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Feeds the mask a flattened FlashAttention-2 style batch (one row of 5 tokens described by cumulative lengths 0, 3, 5, no attention mask) and
+    # asserts it re-pads token embeddings to (2, 3, 1), drops the cumulative-length metadata, and produces masks excluding each period and the padding.
     """Under FA2 unpadding the encoder hands the mask a flat ``(1, sum_lens, ...)`` batch described by
     ``cu_seq_lens_q`` and no ``attention_mask``. The mask re-pads it back to ``(B, T, D)`` before
     applying the skiplist, and this branch is otherwise reachable only with real flash attention."""
@@ -378,6 +450,8 @@ def test_mask_repads_flash_attention_flattened_features(model: MultiVectorEncode
 
 
 def test_mask_skiplist_tasks_round_trips_through_config(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a mask with skiplist_tasks given as a bare string to tmp_path, reloads it, and asserts the tasks were stored as a one-element list.
     # A bare string coerces to a one-element list, and the key persists.
     MultiVectorMask(skiplist_words=["."], skiplist_tasks="query").save(str(tmp_path))
     restored = MultiVectorMask.load(str(tmp_path))
@@ -385,6 +459,9 @@ def test_mask_skiplist_tasks_round_trips_through_config(tmp_path) -> None:
 
 
 def test_mask_skiplist_drops_unk_resolving_words(model: MultiVectorEncoder, caplog) -> None:
+    # [FUNCTION DOC]
+    # On a fresh model, sets a skiplist with an unresolvable word and ".", resolves it, and asserts only the period id remains and a warning about words
+    # that are not single vocab tokens was logged. Uses caplog; network.
     """``resolve_with_tokenizer`` drops skiplist words that ``convert_tokens_to_ids`` resolves to
     ``unk_token_id``. Otherwise every real ``[UNK]`` document token would be silently excluded from
     MaxSim scoring. The drop emits a one-shot warning so the developer sees it once per process.
@@ -408,6 +485,8 @@ def test_mask_skiplist_drops_unk_resolving_words(model: MultiVectorEncoder, capl
 
 
 def test_mask_skiplist_keeps_explicit_unk_token(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts explicitly listing the tokenizer's UNK token in the skiplist keeps the UNK id in the resolved ids.
     """A user who explicitly puts the tokenizer's UNK token in the skiplist gets what they asked for
     (the unk_token_id stays in ``_skiplist_ids``). The drop-on-unk filter only fires when a *different*
     word happens to resolve to unk_token_id.
@@ -426,6 +505,8 @@ def test_mask_skiplist_keeps_explicit_unk_token(model: MultiVectorEncoder) -> No
 
 
 def test_mask_skiplist_all_unresolvable_yields_none(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a skiplist consisting only of unresolvable words resolves to None (skiplist disabled) rather than an empty tensor.
     """When every skiplist word resolves to ``unk_token_id`` (none are real vocab tokens), the resolved
     tensor is ``None`` rather than empty, so ``forward`` treats the skiplist as disabled.
     """
@@ -439,6 +520,8 @@ def test_mask_skiplist_all_unresolvable_yields_none(model: MultiVectorEncoder) -
 
 
 def test_encode_document_default_skiplist_keeps_punctuation(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts that with the default empty skiplist a punctuated document has strictly more token vectors than its unpunctuated twin.
     # With the empty default the masking module is a no-op for token count: a punctuated doc
     # should have strictly more tokens than a punctuation-free one (each "," / "." kept).
     no_punc = model.encode_document(["the cat sat on the mat"])
@@ -447,6 +530,10 @@ def test_encode_document_default_skiplist_keeps_punctuation(model: MultiVectorEn
 
 
 def test_stanford_metadata_seeds_skiplist_from_mask_punctuation(monkeypatch, tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Monkeypatches Dense.load_file_path to point at an artifact.metadata file in tmp_path, and for metadata missing the flag, with mask_punctuation False
+    # and with True, resets the legacy stash, writes the JSON, runs the Stanford metadata loader, and asserts the stashed skiplist is all punctuation,
+    # empty, and all punctuation respectively.
     """A Stanford-NLP load seeds the skiplist from the ``mask_punctuation`` flag in ``artifact.metadata``.
     ColBERTConfig declares ``mask_punctuation: bool = DefaultVal(True)``, so a missing key means the
     checkpoint was trained with punctuation masked and only an explicit ``False`` turns it off. The slow
@@ -506,6 +593,11 @@ def test_stanford_metadata_seeds_skiplist_from_mask_punctuation(monkeypatch, tmp
     ],
 )
 def test_parse_model_config_translates_pylate_expansion(model_config, expected_qe) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over PyLate-style config dicts. Resets the legacy stash, parses the config, and asserts the stashed transformer query_expansion equals
+    # the expected translation (fixed expansion with length moved from query_length and attend from attend_to_expansion_tokens or the Stanford
+    # attend_to_mask_tokens spelling; None when expansion is disabled or explicitly None; explicit dicts kept; absent for bare saves; default length 32
+    # when query_length is null), and that no null query_length is stashed.
     """``_parse_model_config`` translates legacy PyLate-shape expansion fields
     (``do_query_expansion`` + ``attend_to_expansion_tokens``, with the Stanford spelling
     ``attend_to_mask_tokens`` as fallback) into the ``query_expansion`` dict, preserves an explicit
@@ -570,6 +662,10 @@ _PYLATE_PREFIX_AND_PROMPTS = {
     ],
 )
 def test_parse_model_config_composes_pylate_prefix_with_prompts(model_config, user_prompts, expected) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over prefix/prompt combinations and caller-supplied prompts. Resets the stash, sets prompts to the defaults merged with the caller's,
+    # parses the config, and asserts the resulting query/document prompts (prefix alone, prefix composed idempotently with saved prompts, saved prompt
+    # kept for a null prefix, caller prompts including empty strings win) and that the raw prefixes (empty for null) are stashed.
     """A PyLate save can carry both ``query_prefix`` and ``prompts``. PyLate applies both, so the prefix
     composes onto the front of the saved prompt rather than being dropped when a prompt exists. Composing
     onto the saved prompt rather than ``self.prompts`` keeps the base class rule that a caller wins."""
@@ -587,6 +683,9 @@ def test_parse_model_config_composes_pylate_prefix_with_prompts(model_config, us
 
 
 def test_loads_native_retriever_archetype() -> None:
+    # [FUNCTION DOC]
+    # Loads a tiny random ColPaliForRetrieval and asserts the pipeline is only Transformer then MultiVectorMask with the retrieval task and text and image
+    # modalities. Network.
     """transformers-native late-interaction retrievers (``architectures`` ending in ``ForRetrieval``,
     i.e. ColPali / ColQwen2 / ColModernVBert) take a different branch: ``forward`` already projects and
     L2-normalises, so only the scoring mask is appended and no Dense or Normalize. Pinned on a
@@ -603,6 +702,11 @@ def test_loads_native_retriever_archetype() -> None:
 def _write_stanford_checkpoint(
     directory, model: MultiVectorEncoder, projection_dim: int = 16, metadata: dict | None = None
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes a Stanford-NLP ColBERT-shaped checkpoint into directory from the given model's backbone and tokenizer: sets architectures to
+    # HF_ColBERT in config.json, stores a projection weight named linear.weight with projection_dim rows at the repository root, and optionally writes
+    # artifact.metadata as JSON. Disk I/O.
+    # KNOWN ISSUE: An inline comment calls the source model the session-scoped fixture, but the model fixture in this module is module-scoped.
     """A Stanford-NLP ColBERT-shaped checkpoint: ``architectures: ["HF_ColBERT"]``, the projection
     stored at the repo root as ``linear.weight`` rather than in a ``2_Dense/`` folder, and an
     optional ``artifact.metadata``. Built from the tiny backbone so the archetype is exercised
@@ -630,6 +734,11 @@ def _write_stanford_checkpoint(
 
 
 def test_loads_stanford_colbert_archetype(tmp_path, model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Writes a Stanford-shaped checkpoint with metadata (query max length 8, doc max length 96, punctuation masking on, no attention to mask tokens) and
+    # loads it. Asserts the pipeline is Transformer, Dense, MultiVectorMask, Normalize; the Dense weight equals the saved linear.weight and sets the
+    # embedding dimension; document_length is 96; query expansion has length 8 and attend False; prompts are the [unused0]/[unused1] markers; and the
+    # punctuation skiplist resolved to ids.
     """The Stanford load path has no non-slow coverage, and ``audit_v2.md`` recorded a misload of
     exactly this archetype as a blocker. Pins that the root ``linear.weight`` becomes the Dense head
     (rather than a fresh random projection) and that artifact.metadata drives the knobs."""
@@ -658,6 +767,9 @@ def test_loads_stanford_colbert_archetype(tmp_path, model: MultiVectorEncoder) -
 def test_stanford_colbert_archetype_without_metadata_uses_defaults(
     tmp_path, model: MultiVectorEncoder, caplog
 ) -> None:
+    # [FUNCTION DOC]
+    # Writes a Stanford-shaped checkpoint without metadata and asserts loading logs a missing-metadata warning, uses the marker prompts, a 32-token query
+    # expansion, and the punctuation skiplist (ColBERT's default) with resolved ids. Uses caplog.
     """``artifact.metadata`` is absent from some Stanford-shaped repos, so the loader falls back to
     the canonical markers and a 32-token query expansion instead of failing."""
     import string
@@ -684,6 +796,9 @@ def test_stanford_colbert_archetype_without_metadata_uses_defaults(
     ],
 )
 def test_stanford_colbert_archetype_keeps_caller_prompts(tmp_path, model, user_prompts, expected) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over caller prompts. Asserts loading a metadata-less Stanford checkpoint with explicit prompts keeps them, filling only unspecified
+    # slots with markers, and preserves empty strings.
     """``artifact.metadata`` carries no prompt, so the marker only fills a slot the caller left alone.
     An empty string is the documented way to switch a prompt off and must survive, matching how the
     PyLate branch in ``_parse_model_config`` treats one."""
@@ -705,6 +820,9 @@ def test_encode_output_formats(
     convert_to_numpy: bool,
     element_type: type,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over convert_to_numpy False (tensors) and True (numpy arrays). Asserts encode_document returns a list with one 2-D element of the
+    # expected type and embedding width per document, the shorter document having fewer tokens.
     docs = ["short doc", "a considerably longer document with many more distinct tokens than the first one"]
     dim = model.get_embedding_dimension()
     out = model.encode_document(docs, convert_to_numpy=convert_to_numpy)
@@ -717,6 +835,8 @@ def test_encode_output_formats(
 
 
 def test_singular_input_unwraps(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a single string input returns a single 2-D tensor, or a single 2-D numpy array with convert_to_numpy.
     emb = model.encode_document("a single doc string")
     assert isinstance(emb, torch.Tensor)
     assert emb.ndim == 2
@@ -726,6 +846,8 @@ def test_singular_input_unwraps(model: MultiVectorEncoder) -> None:
 
 
 def test_encode_defaults_to_tensors_on_model_device(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts default outputs are tensors on the model's device and convert_to_numpy yields numpy arrays.
     """The default output feeds similarity without a host round trip, so it stays on the model's
     device as tensors. ``convert_to_numpy=True`` remains the opt-out for corpora that outgrow it."""
     embeddings = model.encode_document(["one doc", "another doc"])
@@ -734,6 +856,8 @@ def test_encode_defaults_to_tensors_on_model_device(model: MultiVectorEncoder) -
 
 
 def test_convert_to_tensor_is_rejected_by_name(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts passing convert_to_tensor raises ValueError explaining the model has no such option.
     """Variable-length embeddings cannot stack, so unlike every other model type there is no
     `convert_to_tensor` here. Copied-over calls are common enough that the error says so rather than
     falling through to the generic unused-kwarg message."""
@@ -742,6 +866,8 @@ def test_convert_to_tensor_is_rejected_by_name(model: MultiVectorEncoder) -> Non
 
 
 def test_similarity_returns_maxsim(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Encodes one query and two documents and asserts a 1x2 MaxSim score matrix whose first entry equals similarity_pairwise on the first pair.
     q = model.encode_query(["cats and dogs"])
     d = model.encode_document(["cats and dogs are pets", "the weather is nice"])
     scores = model.similarity(q, d)
@@ -753,6 +879,9 @@ def test_similarity_returns_maxsim(model: MultiVectorEncoder) -> None:
 
 
 def test_save_and_load_round_trip(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Saves the shared model to a temporary dir, reloads it, and asserts prompts, query/document lengths, query expansion and skiplist words survive,
+    # and a query encodes to the same embeddings within 1e-5.
     with tempfile.TemporaryDirectory() as tmpdir:
         model.save_pretrained(tmpdir)
         reloaded = MultiVectorEncoder(tmpdir)
@@ -770,6 +899,9 @@ def test_save_and_load_round_trip(model: MultiVectorEncoder) -> None:
 
 
 def test_convert_dense_sentence_transformer_resets_similarity_to_maxsim(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a dense SentenceTransformer with similarity "cosine" in its config to tmp_path, loads it as a MultiVectorEncoder, and asserts similarity is
+    # reset to maxsim, the pipeline ends with MultiVectorMask and Normalize, and there is no query expansion. Network and disk.
     """A dense SentenceTransformer is converted to a MultiVectorEncoder on load. Its saved
     ``similarity_fn_name`` ("cosine" / "dot" can't score ragged per-token embeddings) must be reset to
     MaxSim by ``_load_converted_modules`` rather than raising in the strict setter during config parsing.
@@ -795,6 +927,9 @@ def test_convert_dense_sentence_transformer_resets_similarity_to_maxsim(tmp_path
 
 
 def test_convert_dense_st_with_dense_head_redirects_to_token_level(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a SentenceTransformer of Transformer, mean Pooling and a 64-D bias-free Dense; loads as a MultiVectorEncoder and asserts the Dense now reads
+    # and writes token_embeddings with identical weights and queries encode to 64-D token vectors.
     """Converting a dense SentenceTransformer WITH a Dense head (LaBSE-shape) redirects the head to
     token level: the conversion drops the Pooling, so sentence-level wiring would KeyError at encode
     time. The learned projection weights are preserved."""
@@ -816,6 +951,8 @@ def test_convert_dense_st_with_dense_head_redirects_to_token_level(tmp_path) -> 
 
 
 def test_io_nameless_dense_config_defaults_to_token_level(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a MultiVectorEncoder, deletes the Dense config's input/output name keys, reloads, and asserts the Dense defaults to token_embeddings IO.
     """Dense configs that predate module IO names (PyLate / pre-v5.4 ST saves) load token-level via
     ``_get_module_init_defaults``, keyed on the saved config actually lacking the key rather than on
     checkpoint provenance markers."""
@@ -836,6 +973,8 @@ def test_io_nameless_dense_config_defaults_to_token_level(tmp_path) -> None:
 
 
 def test_pinned_sentence_level_dense_survives_load(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a MultiVectorEncoder, sets the Dense config's IO names to sentence_embedding, reloads, and asserts those explicit names are kept.
     """A Dense that explicitly pins sentence-level IO names in its saved config is left untouched:
     the token-level default only fills configs that omitted the key, so an intentional
     sentence-level Dense in a saved hybrid pipeline survives its own round-trip."""
@@ -856,6 +995,9 @@ def test_pinned_sentence_level_dense_survives_load(tmp_path) -> None:
 
 
 def test_encode_output_value_none_returns_feature_dicts(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts output_value None returns a list of per-input dicts with 2-D token embeddings, a per-token attention mask, and the non-tensor modality value
+    # carried as "text"; a single string returns one dict containing token_embeddings.
     """``output_value=None`` returns the raw per-input module output dicts (ST parity): every
     feature key a module wrote, with batch-first tensors split per input and other values carried
     as-is. Extra keys from custom modules become user-reachable this way."""
@@ -873,11 +1015,15 @@ def test_encode_output_value_none_returns_feature_dicts(model: MultiVectorEncode
 
 
 def test_encode_output_value_rejects_unknown(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts an unsupported output_value ("sentence_embedding") raises ValueError.
     with pytest.raises(ValueError, match="output_value"):
         model.encode(["x"], output_value="sentence_embedding")
 
 
 def test_encode_output_value_none_with_prompt(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts encoding with a prompt and output_value None yields dicts containing prompt_length and matching input_ids/attention_mask shapes.
     """Prompts compose with ``output_value=None``: the per-item dicts carry the bookkeeping keys
     (mirrors the SentenceTransformer behaviour)."""
     outputs = model.encode(["Text one", "Text two"], prompt="query: ", output_value=None)
@@ -889,6 +1035,8 @@ def test_encode_output_value_none_with_prompt(model: MultiVectorEncoder) -> None
 
 
 def test_encode_output_value_none_ignores_convert_flags(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts raw dict outputs are returned regardless of convert_to_numpy.
     """The convert_to_* options do not apply to raw feature dicts."""
     for outputs in (
         model.encode(["x", "y"], output_value=None),
@@ -899,6 +1047,9 @@ def test_encode_output_value_none_ignores_convert_flags(model: MultiVectorEncode
 
 
 def test_conversion_ignores_prompts_from_sparse_save(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a SparseEncoder with custom prompts and a default prompt name to tmp_path, loads it as a MultiVectorEncoder, and asserts the prompts reset to
+    # empty, no default prompt name, and maxsim similarity. Network and disk.
     """Converting a SparseEncoder (or CrossEncoder) save rebuilds the default MVE modules, so the
     source's prompts and default_prompt_name are not inherited. SentenceTransformer-format saves
     (including PyLate) instead reuse the saved modules and do keep prompts."""
@@ -916,6 +1067,9 @@ def test_conversion_ignores_prompts_from_sparse_save(tmp_path) -> None:
 
 
 def test_pylate_marked_conversion_defaults_punctuation_skiplist(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a dense SentenceTransformer whose config carries PyLate query/document prefixes, loads it as a MultiVectorEncoder, and asserts the mask has the
+    # punctuation skiplist resolved to ids and the prefixes became the query/document prompts.
     """A PyLate-marked SentenceTransformer-format save without an explicit ``skiplist_words`` gets
     PyLate's punctuation default on conversion, matching the PyLate-v3 load path. Un-marked dense
     saves keep the empty default."""
@@ -944,6 +1098,8 @@ def test_pylate_marked_conversion_defaults_punctuation_skiplist(tmp_path) -> Non
 
 
 def test_xtr_scores_clamps_topk_to_token_pool() -> None:
+    # [FUNCTION DOC]
+    # Asserts xtr_scores with top_k 256 on a tiny token pool clamps instead of failing, returning a finite 2x2 matrix. Unseeded random inputs.
     """The default k=256 exceeds tiny in-batch token pools: top-k must clamp instead of crashing."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
 
@@ -956,6 +1112,8 @@ def test_xtr_scores_clamps_topk_to_token_pool() -> None:
 
 @pytest.mark.parametrize("top_k", [True, 0, -1])
 def test_xtr_scores_rejects_non_positive_topk(top_k: int) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over True (a boolean), 0 and -1. Asserts xtr_scores raises ValueError requiring top_k to be a positive integer.
     """Non-positive top-k values fail at the public scoring boundary with a clear error."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
 
@@ -966,6 +1124,8 @@ def test_xtr_scores_rejects_non_positive_topk(top_k: int) -> None:
 
 
 def test_xtr_scores_upcasts_integer_embeddings() -> None:
+    # [FUNCTION DOC]
+    # Asserts int8 inputs to xtr_scores are upcast so the result is float32 and equals the float-input result.
     """Integer embeddings follow the floating-point scoring path and match float inputs."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
 
@@ -979,6 +1139,8 @@ def test_xtr_scores_upcasts_integer_embeddings() -> None:
 
 
 def test_xtr_scores_derives_query_padding_mask() -> None:
+    # [FUNCTION DOC]
+    # Asserts a trailing all-zero query row is treated as padding: scores with it equal scores without it and scores with an explicit query mask.
     """Implicit query padding behaves like an explicit mask and does not affect XTR scores."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
 
@@ -995,6 +1157,8 @@ def test_xtr_scores_derives_query_padding_mask() -> None:
 
 
 def test_xtr_scores_keeps_retrieved_negative_similarities() -> None:
+    # [FUNCTION DOC]
+    # For top_k 2, 3 and 4, asserts a document whose best retrieved similarity is negative (-0.3) keeps it rather than being reported as 0.
     """Non-retrieved tokens are held at the dtype minimum, not 0: a zero placeholder wins the
     per-document max over a genuinely retrieved negative similarity and discards it. Here document 1
     retrieves -0.3 and must keep it at every top_k, not report 0.0."""
@@ -1010,6 +1174,9 @@ def test_xtr_scores_keeps_retrieved_negative_similarities() -> None:
 
 
 def test_colbert_kd_scores_are_the_block_diagonal_of_the_matrix() -> None:
+    # [FUNCTION DOC]
+    # With seeded normalized inputs (2 queries, 2 groups of 3 documents), asserts colbert_scores yields a 2x6 matrix and colbert_kd_scores a 2x3 matrix
+    # equal to each query's own document block.
     """KD scores are each query's own document group, the query-major block diagonal of the full
     matrix. Split out of the bfloat16 test below so it keeps running on Windows, where that one is
     skipped: this relation has nothing to do with the input dtype."""
@@ -1028,6 +1195,8 @@ def test_colbert_kd_scores_are_the_block_diagonal_of_the_matrix() -> None:
 
 @skip_bfloat16_cpu_crash
 def test_colbert_scores_keep_float32_through_delegation() -> None:
+    # [FUNCTION DOC]
+    # Skipped where bfloat16 on CPU crashes. Asserts colbert_scores and colbert_kd_scores on bfloat16 inputs return float32.
     """The losses' default similarity_fct surface must keep maxsim's float32 scores, also under a
     future fused reimplementation."""
     from sentence_transformers.multi_vector_encoder.scoring import colbert_kd_scores, colbert_scores
@@ -1042,6 +1211,9 @@ def test_colbert_scores_keep_float32_through_delegation() -> None:
 
 @skip_bfloat16_cpu_crash
 def test_xtr_scores_half_precision_accumulates_in_float32() -> None:
+    # [FUNCTION DOC]
+    # Skipped where bfloat16 on CPU crashes. Asserts xtr_scores on bfloat16 inputs returns float32 close (2e-2) to scoring the same quantized values in
+    # float32, and that the 500 document scores have more than 400 distinct values (float32 accumulation).
     """XTR's own query-token sum accumulates in float32: an output cast alone cannot restore the
     resolution a bf16 sum loses."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
@@ -1059,6 +1231,9 @@ def test_xtr_scores_half_precision_accumulates_in_float32() -> None:
 
 
 def test_xtr_scores_fully_masked_document_scores_sentinel() -> None:
+    # [FUNCTION DOC]
+    # With one fully masked document, asserts for top_k 256 (spanning the pool) and 4 that scores are finite, the empty document scores exactly -1e9 for
+    # both queries, and the other documents have magnitudes below 100.
     """An empty document surfaces differently per ``k`` (-inf when the top-k spans the pool, a
     retrievable-looking 0 below that): both regimes take the -1e9 sentinel."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
@@ -1078,6 +1253,9 @@ def test_xtr_scores_fully_masked_document_scores_sentinel() -> None:
 
 
 def test_xtr_scores_without_mask_excludes_zero_pad_rows() -> None:
+    # [FUNCTION DOC]
+    # Asserts that without a mask an all-zero document row is treated as padding (same scores as with an explicit mask) and the zero-padded document does
+    # not outrank the real one.
     """On unnormalized embeddings a zero pad row scored 0.0 and beat genuinely negative real maxima:
     without a mask, one is now derived from all-zero document rows, like maxsim."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
@@ -1096,6 +1274,8 @@ def test_xtr_scores_without_mask_excludes_zero_pad_rows() -> None:
 
 
 def test_ir_evaluator_rejects_compiled_xtr_scoring() -> None:
+    # [FUNCTION DOC]
+    # Asserts a torch.compile-wrapped xtr_scores in score_functions is still rejected by the IR evaluator with ValueError mentioning XTR.
     """The XTR rejection must not be evaded by torch.compile, which the XTR docstring itself
     recommends for the hot path."""
     from sentence_transformers.multi_vector_encoder.evaluation import MultiVectorInformationRetrievalEvaluator
@@ -1112,6 +1292,8 @@ def test_ir_evaluator_rejects_compiled_xtr_scoring() -> None:
 
 
 def test_similarity_fn_name_setter_rejects_unsupported(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts assigning the single-vector similarity "cosine" raises ValueError saying only multi-vector similarities are supported.
     """Single-vector similarities can't score ragged token embeddings: assignment must fail loud
     instead of deferring the failure to scoring time."""
     with pytest.raises(ValueError, match="only supports"):
@@ -1119,6 +1301,8 @@ def test_similarity_fn_name_setter_rejects_unsupported(model: MultiVectorEncoder
 
 
 def test_parse_model_config_reads_back_supported_similarity() -> None:
+    # [FUNCTION DOC]
+    # Resets the stash and similarity, and asserts parsing a config with "maxsim" stores it while "cosine" is ignored (stays None).
     """A saved ``similarity_fn_name`` is read back on load when supported. Legacy dense names
     (cosine / dot) are ignored so the model falls through to the MaxSim default instead of raising."""
     from sentence_transformers.multi_vector_encoder.model import _LegacyStash
@@ -1136,6 +1320,10 @@ def test_parse_model_config_reads_back_supported_similarity() -> None:
 
 @pytest.mark.parametrize("attend", [False, True])
 def test_query_expansion_records_per_position_mask(attend: bool) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over attend False/True. Measures the unexpanded query width, sets fixed expansion to 16, and asserts preprocess records a boolean
+    # query_expansion_positions mask of the input ids' shape (no legacy per-batch flag) marking exactly the padded-out positions, which hold the mask
+    # token id; and that the MultiVectorMask's scoring mask covers all 16 positions.
     """Preprocess records WHICH positions hold expansion tokens as a ``(B, T)`` mask (not a
     per-batch bool), and the scoring mask force-includes exactly those positions on top of the
     real tokens."""
@@ -1162,6 +1350,8 @@ def test_query_expansion_records_per_position_mask(attend: bool) -> None:
 
 
 def test_multi_vector_mask_respects_partial_expansion_positions() -> None:
+    # [FUNCTION DOC]
+    # Asserts the mask module includes real tokens plus only marked expansion positions, leaving an unmarked padding position excluded.
     """The scoring mask force-includes only the marked positions: a position that is neither a real
     token nor marked as expansion stays excluded (the old per-batch bool blanket-included every
     position, which only worked for fixed-width expansion rows)."""
@@ -1176,11 +1366,16 @@ def test_multi_vector_mask_respects_partial_expansion_positions() -> None:
 
 
 def test_query_expansion_without_mask_module_warns(caplog) -> None:
+    # [FUNCTION DOC]
+    # Asserts constructing a model with query expansion but no MultiVectorMask logs a warning naming the missing mask, and that inserting the mask
+    # removes the warning. Uses caplog; network.
     """Only MultiVectorMask puts the expansion tokens in the scoring mask: constructing a pipeline
     with query_expansion but no MultiVectorMask warns instead of silently dropping them."""
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
 
     def make_modules() -> list[torch.nn.Module]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a fresh Transformer with fixed 16-token expansion, a 32-D bias-free token-level Dense, and a token-level Normalize.
         transformer = Transformer(base, query_expansion={"strategy": "fixed", "length": 16})
         dense = Dense(
             in_features=transformer.get_embedding_dimension(),
@@ -1204,6 +1399,9 @@ def test_query_expansion_without_mask_module_warns(caplog) -> None:
 
 
 def test_media_counts_run_under_eval_mode(monkeypatch) -> None:
+    # [FUNCTION DOC]
+    # Installs a simple chat template and message modality, enables track_media_counts, sets eval mode, monkeypatches the module's media counter to
+    # record calls and return zero counts, and asserts preprocessing a document still calls it.
     """trainer.evaluate() collates under model.eval(): the media-count bookkeeping keys on
     ``track_media_counts`` alone (not ``self.training``), or VLM eval-loss batches lose
     ``num_images_per_sample`` and fall back to naive sample slicing."""
@@ -1221,6 +1419,8 @@ def test_media_counts_run_under_eval_mode(monkeypatch) -> None:
     calls: list[int] = []
 
     def fake_count(messages):
+        # [FUNCTION DOC]
+        # HELPER: Records the number of messages and returns zero image and video counts for each.
         calls.append(len(messages))
         return [0] * len(messages), [0] * len(messages)
 
@@ -1230,6 +1430,10 @@ def test_media_counts_run_under_eval_mode(monkeypatch) -> None:
 
 
 def test_user_constructed_model_with_prefix_prompts_round_trips() -> None:
+    # [FUNCTION DOC]
+    # Builds a model from explicit modules (Transformer with lengths and fixed expansion, token Dense, mask, Normalize) and marker prompts, encodes a query
+    # and a document, saves and reloads, and asserts the query prompt survives and embeddings match within 1e-5.
+    # KNOWN ISSUE: The comments promise byte-identical embeddings after the round trip, but the assertions only check closeness within 1e-5.
     # A model built from explicit modules + text prefix prompts must save/reload byte-identically.
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
     transformer = Transformer(
@@ -1271,6 +1475,9 @@ def test_user_constructed_model_with_prefix_prompts_round_trips() -> None:
 
 
 def test_native_save_keeps_plain_transformer_unchanged() -> None:
+    # [FUNCTION DOC]
+    # Builds a model from a plain Transformer (no expansion) plus token Dense, mask and Normalize, saves and reloads, and asserts the reloaded first
+    # module is a Transformer still without query expansion (no legacy remap for native saves).
     # A native MultiVectorEncoder may deliberately use a plain Transformer (no query expansion).
     # Reloading must NOT silently flip the expansion knobs on (only legacy/converted checkpoints
     # get that remap), so a custom pipeline round-trips exactly as built.
@@ -1302,6 +1509,10 @@ def test_native_save_keeps_plain_transformer_unchanged() -> None:
 
 
 def test_pylate_shape_save_round_trips_to_new_query_expansion(tmp_path) -> None:
+    # [FUNCTION DOC]
+    # Saves a model with fixed attending 24-token expansion, rewrites its config into the legacy PyLate shape (query_length 24, do_query_expansion,
+    # attend_to_expansion_tokens), reloads, and asserts the translated expansion dict (with token None), that query_length is no longer set, and that
+    # the reloaded query embedding has shape 24 by dimension and matches the original within 1e-5.
     """Save a natively-constructed MVE, rewrite ``config_sentence_transformers.json`` from the new
     ``query_expansion`` dict shape into the legacy PyLate shape (``query_length`` +
     ``do_query_expansion``), reload, and confirm ``_parse_model_config`` translates it back into
@@ -1340,6 +1551,8 @@ def test_pylate_shape_save_round_trips_to_new_query_expansion(tmp_path) -> None:
 
 
 def test_hierarchical_pooling_helper_reduces_token_count() -> None:
+    # [FUNCTION DOC]
+    # Asserts hierarchical pooling of 10 random tokens with one protected token yields fewer tokens of the same dimension with the first row unchanged.
     emb = torch.nn.functional.normalize(torch.randn(10, 8), p=2, dim=1)
     pooled = HierarchicalTokenPooling(pool_factor=2, num_protected_tokens=1).pool([emb])[0]
     # Fewer tokens, same dim, and the protected [CLS] row is untouched.
@@ -1349,6 +1562,8 @@ def test_hierarchical_pooling_helper_reduces_token_count() -> None:
 
 
 def test_hierarchical_pooling_module_pools_documents_not_queries() -> None:
+    # [FUNCTION DOC]
+    # Asserts calling the pooling module with task document shrinks the token axis (mask matching), while task query leaves 12 tokens.
     module = HierarchicalTokenPooling(pool_factor=2)
     emb = torch.nn.functional.normalize(torch.randn(2, 12, 8), p=2, dim=-1)
     mask = torch.ones(2, 12, dtype=torch.long)
@@ -1363,6 +1578,8 @@ def test_hierarchical_pooling_module_pools_documents_not_queries() -> None:
 
 
 def test_hierarchical_pooling_module_in_pipeline() -> None:
+    # [FUNCTION DOC]
+    # Asserts appending HierarchicalTokenPooling to a model reduces the number of document token vectors compared with a model without it. Network.
     text = "a fairly long document with plenty of distinct tokens to cluster together here"
     base = "sentence-transformers-testing/stsb-bert-tiny-safetensors"
     without_pool = MultiVectorEncoder(base).encode_document([text])
@@ -1375,6 +1592,9 @@ def test_hierarchical_pooling_module_in_pipeline() -> None:
 
 
 def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
+    # [FUNCTION DOC]
+    # With pooling in the pipeline, asserts a per-call token_pooling compounds (strictly fewer tokens than the module alone) and logs a note
+    # mentioning compounding. Uses caplog.
     """When a pooling is already in the pipeline AND encode() is called with a per-call ``token_pooling=``,
     the per-call pooling compounds on top (a supported way to pool further than the built-in default),
     and a one-time note is logged for discoverability."""
@@ -1394,6 +1614,9 @@ def test_encode_pooling_compounds_and_notes_when_module_present(caplog) -> None:
 
 
 def test_encode_pooling_note_skipped_for_unpooled_tasks(caplog) -> None:
+    # [FUNCTION DOC]
+    # Asserts a per-call pooling that skips queries logs no compounding note on encode_query, and that a later document encode still logs it (the
+    # once-only warning was not consumed).
     """A per-call pooling whose ``tasks`` gate skips this call must not log the compounding note,
     nor burn the warning_once for a later call that genuinely compounds."""
     pooled_model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -1409,6 +1632,9 @@ def test_encode_pooling_note_skipped_for_unpooled_tasks(caplog) -> None:
 
 
 def test_encode_pooling_applies_to_raw_output(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Encodes three ragged documents with per-call pooling both normally and with output_value None; asserts some raw rows contain padding and that
+    # mask-selected raw token embeddings exactly equal the normal pooled outputs.
     # Per-call transforms also apply to raw output, like ST's truncate_dim. The pooling module's
     # forward slices each row by its mask before clustering, so batch padding never reaches the
     # pooling, and the rewritten mask marks the pooled rows: mask-sliced raw output is bit-exact
@@ -1430,6 +1656,8 @@ def test_encode_pooling_applies_to_raw_output(model: MultiVectorEncoder) -> None
 
 
 def test_encode_pooling_skips_queries_on_raw_output(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts per-call pooling leaves raw query token embeddings unchanged by default, but shrinks them when query is listed in tasks.
     # encode delegates the task gate to the pooling itself: default tasks skip queries, listing
     # "query" pools them.
     query = "a fairly long query with plenty of distinct tokens to cluster together here"
@@ -1443,10 +1671,15 @@ def test_encode_pooling_skips_queries_on_raw_output(model: MultiVectorEncoder) -
 
 
 def test_encode_empty_list(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts encoding an empty list returns an empty list.
     assert model.encode([]) == []
 
 
 def test_similarity_forwards_scoring_kwargs(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts chunk_elements passed to similarity and similarity_pairwise reproduce the plain scores, an unknown keyword raises TypeError, and (with
+    # CUDA) scoring numpy embeddings with a CUDA device override returns CPU scores matching the plain ones.
     """Extra similarity kwargs reach the scoring function: a tiny element budget reproduces the
     plain scores, an unknown kwarg fails loudly, and a device override leaves the scores on the
     embeddings' own device."""
@@ -1473,6 +1706,9 @@ def test_similarity_forwards_scoring_kwargs(model: MultiVectorEncoder) -> None:
 
 
 def test_similarity_singular_query(model: MultiVectorEncoder) -> None:
+    # [FUNCTION DOC]
+    # Asserts a single (unbatched) query embedding is scored as a batch of one in either argument position, matching the batched result, and that
+    # similarity_pairwise on single inputs returns one score equal to the first matrix entry.
     # Mirrors SentenceTransformer.similarity, which auto-batches a singular embedding: similarity
     # on a singular encode output must score as a batch of one instead of crashing in einsum.
     documents = model.encode_document(["Paris is the capital of France.", "Berlin is big."])
@@ -1490,12 +1726,16 @@ def test_similarity_singular_query(model: MultiVectorEncoder) -> None:
 
 
 def test_similarity_function_enum_has_maxsim() -> None:
+    # [FUNCTION DOC]
+    # Asserts SimilarityFunction.MAXSIM has value "maxsim" and maps to the maxsim and maxsim_pairwise functions.
     assert SimilarityFunction.MAXSIM.value == "maxsim"
     assert SimilarityFunction.to_similarity_fn("maxsim") is maxsim
     assert SimilarityFunction.to_similarity_pairwise_fn("maxsim") is maxsim_pairwise
 
 
 def test_maxsim_basic_shapes() -> None:
+    # [FUNCTION DOC]
+    # Asserts MaxSim of a 2-token query against a 2-token document is a 1x1 matrix equal to 1.5 (sum over query tokens of the best dot product).
     q = [torch.tensor([[1.0, 0.0], [0.0, 1.0]])]
     d = [torch.tensor([[1.0, 0.0], [0.0, 0.5]])]
     scores = maxsim(q, d)
@@ -1505,6 +1745,8 @@ def test_maxsim_basic_shapes() -> None:
 
 
 def test_maxsim_padded_tensor_without_mask_excludes_zero_rows() -> None:
+    # [FUNCTION DOC]
+    # Asserts maxsim on a zero-padded 3-D document tensor without a mask equals the list-input result (zero rows are treated as padding).
     """Without a mask, a pre-padded 3D tensor had its zero-pad rows counted as real tokens whose dot
     product 0 could win the max over negative similarities. ``_pad_multi_vector_inputs`` now derives
     a mask from all-zero rows so the padded tensor matches the list-input result."""
@@ -1523,6 +1765,8 @@ def test_maxsim_padded_tensor_without_mask_excludes_zero_rows() -> None:
 
 
 def test_maxsim_document_chunking_matches_unchunked() -> None:
+    # [FUNCTION DOC]
+    # Asserts maxsim with several chunk_elements budgets matches the unchunked result within 1e-5 on seeded ragged inputs.
     """``maxsim(chunk_elements=N)`` chunks the document-axis einsum to bound the 4D scoring
     intermediate, but must return the same scores as the single-chunk path. Covers budgets that
     split the corpus at several granularities, plus one large enough for the single-chunk branch.
@@ -1537,6 +1781,8 @@ def test_maxsim_document_chunking_matches_unchunked() -> None:
 
 
 def test_colbert_scoring_callable_query_major() -> None:
+    # [FUNCTION DOC]
+    # Asserts colbert_scores on 2 queries each with a group of 2 documents returns a 2x4 query-major matrix whose positives (column i times 2) score 1.
     # 2 queries × 1 doc-group of 2 docs each = (2, 2*2) = (2, 4) with query-major layout.
     q = torch.tensor([[[1.0, 0.0]], [[0.0, 1.0]]])  # (Q=2, Qt=1, H=2)
     d = torch.tensor(
@@ -1553,6 +1799,8 @@ def test_colbert_scoring_callable_query_major() -> None:
 
 
 def test_xtr_scoring_callable_shape() -> None:
+    # [FUNCTION DOC]
+    # Asserts XTRScores with top_k 2 returns a 2x4 score matrix for 2 queries and 2 groups of 2 documents.
     q = torch.tensor([[[1.0, 0.0], [0.0, 0.0]], [[0.0, 1.0], [0.0, 0.0]]])
     d = torch.tensor(
         [
@@ -1565,6 +1813,8 @@ def test_xtr_scoring_callable_shape() -> None:
 
 
 def _make_random_image(seed: int, size: int = 32) -> Image.Image:
+    # [FUNCTION DOC]
+    # HELPER: Returns a size by size RGB PIL image of random pixels from a numpy generator seeded with seed.
     rng = np.random.default_rng(seed)
     arr = rng.integers(0, 255, size=(size, size, 3), dtype=np.uint8)
     return Image.fromarray(arr)
@@ -1572,6 +1822,10 @@ def _make_random_image(seed: int, size: int = 32) -> Image.Image:
 
 @pytest.mark.slow
 def test_multimodal_smoke_image_document_through_mve() -> None:
+    # [FUNCTION DOC]
+    # Slow. Loads a tiny random PaliGemma as a MultiVectorEncoder, asserts the default four-module pipeline, encodes two text+image queries and three
+    # image-only documents (random images), and asserts 128-D non-empty token matrices, unit-norm document tokens within 1e-4, and a finite 2x3 score
+    # matrix. Frees memory afterwards. Network.
     """Image-document path through the default MVE module sequence with a tiny PaliGemma backbone.
 
     The real ColPali checkpoint (``vidore/colpali-v1.3-merged``) is exercised by the slow
@@ -1626,6 +1880,8 @@ def test_multimodal_smoke_image_document_through_mve() -> None:
 
 
 def test_pad_expansion_query_length_conflict_raises() -> None:
+    # [FUNCTION DOC]
+    # Sets query_length 8 and asserts assigning fixed 16-token expansion raises ValueError naming query_length=8.
     """With strategy='fixed', queries tokenize directly to the expansion length, so a smaller
     query_length content cap is inexpressible and fails loud when the expansion is assigned."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -1636,6 +1892,8 @@ def test_pad_expansion_query_length_conflict_raises() -> None:
 
 
 def test_max_length_override_loses_to_expansion_wins_elsewhere() -> None:
+    # [FUNCTION DOC]
+    # With fixed 16-token expansion, asserts a max_length override of 8 is ignored for queries (16 ids) but applied to a long document (8 ids).
     """The trainer's max_length cap (forwarded by the data collator) must lose to the expansion
     width: expansion queries always tokenize to exactly the expansion length. Elsewhere the
     override applies, winning over the module's own task lengths."""
@@ -1650,6 +1908,8 @@ def test_max_length_override_loses_to_expansion_wins_elsewhere() -> None:
 
 
 def test_prompt_length_ignores_query_expansion() -> None:
+    # [FUNCTION DOC]
+    # Asserts the transformer's prompt-length computation for a query prompt is the same with and without 32-token expansion and below 32.
     """The prompt length feeds prompt-aware pooling and must report the prompt's own token count,
     not the expansion-padded width."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -1664,6 +1924,8 @@ def test_prompt_length_ignores_query_expansion() -> None:
 
 
 def test_query_expansion_with_message_backbone_raises() -> None:
+    # [FUNCTION DOC]
+    # With fixed expansion and a message (chat-template) modality configured, asserts preprocessing a query raises ValueError mentioning chat-template.
     """Expansion on a chat-template (message) backbone would render queries through the template and
     truncate to the expansion length, collapsing different queries to the same preamble."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -1675,6 +1937,8 @@ def test_query_expansion_with_message_backbone_raises() -> None:
 
 
 def test_skiplist_words_set_at_init_and_resolved_on_demand() -> None:
+    # [FUNCTION DOC]
+    # Encodes a document with two "!" tokens, then sets the skiplist to "!" and resolves it, and asserts the document has two fewer token vectors.
     """The skiplist is set at construction. Changing it on a built model requires the documented
     resolve_with_tokenizer call, which then takes effect."""
     model = MultiVectorEncoder("sentence-transformers-testing/stsb-bert-tiny-safetensors")
@@ -1689,6 +1953,9 @@ def test_skiplist_words_set_at_init_and_resolved_on_demand() -> None:
 
 
 def test_xtr_z_counts_retrieved_query_tokens() -> None:
+    # [FUNCTION DOC]
+    # Asserts XTR normalizes by the number of query tokens that retrieved something: with three positive and one negative query token the score is
+    # (3 times 0.5 minus 0.5) over 4, and an all-negative case yields -1 for both documents rather than an amplified value.
     """Z is the paper's retrieval count (query tokens that retrieved at least one document token),
     not the count of positive maxima: 3 positive + 1 negative token divides by 4, and an all-negative
     document divides by its retrieval count instead of the old 1e-3 clamp amplifying it 4000x."""
@@ -1709,6 +1976,8 @@ def test_xtr_z_counts_retrieved_query_tokens() -> None:
 
 
 def test_xtr_kd_scores_gathers_own_document_groups() -> None:
+    # [FUNCTION DOC]
+    # Asserts xtr_kd_scores equals each query's own two-document block of the xtr_scores cross-product.
     """xtr_kd_scores returns each query's own N-way block of the xtr_scores cross-product."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_kd_scores, xtr_scores
 
@@ -1722,6 +1991,8 @@ def test_xtr_kd_scores_gathers_own_document_groups() -> None:
 
 
 def test_xtr_scores_chunk_budget_matches_single_matmul() -> None:
+    # [FUNCTION DOC]
+    # Asserts xtr_scores with chunk_elements budgets 1, 200 and 1e9 matches the unchunked result within 1e-6.
     """chunk_elements is a pure memory knob: any budget reproduces the single matmul."""
     from sentence_transformers.multi_vector_encoder.scoring import xtr_scores
 
@@ -1735,6 +2006,10 @@ def test_xtr_scores_chunk_budget_matches_single_matmul() -> None:
 
 
 def test_colbert_scorers_match_the_maxsim_keyword_surface() -> None:
+    # [FUNCTION DOC]
+    # For all six ColBERT scorers (plain and mean_), asserts the last two parameters are chunk_elements and length_normalize, length_normalize defaults to
+    # True only for the mean_ variants, a device keyword raises TypeError, and chunk_elements 1 does not change scores; and that mean_ scorers with
+    # length_normalize False reproduce their plain counterparts.
     """Every colbert scorer takes and forwards chunk_elements and length_normalize, so one kwargs
     dict works across the family and the default training path can bound its own memory."""
     import inspect
