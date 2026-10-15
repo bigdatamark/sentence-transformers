@@ -156,14 +156,14 @@ class PeftAdapterMixin:
 
     @peft_wrapper
     def active_adapter(self) -> str: ...  # Implementation handled by the wrapper
+        # [FUNCTION DOC]
+        # Delegates to the underlying model's active_adapter and returns the active adapter name.
 
     @peft_wrapper
     def get_adapter_state_dict(self, *args, **kwargs) -> dict:
         # [FUNCTION DOC]
         # Delegates to the underlying model's get_adapter_state_dict and returns the adapter's weight tensors (active adapter
         # if no name is given).
-        # [FUNCTION DOC]
-        # Delegates to the underlying model's active_adapter and returns the active adapter name.
         """
         If you are not familiar with adapters and PEFT methods, we invite you to read more about them on the PEFT
         official documentation: https://huggingface.co/docs/peft
