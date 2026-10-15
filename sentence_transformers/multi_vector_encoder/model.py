@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# The MultiVectorEncoder model class: a late-interaction (ColBERT-style) embedding model producing one vector
+# per token, built on the shared BaseModel (loading from disk or the Hub, saving, prompts, devices, backends,
+# multi-process pools, preprocessing and model cards). Typical pipeline: Transformer backbone (which also
+# handles query/document lengths and query expansion), token-level Dense projection, MultiVectorMask (scoring
+# mask) and token-level Normalize, optionally followed by token pooling. Adds query/document encoding,
+# MaxSim-family similarity, and loading/conversion of legacy formats (PyLate v3 and Stanford-NLP ColBERT
+# checkpoints, transformers-native retrieval models, and SentenceTransformer checkpoints). Defines a mapping
+# of legacy PyLate class paths to library equivalents.
 from __future__ import annotations
 
 import json
@@ -42,6 +51,11 @@ _CLASS_REF_ALIASES: dict[str, str] = {
 
 @dataclass
 class _LegacyStash:
+    # [CLASS DOC]
+    # HELPER: Dataclass of values recovered from legacy save formats during loading: extra keyword arguments for
+    # the Transformer constructor, prompt-prefix markers to register as special tokens, an optional skiplist word
+    # list for the default mask, and a PyLate v3 flag. Class constant lists the PyLate top-level keys forwarded to
+    # the Transformer (query length, document length, query expansion). Empty for native saves.
     """Per-checkpoint values recovered from legacy save formats (PyLate v3 top-level config,
     Stanford-NLP ColBERT ``artifact.metadata``) that downstream load steps consume: prefix tokens
     to register on the tokenizer, multi-vector knobs to forward into ``Transformer.__init__`` via
@@ -63,6 +77,11 @@ class _LegacyStash:
 
 
 class MultiVectorEncoder(BaseModel):
+    # [CLASS DOC]
+    # Multi-vector encoder model. Class attributes: model card data class, no default Hub organization, default
+    # prompt slots for "query" and "document" (unset), a model-id placeholder, model type name, and the supported
+    # similarity names (maxsim, meanmaxsim). Instance state: the similarity name and its resolved all-pairs and
+    # pairwise scoring functions, and the legacy stash.
     """
     Loads or creates a multi-vector / late-interaction (ColBERT-style) embedding model.
 
@@ -174,6 +193,11 @@ class MultiVectorEncoder(BaseModel):
         backend: Literal["torch", "onnx", "openvino"] = "torch",
         similarity_fn_name: str | SimilarityFunction | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Construct the model. Sets the requested similarity name first (None defers to saved config or the maxsim
+        # default) and an empty legacy stash, then runs BaseModel construction with all loading options (may download
+        # or read files and weights; legacy hooks below fill the stash). Afterwards logs a warning for every
+        # Transformer that has query expansion configured but no MultiVectorMask after it in the pipeline.
         # Stash before super().__init__ so _parse_model_config only falls back to saved config when unset.
         self.similarity_fn_name = similarity_fn_name
         # Legacy-checkpoint state populated by ``_parse_model_config`` (PyLate v3) and
@@ -214,6 +238,8 @@ class MultiVectorEncoder(BaseModel):
                 )
 
     def is_singular_input(self, inputs: Any) -> TypeIs[SingleInput]:
+        # [FUNCTION DOC]
+        # Return whether the input is a single example (delegates to the base; redeclared for type narrowing).
         """Check if the input is a single example rather than a batch. Redeclared with
         :class:`~typing_extensions.TypeIs` so type checkers narrow the branches in :meth:`encode`."""
         return super().is_singular_input(inputs)
@@ -238,6 +264,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (single input); declares the return type only, no body.
 
     @overload
     def encode_query(
@@ -257,6 +285,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (single input with numpy conversion on); declares the return type only, no body.
 
     @overload
     def encode_query(
@@ -276,6 +306,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> dict[str, Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (single input with raw output dicts); declares the return type only, no body.
 
     @overload
     def encode_query(
@@ -294,6 +326,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (a batch of inputs); declares the return type only, no body.
 
     @overload
     def encode_query(
@@ -313,6 +347,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[np.ndarray]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (a batch of inputs with numpy conversion on); declares the return type only, no body.
 
     @overload
     def encode_query(
@@ -332,6 +368,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (a batch of inputs with raw output dicts); declares the return type only, no body.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
     @overload
@@ -351,6 +389,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_query (catch-all for union-typed inputs); declares the return type only, no body.
 
     def encode_query(
         self,
@@ -368,6 +408,9 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Encode queries: if neither prompt name nor prompt is given and a "query" prompt exists, uses it; then calls
+        # encode with task "query" and all other arguments passed through. Returns what encode returns.
         """Compute query embeddings. Uses the "query" prompt if available and routes through the query side.
 
         See :meth:`encode` for the full parameter documentation. This method differs only by:
@@ -414,6 +457,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (single input); declares the return type only, no body.
 
     @overload
     def encode_document(
@@ -433,6 +478,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (single input with numpy conversion on); declares the return type only, no body.
 
     @overload
     def encode_document(
@@ -452,6 +499,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> dict[str, Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (single input with raw output dicts); declares the return type only, no body.
 
     @overload
     def encode_document(
@@ -470,6 +519,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (a batch of inputs); declares the return type only, no body.
 
     @overload
     def encode_document(
@@ -489,6 +540,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[np.ndarray]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (a batch of inputs with numpy conversion on); declares the return type only, no body.
 
     @overload
     def encode_document(
@@ -508,6 +561,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (a batch of inputs with raw output dicts); declares the return type only, no body.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from evaluators) still resolve.
     @overload
@@ -527,6 +582,8 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode_document (catch-all for union-typed inputs); declares the return type only, no body.
 
     def encode_document(
         self,
@@ -544,6 +601,9 @@ class MultiVectorEncoder(BaseModel):
         token_pooling: BaseTokenPooling | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Encode documents: if neither prompt name nor prompt is given, uses the first existing prompt among
+        # "document", "passage", "corpus"; then calls encode with task "document". Returns what encode returns.
         """Compute document embeddings. Uses the first available of ``"document"`` / ``"passage"`` / ``"corpus"``
         prompts and routes through the document side.
 
@@ -595,6 +655,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> Tensor: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (single input); declares the return type only, no body.
 
     @overload
     def encode(
@@ -615,6 +677,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> np.ndarray: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (single input with numpy conversion on); declares the return type only, no body.
 
     @overload
     def encode(
@@ -635,6 +699,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> dict[str, Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (single input with raw output dicts); declares the return type only, no body.
 
     @overload
     def encode(
@@ -654,6 +720,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (a batch of inputs); declares the return type only, no body.
 
     @overload
     def encode(
@@ -674,6 +742,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[np.ndarray]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (a batch of inputs with numpy conversion on); declares the return type only, no body.
 
     @overload
     def encode(
@@ -694,6 +764,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[dict[str, Tensor]]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (a batch of inputs with raw output dicts); declares the return type only, no body.
 
     # Catch-all so forwarding calls with union-typed arguments (e.g. from encode_query) still resolve.
     @overload
@@ -714,6 +786,8 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = ...,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]: ...
+        # [FUNCTION DOC]
+        # Typing overload of encode (catch-all for union-typed inputs); declares the return type only, no body.
 
     def encode(
         self,
@@ -732,6 +806,21 @@ class MultiVectorEncoder(BaseModel):
         task: str | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | list[np.ndarray] | Tensor | np.ndarray | list[dict[str, Tensor]] | dict[str, Tensor]:
+        # [FUNCTION DOC]
+        # Compute per-token embeddings. Inputs: one input or many (text, images, multimodal dicts), prompt name or
+        # prompt text, batch size, progress bar (default on at INFO/DEBUG), output value ("token_embeddings" or None
+        # for raw feature dicts), numpy flag, device or device list, normalize flag, optional pool and chunk size,
+        # optional per-call token pooling, task, and extra kwargs. Raises ValueError for non-positive batch size, an
+        # unsupported output value, or kwargs the model does not use besides task and processing kwargs (with a
+        # dedicated message for convert_to_tensor). Raw output forces numpy off. Single inputs are wrapped; other
+        # non-lists materialized. With a pool or device list, delegates to multi-process encoding. Otherwise resolves
+        # the prompt, moves the model to the device and eval mode, sorts by descending input length, and per batch
+        # preprocesses with prompt and task, runs the forward under inference mode with the task. Raw mode: applies
+        # per-call pooling to the features (warning once if the pipeline already pools) and splits every batch-first
+        # tensor per input (other values copied as-is) into one dict per input. Default mode: slices each input's
+        # token embeddings by its boolean scoring mask, optionally L2-normalizes, applies per-call pooling (same
+        # warning), and moves to CPU when numpy is requested. Restores the input order, converts to numpy (bfloat16
+        # via float32) when requested, and unwraps a single input. Returns a list of 2D tensors or arrays, or dicts.
         """Compute multi-vector token-level embeddings.
 
         .. tip::
@@ -934,6 +1023,8 @@ class MultiVectorEncoder(BaseModel):
 
     @property
     def similarity_fn_name(self) -> Literal["maxsim", "meanmaxsim"]:
+        # [FUNCTION DOC]
+        # Return the similarity name, setting it to maxsim on first access when unset.
         """The similarity function used by :meth:`similarity` and :meth:`similarity_pairwise`. Set it to
         ``"meanmaxsim"`` for a model trained with length-normalized scoring, so evaluators and the model
         card score the way training did. Defaults to ``"maxsim"`` on first access if not explicitly set."""
@@ -946,6 +1037,9 @@ class MultiVectorEncoder(BaseModel):
         self,
         value: Literal["maxsim", "meanmaxsim"] | SimilarityFunction | None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Set the similarity name (enum or string). Raises ValueError for unsupported names, with a dedicated message
+        # for "xtr". Stores the name; when not None, resolves and caches the all-pairs and pairwise scoring functions.
         if isinstance(value, SimilarityFunction):
             value = value.value
         if value is not None and value not in self.SUPPORTED_SIMILARITY_FN_NAMES:
@@ -972,6 +1066,10 @@ class MultiVectorEncoder(BaseModel):
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         **kwargs: Any,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Return the all-pairs score matrix (queries by documents) using the model's similarity function, forcing
+        # lazy default initialization first. Accepts lists of 2D tensors/arrays, padded 3D tensors, or a single 2D
+        # tensor; extra kwargs (device, chunk budget, length normalization) are forwarded to the scorer.
         """Compute the all-pairs score matrix between two collections of multi-vector embeddings, using
         this model's :attr:`similarity_fn_name`.
 
@@ -1013,6 +1111,9 @@ class MultiVectorEncoder(BaseModel):
         embeddings2: Tensor | np.ndarray | list[Tensor] | list[np.ndarray],
         **kwargs: Any,
     ) -> Tensor:
+        # [FUNCTION DOC]
+        # Return pairwise scores for matched query/document rows using the model's pairwise similarity, forcing lazy
+        # default initialization; extra kwargs forwarded.
         """Compute the pairwise score vector between matched query / document pairs, using this
         model's :attr:`similarity_fn_name`.
 
@@ -1042,17 +1143,26 @@ class MultiVectorEncoder(BaseModel):
         return self._similarity_pairwise(embeddings1, embeddings2, **kwargs)
 
     def _get_model_config(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Return the base model config with the (possibly None) similarity name added.
         config = super()._get_model_config()
         config["similarity_fn_name"] = self._similarity_fn_name
         return config
 
     def _post_init(self) -> None:
+        # [FUNCTION DOC]
+        # Apply legacy fixups (which may add modules) before running the base post-init hooks (e.g. module-ready
+        # hooks such as skiplist resolution).
         # Legacy checkpoint fixups can add or replace modules, so they run before the base fires
         # the module-ready hooks (e.g. MultiVectorMask's skiplist resolution).
         self._apply_legacy_fixups()
         super()._post_init()
 
     def _apply_legacy_fixups(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Patch legacy-loaded models. If legacy prefixes were recorded, registers them as special tokens. For
+        # PyLate v3 saves, appends a MultiVectorMask (with the stashed skiplist, or all ASCII punctuation if none was
+        # stashed) and a token-level Normalize. Mutates the module list.
         """Patch up modules loaded from save formats that predate :class:`MultiVectorEncoder`
         (PyLate v3, Stanford-NLP ColBERT). Each step is a no-op for modern saves and for
         user-supplied ``modules=...``. Dense configs that predate module IO names are handled at
@@ -1075,6 +1185,12 @@ class MultiVectorEncoder(BaseModel):
             self.append(Normalize(module_input_name="token_embeddings"))
 
     def _register_prefix_tokens(self, prompts: dict[str, str]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Register legacy prompt-prefix markers as non-normalized special tokens so they tokenize as one
+        # piece. Does nothing without a tokenizer. For each non-blank prompt value, checks the full value then its
+        # first whitespace-separated word; the first candidate known to the tokenizer (in its vocabulary or added
+        # tokens) is registered if it does not already tokenize to itself; unknown candidates are skipped. Adds all
+        # collected tokens to the tokenizer at once (mutates the tokenizer).
         """Mark a prompt-prefix token as special so the tokenizer emits it as a single piece.
 
         Call only with the prefixes of an existing token-prepended checkpoint (the caller guards on
@@ -1113,6 +1229,15 @@ class MultiVectorEncoder(BaseModel):
             tokenizer.add_special_tokens({"additional_special_tokens": to_register})
 
     def _parse_model_config(self, model_config: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Parse the saved model config with legacy PyLate support. Legacy query/document prefix keys are recorded in
+        # the stash and prepended (once) to the saved prompt for that role before the base parse. Adopts the saved
+        # similarity name if the user did not set one and it is supported. Flags PyLate v3 when the saved model type
+        # is "ColBERT". Collects PyLate Transformer knobs (dropping None values except an explicit None query
+        # expansion). If query expansion was not given but any PyLate marker key is present, derives it: off if the
+        # legacy expansion flag is false, else a "fixed" strategy with the legacy attend flag and a length taken from
+        # the query length (default 32), removing the separate query length. Stores the knobs and the saved skiplist
+        # in the stash.
         # PyLate <=3 saved [Q]/[D] as top-level query_prefix/document_prefix (inserted as tokens). We route
         # them through `prompts` as text instead, recording them on the stash for special-token registration.
         # A save can carry both, and PyLate inserts the prefix ahead of the prompt text. Composing onto the
@@ -1167,12 +1292,19 @@ class MultiVectorEncoder(BaseModel):
         self._legacy.skiplist_words = model_config.get("skiplist_words")
 
     def _load_module_class_from_ref(self, class_ref: str, *args: Any, **kwargs: Any) -> nn.Module:
+        # [FUNCTION DOC]
+        # HELPER: Resolve a module class path, first rewriting PyLate paths to library equivalents, then deferring to
+        # the base resolver.
         # Rewrite PyLate refs to ST equivalents (avoid importing pylate), then defer to the base resolver.
         # The backbone Transformer is promoted to MV by the loaders, not remapped here.
         class_ref = _CLASS_REF_ALIASES.get(class_ref, class_ref)
         return super()._load_module_class_from_ref(class_ref, *args, **kwargs)
 
     def _get_module_init_defaults(self, class_ref: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Return default constructor kwargs for a module class path being loaded (saved values take priority
+        # downstream). After alias rewriting and import (an import failure or non-class gives none): Transformer
+        # subclasses get the stashed legacy Transformer kwargs; Dense subclasses get token-level input; others none.
         """Inject load-time defaults for module configs, applied with setdefault priority (saved
         config values always win): legacy top-level multi-vector knobs into the backbone
         Transformer's ``__init__``, and token-level input for Dense configs that predate module IO
@@ -1204,6 +1336,16 @@ class MultiVectorEncoder(BaseModel):
         processor_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
     ) -> tuple[list[nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Build modules for a checkpoint without a saved module list. Merges shared loading flags into model,
+        # processor and config kwargs, reads the HF config's architectures (file/Hub I/O). For a Stanford-NLP ColBERT
+        # architecture, first loads its metadata into the stash. For architectures ending in "ForRetrieval", builds a
+        # retrieval Transformer using the model's forward "embeddings" output for text and images as token
+        # embeddings, plus a MultiVectorMask, and returns them. Otherwise builds a Transformer with the stashed
+        # legacy kwargs, then either the Stanford projection (Stanford checkpoints) or a new randomly initialized
+        # 128-dimensional bias-free token-level Dense (logging that training is required), followed by a
+        # MultiVectorMask with the stashed skiplist and a token-level Normalize. Records the base model in the card
+        # unless local-only. Returns the modules and an empty extra-config dict.
         """Build the default module sequence for a fresh MultiVectorEncoder.
 
         Three paths:
@@ -1332,6 +1474,9 @@ class MultiVectorEncoder(BaseModel):
         local_files_only: bool,
         token: bool | str | None,
     ) -> Dense:
+        # [FUNCTION DOC]
+        # HELPER: Load the checkpoint's root torch weights and build a bias-free identity-activation token-level Dense
+        # initialized from the "linear.weight" matrix (output by input dimensions). Raises KeyError if absent.
         """Build a token-level :class:`~sentence_transformers.base.modules.dense.Dense` from a
         Stanford-NLP ColBERT checkpoint.
 
@@ -1366,6 +1511,12 @@ class MultiVectorEncoder(BaseModel):
         local_files_only: bool,
         token: bool | str | None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Read Stanford-NLP ColBERT settings from the "artifact.metadata" JSON (warning and using defaults if
+        # missing). Records query/document marker prefixes (metadata token ids or "[unused0]"/"[unused1]", plus a
+        # space) and sets them as prompts for roles without a prompt (mutates prompts). Defaults the document length
+        # from the metadata, sets a "fixed" query expansion (attend flag from metadata, length from the query max
+        # length or 32), and the skiplist to ASCII punctuation unless punctuation masking is disabled.
         """Read Stanford-NLP ColBERT settings from ``artifact.metadata`` and stash them on ``self._legacy``
         for the Transformer constructor + prefix-token registration to consume. Falls back to the
         standard ``[unused0]`` / ``[unused1]`` markers when the file is absent.
@@ -1423,6 +1574,13 @@ class MultiVectorEncoder(BaseModel):
         config_kwargs: dict[str, Any] | None = None,
         model_type: str | None = None,
     ) -> tuple[list[nn.Module] | OrderedDict[str, nn.Module], dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Convert another model type's checkpoint. Non-SentenceTransformer types defer to the base. For a
+        # SentenceTransformer: loads its configured modules, drops Pooling and sentence-level Normalize modules,
+        # redirects sentence-level Dense modules to token embeddings (keeping weights), and raises ValueError if no
+        # Transformer remains. Appends a random 128-dimensional token-level Dense if there was none (logged), then a
+        # MultiVectorMask (stashed skiplist, or punctuation if legacy prefixes exist) and token-level Normalize.
+        # Defaults the similarity to maxsim if unset and clears the inherited README text. Returns modules and kwargs.
         """Convert a SentenceTransformer (and similar) checkpoint into a MultiVectorEncoder.
 
         If a final :class:`~sentence_transformers.base.modules.dense.Dense` head is present, it is
@@ -1523,6 +1681,11 @@ class MultiVectorEncoder(BaseModel):
         revision: str | None = None,
         local_files_only: bool = False,
     ) -> str:
+        # [FUNCTION DOC]
+        # Detect the stored model type. If the sentence-transformers config exists, returns "MultiVectorEncoder" for
+        # model type "ColBERT", else its model type when present. Otherwise returns "MultiVectorEncoder" if the HF
+        # config's architectures contain the Stanford ColBERT marker, else defers to the base detection. Reads files
+        # locally or from the Hub.
         """Detect the model type. Adds Stanford-NLP and PyLate-v3 detection on top of the base behaviour.
 
         - If ``config.json`` has ``architectures == ["HF_ColBERT"]`` (Stanford ColBERT), return
@@ -1572,6 +1735,8 @@ class MultiVectorEncoder(BaseModel):
         )
 
     def get_embedding_dimension(self) -> int | None:
+        # [FUNCTION DOC]
+        # Return the per-token embedding size from the last module exposing an embedding-dimension method, or None.
         """The dimensionality of each token vector returned by :meth:`encode`."""
         for module in reversed(self._modules.values()):
             method = getattr(module, "get_embedding_dimension", None)
@@ -1588,6 +1753,12 @@ class MultiVectorEncoder(BaseModel):
         chunk_size: int | None = None,
         **encode_kwargs,
     ) -> list[Tensor] | list[np.ndarray]:
+        # [FUNCTION DOC]
+        # HELPER: Multi-process encoding. Disables per-worker progress bars, starts (and finally stops) a pool when
+        # given a device list without a pool, picks a chunk size (about a tenth of inputs per process, at most 5000,
+        # at least 1), enqueues (chunk id, inputs slice, kwargs) jobs, collects one result per chunk sorted by id
+        # (optional progress bar), re-raises any exception object returned by a worker, and flattens list results
+        # (appending non-list results). Returns the combined list.
         encode_kwargs["show_progress_bar"] = False
         created_pool = False
         if pool is None and isinstance(device, list):
@@ -1630,6 +1801,10 @@ class MultiVectorEncoder(BaseModel):
     def _multi_process_worker(
         target_device: str, model: MultiVectorEncoder, input_queue: Queue, results_queue: Queue
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Worker loop: take a job, encode the chunk on the worker device, move tensors (including tensors in
+        # raw dicts) to CPU, and put (chunk id, embeddings) on the results queue. On error logs it, tries to put
+        # (chunk id, the exception object) and exits.
         while True:
             try:
                 chunk_id, inputs, kwargs = input_queue.get()
@@ -1654,6 +1829,9 @@ class MultiVectorEncoder(BaseModel):
                 break
 
     def _push_to_hub_usage_tip(self, repo_id: str) -> str:
+        # [FUNCTION DOC]
+        # Return markdown appended to Hub pull requests showing how to load the PR revision and test query/document
+        # encoding and similarity.
         class_name = self.__class__.__name__
         backend = self.get_backend()
         return f"""\
